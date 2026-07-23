@@ -28,10 +28,11 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
     let mut assets = AssetManager::new();
     let white =
         assets.create_white_texture(&renderer.device, &renderer.queue, &renderer.scene.texture_bind_group_layout);
+    // NFS_CULL → single-sided (backface culled); default double-sided.
+    let double = std::env::var("NFS_CULL").is_err();
+    let two = |m: Material| if double { m.with_double_sided(true) } else { m };
     let mat = |rgb: [f32; 3], rough: f32, metal: f32| {
-        Material::new(white.clone())
-            .with_pbr(Vec4::new(rgb[0], rgb[1], rgb[2], 1.0), rough, metal)
-            .with_double_sided(true)
+        two(Material::new(white.clone()).with_pbr(Vec4::new(rgb[0], rgb[1], rgb[2], 1.0), rough, metal))
     };
     let spawn = |world: &mut World, m: Mesh, material: Material, t: Transform| {
         let e = world.spawn();
@@ -54,6 +55,46 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
     if let Ok(drop) = std::env::var("NFS_DROP") {
         let pats: Vec<String> = drop.split(',').map(|s| s.trim().to_string()).collect();
         all.retain(|p| !pats.iter().any(|s| p.name.contains(s.as_str())));
+    }
+    // NFS_SHADER=0xXXXX renders only the material runs with that shader hash (diagnostic).
+    if let Ok(sh) = std::env::var("NFS_SHADER") {
+        let sh = u32::from_str_radix(sh.trim_start_matches("0x"), 16).unwrap_or(0);
+        for p in &mut all {
+            if p.materials.is_empty() {
+                p.indices.clear();
+            } else {
+                p.materials.retain(|m| m.shader.0 == sh);
+                if p.materials.is_empty() {
+                    p.indices.clear();
+                }
+            }
+        }
+    }
+    if std::env::var("NFS_MATLIST").is_ok() {
+        for p in &all {
+            for m in &p.materials {
+                let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
+                for &idx in p.indices.get(m.index_offset..m.index_offset + m.index_count).unwrap_or(&[]) {
+                    if let Some(pos) = p.positions.get(idx as usize) {
+                        for k in 0..3 {
+                            lo[k] = lo[k].min(pos[k]);
+                            hi[k] = hi[k].max(pos[k]);
+                        }
+                    }
+                }
+                // Positions are NFSU2 Z-up: center[2] is height (high = greenhouse/roof).
+                eprintln!(
+                    "{:<30} sh={:#010x} tris={:<5} centerZ={:.2} center=[{:.2},{:.2},{:.2}]",
+                    p.name,
+                    m.shader.0,
+                    m.index_count / 3,
+                    (lo[2] + hi[2]) / 2.0,
+                    (lo[0] + hi[0]) / 2.0,
+                    (lo[1] + hi[1]) / 2.0,
+                    (lo[2] + hi[2]) / 2.0
+                );
+            }
+        }
     }
     if std::env::var("NFS_LIST").is_ok() {
         for p in nfsu2::part_groups::select_stock_car(&all) {
@@ -92,9 +133,11 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
         ) else {
             continue;
         };
-        let material = Material::new(bg)
-            .with_pbr(Vec4::new(tp.tint[0], tp.tint[1], tp.tint[2], 1.0), tp.roughness, tp.metallic)
-            .with_double_sided(true);
+        let material = two(Material::new(bg).with_pbr(
+            Vec4::new(tp.tint[0], tp.tint[1], tp.tint[2], 1.0),
+            tp.roughness,
+            tp.metallic,
+        ));
         spawn(&mut world, tp.mesh, material, Transform::new(Vec3::ZERO));
     }
     let wheel_y = -ch * 0.5 + fit.radius * 0.95;
@@ -112,9 +155,7 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
                     tex.width,
                     tex.height,
                 ) {
-                    Ok(bg) => Material::new(bg)
-                        .with_pbr(Vec4::new(1.0, 1.0, 1.0, 1.0), 0.7, 0.2)
-                        .with_double_sided(true),
+                    Ok(bg) => two(Material::new(bg).with_pbr(Vec4::new(1.0, 1.0, 1.0, 1.0), 0.7, 0.2)),
                     Err(_) => mat([0.09, 0.09, 0.10], 0.7, 0.2),
                 }
             }
