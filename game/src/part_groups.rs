@@ -118,11 +118,17 @@ pub fn component_key(name: &str) -> &str {
 #[must_use]
 pub fn select_stock_car(all: &[NfsMeshPart]) -> Vec<&NfsMeshPart> {
     use std::collections::HashMap;
+    // When the car ships a KIT00 body, `BASE` is a redundant inner / no-kit shell: on some
+    // cars it is a full second body (harmless overlap), on others the low-poly interior/chassis
+    // structure that pokes out through the kit skin as jagged z-fighting slivers. The KIT00 body
+    // is the complete one either way, so drop BASE whenever a KIT00 body is present. Cars with no
+    // KIT00 body keep BASE (it is then their only body).
+    let has_kit_body = all.iter().any(|p| p.name.contains("_KIT00_BODY"));
     let mut best: HashMap<&str, &NfsMeshPart> = HashMap::new();
     for p in all {
-        // The showroom set is the shared BASE body + kit slot 00, plus the window glass
-        // (which lives on un-kitted `DECAL_*_WINDOW` parts, so admit it explicitly).
-        let is_default = p.name.contains("_BASE")
+        // The showroom set is kit slot 00 (or the shared BASE body if there is no KIT00 body),
+        // plus the window glass (on un-kitted `DECAL_*_WINDOW` parts, so admit it explicitly).
+        let is_default = (p.name.contains("_BASE") && !has_kit_body)
             || p.name.contains("_KIT00")
             || (p.name.contains("DECAL") && p.name.contains("WINDOW"));
         // Drop the second-shell duplicates that z-fight the parts they sit on: TRUNK_AUDIO
