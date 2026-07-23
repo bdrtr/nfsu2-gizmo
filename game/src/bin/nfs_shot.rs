@@ -1,0 +1,196 @@
+//! Headless one-frame screenshot of a car for visual QA — renders the same visuals as
+//! `nfs_viewer` into an offscreen target and writes the framebuffer as raw bytes (convert to
+//! PNG with any tool). No window, so it works over SSH / in CI.
+//!
+//! Usage: nfs_shot GEOMETRY.BIN OUT.raw [W H]
+//! Env: NFS_COLOR="r,g,b" paint, NFS_EYE="x,y,z" camera eye (else a 3/4 auto-frame).
+//! Prints one line: `WxH format=<TextureFormat>` so the reader knows the channel order.
+
+use gizmo::prelude::*;
+use gizmo::renderer::components::LightRole;
+use gizmo::renderer::Renderer;
+use gizmo::wgpu;
+use gizmo_nfs::parse_geometry;
+use nfsu2::car::{build_car_visuals, env_color, load_tpk_beside, WheelSurface};
+
+fn main() {
+    let path = std::env::args().nth(1).expect("usage: nfs_shot GEOMETRY.BIN OUT.raw [W H]");
+    let out = std::env::args().nth(2).expect("usage: nfs_shot GEOMETRY.BIN OUT.raw [W H]");
+    let w: u32 = std::env::args().nth(3).and_then(|s| s.parse().ok()).unwrap_or(1024);
+    let h: u32 = std::env::args().nth(4).and_then(|s| s.parse().ok()).unwrap_or(768);
+    pollster::block_on(run(&path, &out, w, h));
+}
+
+async fn run(path: &str, out: &str, w: u32, h: u32) {
+    assert!(Renderer::headless_adapter_available().await, "no GPU adapter for headless render");
+    let mut renderer = Renderer::new_headless(w, h, None).await;
+    let mut world = World::new();
+    let mut assets = AssetManager::new();
+    let white =
+        assets.create_white_texture(&renderer.device, &renderer.queue, &renderer.scene.texture_bind_group_layout);
+    let mat = |rgb: [f32; 3], rough: f32, metal: f32| {
+        Material::new(white.clone())
+            .with_pbr(Vec4::new(rgb[0], rgb[1], rgb[2], 1.0), rough, metal)
+            .with_double_sided(true)
+    };
+    let spawn = |world: &mut World, m: Mesh, material: Material, t: Transform| {
+        let e = world.spawn();
+        world.add_component(e, t);
+        world.add_component(e, GlobalTransform { matrix: t.local_matrix });
+        world.add_component(e, m);
+        world.add_component(e, material);
+        world.add_component(e, MeshRenderer::new());
+    };
+
+    // ── Car ──
+    let bytes = std::fs::read(path).unwrap_or_else(|e| panic!("read {path}: {e}"));
+    let all = parse_geometry(&bytes).expect("parse GEOMETRY.BIN");
+    let tpk = load_tpk_beside(path);
+    let paint = env_color("NFS_COLOR", [0.10, 0.28, 0.72]);
+    let car = build_car_visuals(&renderer.device, &all, tpk.as_ref(), paint, |look| {
+        mat(look.rgb, look.roughness, look.metallic)
+    });
+    let (cw, ch, cl) = (car.width, car.height, car.length);
+    let fit = car.wheel_fit;
+
+    for gv in car.groups {
+        spawn(&mut world, gv.mesh, gv.material, Transform::new(Vec3::ZERO));
+    }
+    if let Some(interior) = car.interior {
+        spawn(&mut world, interior, mat([0.02, 0.02, 0.025], 0.9, 0.0), Transform::new(Vec3::ZERO));
+    }
+    for tp in car.textured {
+        let key = format!("nfs_tex_{:08X}", tp.texture.hash.0);
+        let Ok(bg) = assets.install_decoded_material_texture(
+            &renderer.device,
+            &renderer.queue,
+            &renderer.scene.texture_bind_group_layout,
+            &key,
+            &tp.texture.rgba,
+            tp.texture.width,
+            tp.texture.height,
+        ) else {
+            continue;
+        };
+        let material = Material::new(bg)
+            .with_pbr(Vec4::new(tp.tint[0], tp.tint[1], tp.tint[2], 1.0), tp.roughness, tp.metallic)
+            .with_double_sided(true);
+        spawn(&mut world, tp.mesh, material, Transform::new(Vec3::ZERO));
+    }
+    let wheel_y = -ch * 0.5 + fit.radius * 0.95;
+    if let Some((wm, surface)) = car.wheel {
+        let wmat = match surface {
+            WheelSurface::Flat(m) => m,
+            WheelSurface::Textured(tex) => {
+                let key = format!("nfs_tex_{:08X}", tex.hash.0);
+                match assets.install_decoded_material_texture(
+                    &renderer.device,
+                    &renderer.queue,
+                    &renderer.scene.texture_bind_group_layout,
+                    &key,
+                    &tex.rgba,
+                    tex.width,
+                    tex.height,
+                ) {
+                    Ok(bg) => Material::new(bg)
+                        .with_pbr(Vec4::new(1.0, 1.0, 1.0, 1.0), 0.7, 0.2)
+                        .with_double_sided(true),
+                    Err(_) => mat([0.09, 0.09, 0.10], 0.7, 0.2),
+                }
+            }
+        };
+        for (sx, sz) in [(-1.0, -1.0), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)] {
+            let t = Transform::new(Vec3::new(sx * fit.half_track, wheel_y, sz * fit.half_wheelbase));
+            spawn(&mut world, wm.clone(), wmat.clone(), t);
+        }
+    }
+
+    // ── Lights ──
+    let sun = world.spawn();
+    world.add_component(
+        sun,
+        Transform::new(Vec3::new(30.0, 80.0, 40.0))
+            .with_rotation(Quat::from_axis_angle(Vec3::new(1.0, 0.3, 0.0).normalize(), -0.8)),
+    );
+    world.add_component(sun, GlobalTransform::default());
+    world.add_component(sun, DirectionalLight::new(Vec3::new(1.0, 0.97, 0.9), 2.6, LightRole::Sun));
+    let fill = world.spawn();
+    world.add_component(fill, Transform::new(Vec3::new(-30.0, 40.0, -20.0)));
+    world.add_component(fill, GlobalTransform::default());
+    world.add_component(fill, DirectionalLight::new(Vec3::new(0.6, 0.7, 0.9), 0.6, LightRole::Sun));
+
+    // ── Camera: 3/4 auto-frame on the origin (meshes are recentered there) ──
+    let radius = (cw * cw + ch * ch + cl * cl).sqrt() * 0.5;
+    let eye = env_color("NFS_EYE", [radius * 1.5, radius * 0.75, radius * 1.7]);
+    let eye = Vec3::new(eye[0], eye[1], eye[2]);
+    let dir = (-eye).normalize();
+    let yaw = dir.z.atan2(dir.x);
+    let pitch = dir.y.asin();
+    let cam = world.spawn();
+    world.add_component(cam, Transform::new(eye));
+    world.add_component(cam, GlobalTransform::default());
+    world.add_component(cam, Camera::new(std::f32::consts::FRAC_PI_4, 0.1, 4000.0, yaw, pitch, true));
+
+    // ── Render one frame into an offscreen target, then read it back ──
+    let format = renderer.config.format;
+    let bpp = 4u32;
+    let target = renderer.device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("nfs-shot-target"),
+        size: wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+        view_formats: &[],
+    });
+    let view = target.create_view(&wgpu::TextureViewDescriptor::default());
+    let mut encoder =
+        renderer.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+    gizmo::systems::default_render_pass(&mut world, &mut encoder, &view, &mut renderer);
+
+    // 256-align bytes_per_row for the copy.
+    let unpadded = w * bpp;
+    let align = 256;
+    let padded = unpadded.div_ceil(align) * align;
+    let staging = renderer.device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("nfs-shot-readback"),
+        size: (padded * h) as u64,
+        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    encoder.copy_texture_to_buffer(
+        wgpu::TexelCopyTextureInfo {
+            texture: &target,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        wgpu::TexelCopyBufferInfo {
+            buffer: &staging,
+            layout: wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(padded),
+                rows_per_image: Some(h),
+            },
+        },
+        wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+    );
+    renderer.queue.submit(Some(encoder.finish()));
+
+    let slice = staging.slice(..);
+    let (tx, rx) = std::sync::mpsc::channel();
+    slice.map_async(wgpu::MapMode::Read, move |v| tx.send(v).unwrap());
+    let _ = renderer.device.poll(wgpu::PollType::Wait { submission_index: None, timeout: None });
+    rx.recv().unwrap().unwrap();
+    let data = slice.get_mapped_range();
+
+    // Drop row padding → tight w*h*4 buffer.
+    let mut tight = Vec::with_capacity((unpadded * h) as usize);
+    for y in 0..h {
+        let start = (y * padded) as usize;
+        tight.extend_from_slice(&data[start..start + unpadded as usize]);
+    }
+    std::fs::write(out, &tight).expect("write raw");
+    println!("{w}x{h} format={format:?} -> {out}");
+}

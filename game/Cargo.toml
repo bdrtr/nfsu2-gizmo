@@ -14,6 +14,8 @@ default-run = "nfs_drive"
 gizmo = { package = "gizmo-engine", path = "../../Gizmo-engine/crates/gizmo", features = ["audio", "scripting", "scene", "editor", "render", "window", "ui"] }
 # Saf NFSU2 asset parser'ı (motordan bağımsız).
 gizmo-nfs = { path = "../crates/gizmo-nfs" }
+# Küçük async blok-on executor — yalnız headless screenshot binary (nfs_shot) için.
+pollster = "0.3"
 
 [[bin]]
 name = "nfs_viewer"
