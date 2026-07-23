@@ -15,7 +15,9 @@ use gizmo::egui;
 use gizmo::physics::world::PhysicsWorld;
 use gizmo::prelude::*;
 use gizmo::renderer::gpu_types::Vertex;
-use gizmo_nfs::{parse_geometry, NfsMeshPart};
+use gizmo_nfs::parse_geometry;
+use nfsu2::car::{build_car_visuals, env_color, WheelFit};
+use nfsu2::mesh::add_transform;
 
 const DEFAULT_CAR: &str =
     "/home/bedir/Games/need-for-speed-underground-2/drive_c/Need for Speed Underground 2/CARS/240SX/GEOMETRY.BIN";
@@ -53,49 +55,6 @@ struct RaceState {
     lap: u32,
     cur_time: f32,
     best_time: f32,
-}
-
-#[inline]
-fn remap(p: [f32; 3]) -> Vec3 {
-    Vec3::new(-p[1], p[2], -p[0])
-}
-
-fn add_transform(world: &mut World, entity: gizmo::core::Entity, t: Transform) {
-    world.add_component(entity, t);
-    world.add_component(entity, GlobalTransform { matrix: t.local_matrix });
-}
-
-fn build_car_mesh(device: &wgpu::Device, parts: &[&NfsMeshPart], off: Vec3, label: &str) -> Option<Mesh> {
-    let mut verts = Vec::new();
-    for p in parts {
-        let has_n = !p.normals.is_empty();
-        for &idx in &p.indices {
-            let i = idx as usize;
-            let Some(&pos) = p.positions.get(i) else { continue };
-            let n = if has_n { p.normals.get(i).copied().unwrap_or([0.0, 0.0, 1.0]) } else { [0.0, 0.0, 1.0] };
-            let gp = remap(pos) - off;
-            let gn = remap(n);
-            verts.push(Vertex {
-                position: [gp.x, gp.y, gp.z],
-                normal: [gn.x, gn.y, gn.z],
-                tex_coords: p.uvs.get(i).copied().unwrap_or([0.0, 0.0]),
-                ..Default::default()
-            });
-        }
-    }
-    (!verts.is_empty()).then(|| Mesh::from_vertices(device, &verts, label.to_string()))
-}
-
-fn car_bbox(parts: &[&NfsMeshPart]) -> (Vec3, Vec3) {
-    let (mut lo, mut hi) = (Vec3::splat(f32::INFINITY), Vec3::splat(f32::NEG_INFINITY));
-    for p in parts {
-        for v in &p.positions {
-            let g = remap(*v);
-            lo = lo.min(g);
-            hi = hi.max(g);
-        }
-    }
-    (lo, hi)
 }
 
 /// A closed oval track ribbon (visual geometry + centerline for checkpoints).
@@ -183,8 +142,12 @@ fn setup_scene(world: &mut World, renderer: &gizmo::renderer::Renderer) -> RaceS
         &renderer.queue,
         &renderer.scene.texture_bind_group_layout,
     );
+    // Double-sided so the glass-less greenhouse (windows are texture-only decals) doesn't
+    // read as see-through, and the track ribbon is visible from both sides.
     let mat = |rgb: [f32; 3], rough: f32, metal: f32| {
-        Material::new(tex.clone()).with_pbr(Vec4::new(rgb[0], rgb[1], rgb[2], 1.0), rough, metal)
+        Material::new(tex.clone())
+            .with_pbr(Vec4::new(rgb[0], rgb[1], rgb[2], 1.0), rough, metal)
+            .with_double_sided(true)
     };
 
     // ── Ground: a big flat drivable plane (grass-green, asphalt grip) ──
@@ -270,65 +233,33 @@ fn setup_scene(world: &mut World, renderer: &gizmo::renderer::Renderer) -> RaceS
     // ── Car ──
     let bytes = std::fs::read(&path).unwrap_or_else(|e| panic!("cannot read {path}: {e}"));
     let all = parse_geometry(&bytes).expect("parse GEOMETRY.BIN");
-    let stock: Vec<NfsMeshPart> = all
-        .into_iter()
-        .filter(|p| {
-            p.name.ends_with("_A")
-                && (p.name.contains("BASE") || p.name.contains("KIT00"))
-                && !p.name.contains("ENGINE")
-                && !p.name.contains("UNDER")
-                && !p.name.contains("FULLROOF") // duplicate of ROOF → z-fighting
-                && !p.name.contains("TRUNK_AUDIO") // duplicate of TRUNK
-        })
-        .collect();
-    let is_wheel = |n: &str| n.contains("FRONT_WHEEL");
-    let is_light = |n: &str| n.contains("BRAKELIGHT") || n.contains("TAILLIGHT");
-    let is_exhaust = |n: &str| n.contains("EXHAUST");
-    let body_parts: Vec<&NfsMeshPart> = stock.iter().filter(|p| !is_wheel(&p.name) && !is_light(&p.name) && !is_exhaust(&p.name)).collect();
-    let light_parts: Vec<&NfsMeshPart> = stock.iter().filter(|p| is_light(&p.name)).collect();
-    let exhaust_parts: Vec<&NfsMeshPart> = stock.iter().filter(|p| is_exhaust(&p.name)).collect();
-    let wheel_part = stock.iter().find(|p| is_wheel(&p.name));
+    let paint = env_color("NFS_COLOR", [0.10, 0.28, 0.72]); // override "r,g,b" in 0..1
+    let car = build_car_visuals(&renderer.device, &all, paint, |look| {
+        mat(look.rgb, look.roughness, look.metallic)
+    });
+    let (width, height, length) = (car.width, car.height, car.length);
+    let WheelFit { radius, half_wheelbase, half_track } = car.wheel_fit;
 
-    let (lo, hi) = car_bbox(&body_parts);
-    let center = (lo + hi) * 0.5;
-    let width = hi.x - lo.x;
-    let height = hi.y - lo.y;
-    let length = hi.z - lo.z;
-
+    // Each material group is its own entity that rigidly follows the chassis.
     let mut visual_ids = Vec::new();
-    let mut spawn_group = |world: &mut World, m: Option<Mesh>, material: Material| {
-        if let Some(m) = m {
-            let e = world.spawn();
-            add_transform(world, e, Transform::new(Vec3::ZERO));
-            world.add_component(e, m);
-            world.add_component(e, material);
-            world.add_component(e, MeshRenderer::new());
-            visual_ids.push(e.id());
-        }
-    };
-    spawn_group(world, build_car_mesh(&renderer.device, &body_parts, center, "body"), mat([0.85, 0.32, 0.06], 0.35, 0.4));
-    spawn_group(world, build_car_mesh(&renderer.device, &light_parts, center, "light"), mat([0.80, 0.06, 0.05], 0.3, 0.0));
-    spawn_group(world, build_car_mesh(&renderer.device, &exhaust_parts, center, "exhaust"), mat([0.55, 0.56, 0.6], 0.25, 0.9));
-
-    let (mut radius, mut half_wheelbase, mut half_track) = (0.31_f32, length * 0.36, width * 0.42);
-    let mut wheel_mesh = None;
-    if let Some(wp) = wheel_part {
-        let (wl, wh) = car_bbox(std::slice::from_ref(&wp));
-        let wc = (wl + wh) * 0.5;
-        radius = ((wh.y - wl.y).max(wh.z - wl.z) * 0.5).clamp(0.18, 0.55);
-        half_wheelbase = (wc.z - center.z).abs().max(length * 0.30);
-        half_track = (wc.x - center.x).abs().max(width * 0.46);
-        wheel_mesh = build_car_mesh(&renderer.device, &[wp], wc, "wheel");
+    for gv in car.groups {
+        let e = world.spawn();
+        add_transform(world, e, Transform::new(Vec3::ZERO));
+        world.add_component(e, gv.mesh);
+        world.add_component(e, gv.material);
+        world.add_component(e, MeshRenderer::new());
+        visual_ids.push(e.id());
     }
+
+    // Wheels: the single wheel mesh instanced at four fitted corners.
     let wheel_y = -height * 0.5 + radius * 0.15;
-    let wheel_mat = mat([0.09, 0.09, 0.1], 0.7, 0.2);
     let mut wheels = Vec::new();
-    if let Some(wm) = wheel_mesh {
+    if let Some((wm, wmat)) = car.wheel {
         for (sx, sz, front) in [(-1.0, -1.0, true), (1.0, -1.0, true), (-1.0, 1.0, false), (1.0, 1.0, false)] {
             let e = world.spawn();
             add_transform(world, e, Transform::new(Vec3::ZERO));
             world.add_component(e, wm.clone());
-            world.add_component(e, wheel_mat.clone());
+            world.add_component(e, wmat.clone());
             world.add_component(e, MeshRenderer::new());
             wheels.push(WheelVis { id: e.id(), local: Vec3::new(sx * half_track, wheel_y, sz * half_wheelbase), front });
         }
