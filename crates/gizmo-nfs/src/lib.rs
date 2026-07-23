@@ -43,7 +43,8 @@ pub use error::{NfsError, NfsResult};
 pub use geometry::parse_geometry;
 pub use texture::{Tpk, TpkEntry};
 pub use types::{
-    AssetHash, LodLevel, Mat4, NfsCar, NfsMeshPart, NfsTexture, PartRole, PixelFormat, TexFormat,
+    AssetHash, LodLevel, Mat4, NfsCar, NfsMaterialRange, NfsMeshPart, NfsTexture, PartRole,
+    PixelFormat, TexFormat,
 };
 
 /// Read a file from disk and decompress it if it carries a recognised codec.

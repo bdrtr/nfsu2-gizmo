@@ -73,6 +73,26 @@ pub enum PartRole {
 /// The attribute arrays are parallel; `normals` and/or `uvs` may be empty when the source
 /// omits them. `indices` is a triangle list (any strips are normalised to a list by the
 /// parser).
+/// One contiguous run of a part's index buffer that shares a single material/texture.
+///
+/// From the mesh's `0x00134B02` material list: a solid's triangles are grouped by material,
+/// and each group is a `[index_offset, index_offset + index_count)` slice of
+/// [`NfsMeshPart::indices`]. `hash` resolves against a [`crate::Tpk`] — a run whose hash is a
+/// texture is that region's diffuse; a run whose hash does not resolve is a shader-only
+/// material (body paint, glass, chrome). Lets the integration layer split one baked mesh into
+/// its textured sub-regions (headlights, brake lights, interior) instead of one flat surface.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct NfsMaterialRange {
+    /// The material/texture hash for this run.
+    pub hash: AssetHash,
+    /// Start index into [`NfsMeshPart::indices`].
+    pub index_offset: usize,
+    /// Number of indices in this run (a multiple of 3).
+    pub index_count: usize,
+}
+
 #[derive(Debug, Clone, Default)]
 #[non_exhaustive]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -94,6 +114,9 @@ pub struct NfsMeshPart {
     /// resolves is the diffuse map; the rest are shader/material hashes not in the texture
     /// pack.
     pub material_refs: Vec<AssetHash>,
+    /// Per-material index sub-ranges (from `0x00134B02`), in file order. Empty if the mesh
+    /// carries no material list; otherwise the runs tile [`Self::indices`] end to end.
+    pub materials: Vec<NfsMaterialRange>,
     /// The part's role in the car hierarchy.
     pub role: PartRole,
     /// The part's LOD level.

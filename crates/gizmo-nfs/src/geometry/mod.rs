@@ -24,14 +24,25 @@
 use crate::chunk::ChunkNode;
 use crate::error::{NfsError, NfsResult};
 use crate::reader::ByteReader;
-use crate::types::{AssetHash, LodLevel, Mat4, NfsMeshPart, PartRole};
+use crate::types::{AssetHash, LodLevel, Mat4, NfsMaterialRange, NfsMeshPart, PartRole};
 
 const SOLID: u32 = 0x8013_4010;
 const SOLID_HEADER: u32 = 0x0013_4011;
 const MATERIAL_LIST: u32 = 0x0013_4012;
 const MESH_HEADER: u32 = 0x0013_4900;
 const VERTEX_BUFFER: u32 = 0x0013_4B01;
+/// Per-material index-range table (splits the index buffer by material).
+const MATERIAL_RANGES: u32 = 0x0013_4B02;
 const INDEX_BUFFER: u32 = 0x0013_4B03;
+
+/// Bytes per `0x00134B02` entry (15 × u32). The entries occupy the *trailing*
+/// `count * MAT_RANGE_STRIDE` bytes (any leading bytes are `0x11` alignment filler).
+const MAT_RANGE_STRIDE: usize = 60;
+/// u32 field offsets within a `0x00134B02` entry: index count, material index, index offset.
+/// (The rest is a per-material bbox — degenerate ±5000 in practice — and a constant `0x4180`.)
+const MAT_RANGE_COUNT: usize = 3 * 4;
+const MAT_RANGE_MATIDX: usize = 7 * 4;
+const MAT_RANGE_OFFSET: usize = 13 * 4;
 
 /// Bytes per vertex in `0x00134B01` (9 × f32).
 pub const VERTEX_STRIDE: usize = 36;
@@ -89,8 +100,14 @@ fn parse_solid(solid: &ChunkNode, root: &[u8]) -> NfsResult<Option<NfsMeshPart>>
     let role = classify_role(&name);
     let lod = classify_lod(&name);
     let (bbox_min, bbox_max) = bounds(&positions);
-    let material_refs =
-        solid.find(MATERIAL_LIST).map(|m| material_hashes(m.data(root))).unwrap_or_default();
+    // The `0x00134012` list, in file order *including* zero slots — the material list indexes
+    // into it, so positions must be preserved (`material_refs` drops the zeros for lookup).
+    let ordered = solid.find(MATERIAL_LIST).map(|m| ordered_hashes(m.data(root))).unwrap_or_default();
+    let material_refs = ordered.iter().copied().filter(|h| h.0 != 0).collect();
+    let materials = solid
+        .find(MATERIAL_RANGES)
+        .map(|m| material_ranges(m.data(root), &ordered, indices.len()))
+        .unwrap_or_default();
 
     Ok(Some(NfsMeshPart {
         name,
@@ -100,6 +117,7 @@ fn parse_solid(solid: &ChunkNode, root: &[u8]) -> NfsResult<Option<NfsMeshPart>>
         uvs,
         indices,
         material_refs,
+        materials,
         role,
         lod,
         transform,
@@ -214,18 +232,48 @@ fn part_name(header: &[u8]) -> String {
 /// The list mixes shader/material hashes with the solid's texture hash(es), in no fixed
 /// order, so all non-zero hashes are returned and the texture is resolved downstream against
 /// the `TEXTURES.BIN` pack.
-fn material_hashes(data: &[u8]) -> Vec<AssetHash> {
+fn ordered_hashes(data: &[u8]) -> Vec<AssetHash> {
     let count = data.len() / 8;
     let mut hashes = Vec::with_capacity(count);
     let mut r = ByteReader::new(data);
     for _ in 0..count {
         let hash = r.u32_le().unwrap_or(0);
         let _pad = r.u32_le().unwrap_or(0);
-        if hash != 0 {
-            hashes.push(AssetHash(hash));
-        }
+        hashes.push(AssetHash(hash));
     }
     hashes
+}
+
+/// Parse the `0x00134B02` material list into per-material index runs.
+///
+/// Each 60-byte entry carries an index `count` and `offset` (into the index buffer) plus a
+/// `matidx` into `ordered` (the solid's `0x00134012` hash list). The entries are the trailing
+/// `n * 60` bytes; leading bytes are `0x11` alignment filler. Runs whose slice falls outside
+/// the index buffer are skipped rather than trusted (panic-free against untrusted input).
+fn material_ranges(data: &[u8], ordered: &[AssetHash], index_count: usize) -> Vec<NfsMaterialRange> {
+    let n = data.len() / MAT_RANGE_STRIDE;
+    if n == 0 {
+        return Vec::new();
+    }
+    let start = data.len() - n * MAT_RANGE_STRIDE;
+    let mut runs = Vec::with_capacity(n);
+    for i in 0..n {
+        let base = start + i * MAT_RANGE_STRIDE;
+        let count = u32_at(data, base + MAT_RANGE_COUNT) as usize;
+        let matidx = u32_at(data, base + MAT_RANGE_MATIDX) as usize;
+        let offset = u32_at(data, base + MAT_RANGE_OFFSET) as usize;
+        if count == 0 || offset > index_count || count > index_count - offset {
+            continue; // out-of-range run — don't emit a slice we can't trust
+        }
+        let hash = ordered.get(matidx).copied().unwrap_or(AssetHash(0));
+        runs.push(NfsMaterialRange { hash, index_offset: offset, index_count: count });
+    }
+    runs
+}
+
+/// Read a little-endian `u32` at `pos`, or `0` if it is out of range.
+fn u32_at(data: &[u8], pos: usize) -> u32 {
+    ByteReader::at(data, pos).and_then(|mut r| r.u32_le()).unwrap_or(0)
 }
 
 fn classify_role(name: &str) -> PartRole {
@@ -352,6 +400,31 @@ mod tests {
         }
         let idx = parse_indices(&ibuf, 1, 2).unwrap();
         assert_eq!(idx, vec![0, 1, 0]);
+    }
+
+    #[test]
+    fn material_ranges_split_index_buffer() {
+        let ordered = [AssetHash(0xAA), AssetHash(0xBB)];
+        let entry = |count: u32, matidx: u32, offset: u32| {
+            let mut e = [0u32; 15];
+            e[3] = count;
+            e[7] = matidx;
+            e[13] = offset;
+            e.iter().flat_map(|v| v.to_le_bytes()).collect::<Vec<u8>>()
+        };
+        // 12 bytes leading 0x11 filler, then two runs tiling a 9-index buffer.
+        let mut data = vec![0x11u8; 12];
+        data.extend(entry(6, 0, 0));
+        data.extend(entry(3, 1, 6));
+        let runs = material_ranges(&data, &ordered, 9);
+        assert_eq!(runs, vec![
+            NfsMaterialRange { hash: AssetHash(0xAA), index_offset: 0, index_count: 6 },
+            NfsMaterialRange { hash: AssetHash(0xBB), index_offset: 6, index_count: 3 },
+        ]);
+        // A run that overshoots the index buffer is dropped, not trusted.
+        let mut bad = vec![0x11u8; 12];
+        bad.extend(entry(100, 0, 0));
+        assert!(material_ranges(&bad, &ordered, 9).is_empty());
     }
 
     #[test]
