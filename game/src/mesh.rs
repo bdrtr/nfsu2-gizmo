@@ -84,11 +84,27 @@ pub fn build_mesh_inflated(
     inflate: impl Fn(&NfsMeshPart) -> f32,
     label: &str,
 ) -> Option<Mesh> {
+    let items: Vec<(&NfsMeshPart, &[u32])> = parts.iter().map(|p| (*p, p.indices.as_slice())).collect();
+    build_mesh_items(device, &items, off, inflate, label)
+}
+
+/// The core mesh builder: each item is a part paired with the exact slice of *its* index
+/// buffer to draw. This is how one solid whose triangles are split across several materials
+/// (headlights, brake lights, glass…) becomes several sub-meshes — pass each material run's
+/// index slice as its own item. `build_mesh`/`build_mesh_inflated` are the whole-part cases.
+#[must_use]
+pub fn build_mesh_items(
+    device: &wgpu::Device,
+    items: &[(&NfsMeshPart, &[u32])],
+    off: Vec3,
+    inflate: impl Fn(&NfsMeshPart) -> f32,
+    label: &str,
+) -> Option<Mesh> {
     let mut verts = Vec::new();
-    for p in parts {
+    for (p, indices) in items {
         let has_n = !p.normals.is_empty();
         let push = inflate(p);
-        for &idx in &p.indices {
+        for &idx in *indices {
             let i = idx as usize;
             let Some(&pos) = p.positions.get(i) else { continue };
             let n = if has_n {

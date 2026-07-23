@@ -6,7 +6,7 @@
 //! ([`build_car_visuals`]) turning a [`PbrLook`] into an engine `Material`, so texture and
 //! bind-group setup stays in the app while the assembly stays here and testable in spirit.
 
-use crate::mesh::{bbox, build_box, build_mesh, build_mesh_inflated};
+use crate::mesh::{bbox, build_box, build_mesh, build_mesh_items};
 use crate::part_groups::{group_of, select_stock_car, Grp};
 use gizmo::prelude::*;
 use gizmo_nfs::{AssetHash, NfsMeshPart, NfsTexture, Tpk};
@@ -51,6 +51,15 @@ pub fn wheel_look() -> PbrLook {
     PbrLook::new([0.09, 0.09, 0.10], 0.70, 0.20)
 }
 
+/// How to surface the (four-times-instanced) wheel mesh.
+pub enum WheelSurface {
+    /// A pre-built flat material — dark rubber, for a wheel with no resolvable texture.
+    Flat(Material),
+    /// The tire/rim texture (its UVs cover both). The caller uploads it, once, then instances
+    /// the wheel at the four corners with the resulting material.
+    Textured(NfsTexture),
+}
+
 /// Wheel size and corner offsets derived from the wheel part's bounds and the car body.
 #[derive(Clone, Copy, Debug)]
 pub struct WheelFit {
@@ -71,7 +80,7 @@ pub fn fit_wheel(wmin: Vec3, wmax: Vec3, center: Vec3, width: f32, length: f32) 
     WheelFit {
         radius: ((wmax.y - wmin.y).max(wmax.z - wmin.z) * 0.5).clamp(0.18, 0.55),
         half_wheelbase: (wcenter.z - center.z).abs().max(length * 0.30),
-        half_track: (wcenter.x - center.x).abs().max(width * 0.46),
+        half_track: (wcenter.x - center.x).abs().max(width * 0.40),
     }
 }
 
@@ -123,14 +132,16 @@ pub struct CarVisuals {
     pub height: f32,
     /// Body length (Z).
     pub length: f32,
-    /// The wheel mesh (recentered on its own hub) and its material, if the car models one.
-    pub wheel: Option<(Mesh, Material)>,
+    /// The wheel mesh (recentered on its own hub) and how to surface it (flat rubber or the
+    /// tire/rim texture), if the car models a wheel. The caller instances it at four corners.
+    pub wheel: Option<(Mesh, WheelSurface)>,
     /// Wheel radius and corner offsets.
     pub wheel_fit: WheelFit,
     /// A dark box filling the cabin so the camera can't see through the glass-less window
-    /// openings into the hollow body shell. Sized to sit inside the greenhouse; the caller
-    /// gives it a near-black matte material.
-    pub interior: Mesh,
+    /// openings into a hollow body shell — `None` when the car models its own interior (that
+    /// geometry is textured instead), so a heuristic filler box doesn't poke out through the
+    /// roof. The caller gives it a near-black matte material.
+    pub interior: Option<Mesh>,
 }
 
 /// A merged mesh sharing one decoded texture, ready for the caller to upload and material-ise.
@@ -176,6 +187,20 @@ fn texture_for_name<'a>(part_name: &str, tpk: &'a Tpk) -> Option<&'a NfsTexture>
         .map(|(_, t)| t)
 }
 
+/// Resolve a whole part (one carrying no `0x00134B02` material list) to a texture the old
+/// way: painted panels stay flat, else match by DebugName prefix, then fall back to the
+/// material-hash list. Parts *with* a material list are resolved per-run in
+/// [`build_car_visuals`] instead.
+fn resolve_whole(p: &NfsMeshPart, grp: Grp, tpk: &Tpk) -> Option<AssetHash> {
+    if grp == Grp::Paint {
+        return None;
+    }
+    if let Some(tex) = texture_for_name(&p.name, tpk) {
+        return Some(tex.hash);
+    }
+    p.material_refs.iter().copied().find(|h| tpk.texture(*h).is_some())
+}
+
 /// Roughness/metallic to pair with a texture for a given material group.
 fn group_pbr(group: Grp) -> (f32, f32) {
     body_palette([0.0; 3])
@@ -213,42 +238,43 @@ where
     let center = (lo + hi) * 0.5;
     let (width, height, length) = (hi.x - lo.x, hi.y - lo.y, hi.z - lo.z);
 
-    // Resolve each part to a texture. Primary link is by *name*: every texture carries a
-    // DebugName (`240SX_KIT00_HEADLIGHT`, `240SX_KIT00_BRAKELIGHT`, …) that shares a long
-    // prefix with the part it dresses — far more reliable than the material-hash list, which
-    // for most detail parts holds a shader hash that indirects to the texture elsewhere. The
-    // hash list is kept as a fallback. Painted body panels are excluded: their texture is a
-    // shared detail atlas that only reads right through the paint shader, and in-game the
-    // body is the player's flat paint colour anyway.
-    let resolve = |p: &NfsMeshPart| -> Option<AssetHash> {
-        if group_of(&p.name) == Grp::Paint {
-            return None;
-        }
-        let tpk = tpk?;
-        if let Some(tex) = texture_for_name(&p.name, tpk) {
-            return Some(tex.hash);
-        }
-        p.material_refs.iter().copied().find(|h| tpk.texture(*h).is_some())
-    };
-    let mut by_texture: HashMap<AssetHash, Vec<&NfsMeshPart>> = HashMap::new();
-    let mut untextured: Vec<&NfsMeshPart> = Vec::new();
+    // Split every body part into its material runs (`0x00134B02`) and route each run to a
+    // texture — when its hash resolves to a decoded TPK image (headlights, brake lights,
+    // interior, badging) — or to its part's flat colour group. This is what turns a mod that
+    // bakes a whole car into one BODY mesh (split only by material) into textured light lenses
+    // instead of one flat panel. Body paint, glass and chrome carry shader-only hashes that
+    // never resolve, so they fall through to their group. A part with no material list is one
+    // run resolved the old way (by DebugName, then material-hash; paint stays flat).
+    let mut by_texture: HashMap<AssetHash, Vec<(&NfsMeshPart, &[u32])>> = HashMap::new();
+    let mut by_group: HashMap<Grp, Vec<(&NfsMeshPart, &[u32])>> = HashMap::new();
     for p in body_like.iter().copied() {
-        match resolve(p) {
-            Some(hash) => by_texture.entry(hash).or_default().push(p),
-            None => untextured.push(p),
+        let grp = group_of(&p.name);
+        if p.materials.is_empty() {
+            match tpk.and_then(|t| resolve_whole(p, grp, t)) {
+                Some(h) => by_texture.entry(h).or_default().push((p, p.indices.as_slice())),
+                None => by_group.entry(grp).or_default().push((p, p.indices.as_slice())),
+            }
+            continue;
+        }
+        for m in &p.materials {
+            let Some(slice) = p.indices.get(m.index_offset..m.index_offset + m.index_count) else {
+                continue;
+            };
+            match tpk.and_then(|t| t.texture(m.hash)).map(|_| m.hash) {
+                Some(h) => by_texture.entry(h).or_default().push((p, slice)),
+                None => by_group.entry(grp).or_default().push((p, slice)),
+            }
         }
     }
 
+    // Flat-colour group meshes. Sink the shared BASE shell a few mm behind the kit panels: the
+    // two model the same greenhouse belt near-coplanar and would otherwise z-fight.
     let mut groups = Vec::new();
     for (group, label, look) in body_palette(paint) {
-        let parts: Vec<&NfsMeshPart> =
-            untextured.iter().copied().filter(|p| group_of(&p.name) == group).collect();
-        // Sink the shared BASE shell a few mm behind the kit body panels: the two model the
-        // same greenhouse belt near-coplanar and would otherwise z-fight into flickering
-        // slivers along the roof/windshield edge.
-        let mesh = build_mesh_inflated(
+        let Some(items) = by_group.get(&group) else { continue };
+        let mesh = build_mesh_items(
             device,
-            &parts,
+            items,
             center,
             |p| if p.name.contains("_BASE") { -0.006 } else { 0.0 },
             label,
@@ -258,16 +284,16 @@ where
         }
     }
 
+    // One textured mesh per resolved texture. A run's texture is its own full colour, so it is
+    // used white (never the paint tint the old whole-part body-atlas path applied).
     let mut textured = Vec::new();
-    for (hash, parts) in by_texture {
-        let Some(mesh) = build_mesh(device, &parts, center, "nfs_textured") else { continue };
+    for (hash, items) in by_texture {
+        let Some(mesh) = build_mesh_items(device, &items, center, |_| 0.0, "nfs_textured") else {
+            continue;
+        };
         let Some(texture) = tpk.and_then(|t| t.texture(hash)).cloned() else { continue };
-        let group = group_of(&parts[0].name);
-        let (roughness, metallic) = group_pbr(group);
-        // Body panels carry a neutral detail atlas → tint by paint; details are their own
-        // colour → white.
-        let tint = if group == Grp::Paint { paint } else { [1.0, 1.0, 1.0] };
-        textured.push(TexturedPart { mesh, texture, tint, roughness, metallic });
+        let (roughness, metallic) = group_pbr(group_of(&items[0].0.name));
+        textured.push(TexturedPart { mesh, texture, tint: [1.0, 1.0, 1.0], roughness, metallic });
     }
 
     let mut wheel = None;
@@ -276,20 +302,31 @@ where
     if let Some(wp) = stock.iter().copied().find(|p| group_of(&p.name) == Grp::Wheel) {
         let (wl, wh) = bbox(std::slice::from_ref(&wp));
         wheel_fit = fit_wheel(wl, wh, center, width, length);
+        // The wheel's texture is its first material run that resolves to a TPK image — the tire
+        // + rim atlas, whose UVs cover both. The whole wheel is one mesh; a small untextured hub
+        // run just samples the same atlas, which reads fine.
+        let wheel_tex = wp.materials.iter().find_map(|m| tpk.and_then(|t| t.texture(m.hash)).cloned());
         if let Some(mesh) = build_mesh(device, &[wp], (wl + wh) * 0.5, "nfs_wheel") {
-            wheel = Some((mesh, make_material(wheel_look())));
+            let surface = match wheel_tex {
+                Some(tex) => WheelSurface::Textured(tex),
+                None => WheelSurface::Flat(make_material(wheel_look())),
+            };
+            wheel = Some((mesh, surface));
         }
     }
 
     // A dark cabin filler occupying the greenhouse cavity (recentered frame: origin = car
-    // centre, +Y = up). Spans from just below the beltline up toward the roof, narrow enough
-    // to stay inside the pillars so it only shows through the window openings.
-    let interior = build_box(
-        device,
-        Vec3::new(-width * 0.27, -height * 0.05, -length * 0.14),
-        Vec3::new(width * 0.27, height * 0.34, length * 0.13),
-        "nfs_interior",
-    );
+    // centre, +Y = up). Only for hollow shells: skip it when the car models a real interior
+    // (its geometry is textured above), which the heuristic box would otherwise poke through.
+    let has_interior = textured.iter().any(|tp| tp.texture.name.contains("INTERIOR"));
+    let interior = (!has_interior).then(|| {
+        build_box(
+            device,
+            Vec3::new(-width * 0.27, -height * 0.05, -length * 0.14),
+            Vec3::new(width * 0.27, height * 0.34, length * 0.13),
+            "nfs_interior",
+        )
+    });
 
     CarVisuals { groups, textured, center, width, height, length, wheel, wheel_fit, interior }
 }

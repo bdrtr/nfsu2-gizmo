@@ -15,7 +15,7 @@
 use gizmo::prelude::*;
 use gizmo::simple::{SimpleAppExt, SimpleSceneState};
 use gizmo_nfs::parse_geometry;
-use nfsu2::car::{build_car_visuals, env_color, load_tpk_beside, PbrLook};
+use nfsu2::car::{build_car_visuals, env_color, load_tpk_beside, PbrLook, WheelSurface};
 
 const DEFAULT_CAR: &str =
     "/home/bedir/Games/need-for-speed-underground-2/drive_c/Need for Speed Underground 2/CARS/240SX/GEOMETRY.BIN";
@@ -83,14 +83,17 @@ fn main() {
                 ));
             }
 
-            // Dark cabin filler so the glass-less windows don't read as see-through.
-            scene.world.spawn_bundle((
-                Transform::default(),
-                GlobalTransform::default(),
-                car.interior,
-                make_material(PbrLook { rgb: [0.02, 0.02, 0.025], roughness: 0.9, metallic: 0.0 }),
-                MeshRenderer::new(),
-            ));
+            // Dark cabin filler so the glass-less windows don't read as see-through (only for
+            // cars without a modelled interior).
+            if let Some(interior) = car.interior {
+                scene.world.spawn_bundle((
+                    Transform::default(),
+                    GlobalTransform::default(),
+                    interior,
+                    make_material(PbrLook { rgb: [0.02, 0.02, 0.025], roughness: 0.9, metallic: 0.0 }),
+                    MeshRenderer::new(),
+                ));
+            }
 
             // Textured parts: upload each decoded TPK texture and use it as albedo.
             for tp in car.textured {
@@ -120,8 +123,33 @@ fn main() {
 
             // Four static wheels at the fitted corners (lower half tucked into the arch).
             let fit = car.wheel_fit;
-            let wheel_y = -car.height * 0.5 + fit.radius * 0.15;
-            if let Some((wm, wmat)) = car.wheel {
+            let wheel_y = -car.height * 0.5 + fit.radius * 0.95;
+            if let Some((wm, surface)) = car.wheel {
+                // Build the wheel material once, then instance the mesh at the four corners.
+                let wmat = match surface {
+                    WheelSurface::Flat(m) => m,
+                    WheelSurface::Textured(tex) => {
+                        let key = format!("nfs_tex_{:08X}", tex.hash.0);
+                        match scene.asset_manager.install_decoded_material_texture(
+                            &scene.renderer.device,
+                            &scene.renderer.queue,
+                            &scene.renderer.scene.texture_bind_group_layout,
+                            &key,
+                            &tex.rgba,
+                            tex.width,
+                            tex.height,
+                        ) {
+                            Ok(bg) => Material::new(bg)
+                                .with_pbr(Vec4::new(1.0, 1.0, 1.0, 1.0), 0.7, 0.2)
+                                .with_double_sided(true),
+                            Err(_) => make_material(PbrLook {
+                                rgb: [0.09, 0.09, 0.10],
+                                roughness: 0.7,
+                                metallic: 0.2,
+                            }),
+                        }
+                    }
+                };
                 for (sx, sz) in [(-1.0, -1.0), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)] {
                     let t = Transform::new(Vec3::new(sx * fit.half_track, wheel_y, sz * fit.half_wheelbase));
                     scene.world.spawn_bundle((

@@ -18,7 +18,7 @@ use gizmo::egui;
 use gizmo::physics::world::PhysicsWorld;
 use gizmo::prelude::*;
 use gizmo_nfs::parse_geometry;
-use nfsu2::car::{build_car_visuals, env_color, load_tpk_beside, WheelFit};
+use nfsu2::car::{build_car_visuals, env_color, load_tpk_beside, WheelFit, WheelSurface};
 use nfsu2::mesh::add_transform;
 
 const DEFAULT_CAR: &str =
@@ -158,11 +158,12 @@ fn setup_scene(world: &mut World, renderer: &gizmo::renderer::Renderer) -> Drive
         world.add_component(e, MeshRenderer::new());
         visual_ids.push(e.id());
     }
-    // Dark cabin filler so the glass-less windows don't read as see-through.
-    {
+    // Dark cabin filler so the glass-less windows don't read as see-through (only for cars
+    // without a modelled interior).
+    if let Some(interior) = car.interior {
         let e = world.spawn();
         add_transform(world, e, Transform::new(Vec3::ZERO));
-        world.add_component(e, car.interior);
+        world.add_component(e, interior);
         world.add_component(e, mat([0.02, 0.02, 0.025], 0.9, 0.0));
         world.add_component(e, MeshRenderer::new());
         visual_ids.push(e.id());
@@ -193,13 +194,33 @@ fn setup_scene(world: &mut World, renderer: &gizmo::renderer::Renderer) -> Drive
         visual_ids.push(e.id());
         textured_count += 1;
     }
-    world.insert_resource(asset_manager);
-
     // ── Wheels: the single wheel mesh instanced at four fitted corners ──
     // Wheel centre near the bottom of the body so the lower half sticks out of the arch.
-    let wheel_y = -height * 0.5 + radius * 0.15;
+    let wheel_y = -height * 0.5 + radius * 0.95;
     let mut wheels = Vec::new();
-    if let Some((wm, wmat)) = car.wheel {
+    if let Some((wm, surface)) = car.wheel {
+        // Build the wheel material once (uploading the tire/rim texture if present), then
+        // instance the mesh at the four corners.
+        let wmat = match surface {
+            WheelSurface::Flat(m) => m,
+            WheelSurface::Textured(tex) => {
+                let key = format!("nfs_tex_{:08X}", tex.hash.0);
+                match asset_manager.install_decoded_material_texture(
+                    &renderer.device,
+                    &renderer.queue,
+                    &renderer.scene.texture_bind_group_layout,
+                    &key,
+                    &tex.rgba,
+                    tex.width,
+                    tex.height,
+                ) {
+                    Ok(bg) => Material::new(bg)
+                        .with_pbr(Vec4::new(1.0, 1.0, 1.0, 1.0), 0.7, 0.2)
+                        .with_double_sided(true),
+                    Err(_) => mat([0.09, 0.09, 0.10], 0.7, 0.2),
+                }
+            }
+        };
         for (sx, sz, front) in [(-1.0, -1.0, true), (1.0, -1.0, true), (-1.0, 1.0, false), (1.0, 1.0, false)] {
             let e = world.spawn();
             add_transform(world, e, Transform::new(Vec3::ZERO));
@@ -213,6 +234,7 @@ fn setup_scene(world: &mut World, renderer: &gizmo::renderer::Renderer) -> Drive
             });
         }
     }
+    world.insert_resource(asset_manager);
 
     // ── Chassis (physics only; the visuals above follow it) ──
     let spawn = Vec3::new(0.0, height * 0.5 + radius + 0.15, 0.0);

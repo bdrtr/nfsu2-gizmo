@@ -12,7 +12,7 @@ use gizmo_nfs::NfsMeshPart;
 /// `Skip` parts are deliberately never rendered: engine-bay and underbody geometry that
 /// is hidden on a grounded car, and texture-only decals that only look right once the TPK
 /// texture is applied (as flat colour they z-fight the body they sit on).
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Grp {
     /// Painted body panels.
     Paint,

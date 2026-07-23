@@ -16,7 +16,7 @@ use gizmo::physics::world::PhysicsWorld;
 use gizmo::prelude::*;
 use gizmo::renderer::gpu_types::Vertex;
 use gizmo_nfs::parse_geometry;
-use nfsu2::car::{build_car_visuals, env_color, load_tpk_beside, WheelFit};
+use nfsu2::car::{build_car_visuals, env_color, load_tpk_beside, WheelFit, WheelSurface};
 use nfsu2::mesh::add_transform;
 
 const DEFAULT_CAR: &str =
@@ -272,21 +272,42 @@ fn setup_scene(world: &mut World, renderer: &gizmo::renderer::Renderer) -> RaceS
         world.add_component(e, MeshRenderer::new());
         visual_ids.push(e.id());
     }
-    // Dark cabin filler so the glass-less windows don't read as see-through.
-    {
+    // Dark cabin filler so the glass-less windows don't read as see-through (only for cars
+    // without a modelled interior).
+    if let Some(interior) = car.interior {
         let e = world.spawn();
         add_transform(world, e, Transform::new(Vec3::ZERO));
-        world.add_component(e, car.interior);
+        world.add_component(e, interior);
         world.add_component(e, mat([0.02, 0.02, 0.025], 0.9, 0.0));
         world.add_component(e, MeshRenderer::new());
         visual_ids.push(e.id());
     }
-    world.insert_resource(asset_manager);
-
     // Wheels: the single wheel mesh instanced at four fitted corners.
-    let wheel_y = -height * 0.5 + radius * 0.15;
+    let wheel_y = -height * 0.5 + radius * 0.95;
     let mut wheels = Vec::new();
-    if let Some((wm, wmat)) = car.wheel {
+    if let Some((wm, surface)) = car.wheel {
+        // Build the wheel material once (uploading the tire/rim texture if present), then
+        // instance the mesh at the four corners.
+        let wmat = match surface {
+            WheelSurface::Flat(m) => m,
+            WheelSurface::Textured(tex) => {
+                let key = format!("nfs_tex_{:08X}", tex.hash.0);
+                match asset_manager.install_decoded_material_texture(
+                    &renderer.device,
+                    &renderer.queue,
+                    &renderer.scene.texture_bind_group_layout,
+                    &key,
+                    &tex.rgba,
+                    tex.width,
+                    tex.height,
+                ) {
+                    Ok(bg) => Material::new(bg)
+                        .with_pbr(Vec4::new(1.0, 1.0, 1.0, 1.0), 0.7, 0.2)
+                        .with_double_sided(true),
+                    Err(_) => mat([0.09, 0.09, 0.10], 0.7, 0.2),
+                }
+            }
+        };
         for (sx, sz, front) in [(-1.0, -1.0, true), (1.0, -1.0, true), (-1.0, 1.0, false), (1.0, 1.0, false)] {
             let e = world.spawn();
             add_transform(world, e, Transform::new(Vec3::ZERO));
@@ -296,6 +317,7 @@ fn setup_scene(world: &mut World, renderer: &gizmo::renderer::Renderer) -> RaceS
             wheels.push(WheelVis { id: e.id(), local: Vec3::new(sx * half_track, wheel_y, sz * half_wheelbase), front });
         }
     }
+    world.insert_resource(asset_manager);
 
     // Spawn the car on the start line, facing along the track.
     let tan0 = track.tangents[0];
