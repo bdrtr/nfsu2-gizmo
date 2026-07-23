@@ -36,4 +36,12 @@ proptest! {
         data[1] = 0xFB;
         let _ = compression::decompress(&data);
     }
+
+    // Force a HUFF header onto garbage so the Huffman table build + bit reader are exercised.
+    #[test]
+    fn huff_signed_never_panics(mut data in proptest::collection::vec(any::<u8>(), 16..4096)) {
+        data[0..4].copy_from_slice(b"HUFF");
+        data[4] = 1; // version
+        let _ = compression::decompress(&data);
+    }
 }

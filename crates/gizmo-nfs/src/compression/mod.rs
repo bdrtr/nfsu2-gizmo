@@ -1,9 +1,11 @@
 //! Compression codecs used by NFSU2 assets.
 //!
-//! Two schemes appear: EA's **RefPack/QFS** (LZ77-style, magic `10 FB`) and EA Black
-//! Box's **JDLZ** (magic ASCII `"JDLZ"`). A `.LZC` file may be *either*, so the codec is
-//! always detected by magic bytes, never assumed from the extension.
+//! Three schemes appear: EA's **RefPack/QFS** (LZ77-style, magic `10 FB`), EA Black Box's
+//! **JDLZ** (magic ASCII `"JDLZ"`), and EA's **HUFF** Huffman codec (magic ASCII `"HUFF"`,
+//! used by some NFSU2 textures). A `.LZC` file may be any of these, so the codec is always
+//! detected by magic bytes, never assumed from the extension.
 
+pub mod huff;
 pub mod jdlz;
 pub mod refpack;
 
@@ -17,6 +19,8 @@ pub enum Codec {
     RefPack,
     /// EA Black Box JDLZ (magic `"JDLZ"`).
     Jdlz,
+    /// EA HUFF Huffman (magic `"HUFF"`).
+    Huff,
     /// No recognised compression signature — treat the buffer as already plain.
     None,
 }
@@ -26,6 +30,8 @@ pub enum Codec {
 pub fn detect(buf: &[u8]) -> Codec {
     if buf.get(..4) == Some(b"JDLZ".as_slice()) {
         Codec::Jdlz
+    } else if buf.get(..4) == Some(huff::MAGIC.as_slice()) {
+        Codec::Huff
     } else if refpack::signature_offset(buf).is_some() {
         Codec::RefPack
     } else {
@@ -34,10 +40,14 @@ pub fn detect(buf: &[u8]) -> Codec {
 }
 
 /// Decompress `buf` if it carries a recognised codec, otherwise return a plain copy.
+///
+/// A recognised-but-unimplemented codec (currently HUFF) returns
+/// [`crate::NfsError::NotImplemented`] rather than a bogus plain copy.
 pub fn decompress(buf: &[u8]) -> NfsResult<Vec<u8>> {
     match detect(buf) {
         Codec::RefPack => refpack::decompress(buf),
         Codec::Jdlz => jdlz::decompress(buf),
+        Codec::Huff => huff::decompress(buf),
         Codec::None => Ok(buf.to_vec()),
     }
 }

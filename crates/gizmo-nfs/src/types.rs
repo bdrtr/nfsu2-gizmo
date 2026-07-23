@@ -89,8 +89,11 @@ pub struct NfsMeshPart {
     pub uvs: Vec<[f32; 2]>,
     /// Triangle-list indices into the attribute arrays.
     pub indices: Vec<u32>,
-    /// Hash of the texture/material to resolve against [`NfsCar::textures`].
-    pub material_ref: Option<AssetHash>,
+    /// Asset hashes this part references (from the solid's material list). Resolve each
+    /// against a [`crate::Tpk`] to find the part's texture — typically the first that
+    /// resolves is the diffuse map; the rest are shader/material hashes not in the texture
+    /// pack.
+    pub material_refs: Vec<AssetHash>,
     /// The part's role in the car hierarchy.
     pub role: PartRole,
     /// The part's LOD level.

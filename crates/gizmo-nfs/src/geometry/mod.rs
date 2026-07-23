@@ -89,7 +89,8 @@ fn parse_solid(solid: &ChunkNode, root: &[u8]) -> NfsResult<Option<NfsMeshPart>>
     let role = classify_role(&name);
     let lod = classify_lod(&name);
     let (bbox_min, bbox_max) = bounds(&positions);
-    let material_ref = solid.find(MATERIAL_LIST).and_then(|m| first_material_hash(m.data(root)));
+    let material_refs =
+        solid.find(MATERIAL_LIST).map(|m| material_hashes(m.data(root))).unwrap_or_default();
 
     Ok(Some(NfsMeshPart {
         name,
@@ -98,7 +99,7 @@ fn parse_solid(solid: &ChunkNode, root: &[u8]) -> NfsResult<Option<NfsMeshPart>>
         normals,
         uvs,
         indices,
-        material_ref,
+        material_refs,
         role,
         lod,
         transform,
@@ -210,16 +211,21 @@ fn part_name(header: &[u8]) -> String {
 }
 
 /// The `0x00134012` material list is an array of 8-byte entries (`u32` hash, `u32` zero).
-/// The first hash is the solid's primary material — it resolves to a `TEXTURES.BIN` texture
-/// for the parts that carry one (head-lamps, badges, ...), or to a paint/shader hash the
-/// texture table won't contain (the body), which the renderer treats as untextured.
-fn first_material_hash(data: &[u8]) -> Option<AssetHash> {
+/// The list mixes shader/material hashes with the solid's texture hash(es), in no fixed
+/// order, so all non-zero hashes are returned and the texture is resolved downstream against
+/// the `TEXTURES.BIN` pack.
+fn material_hashes(data: &[u8]) -> Vec<AssetHash> {
+    let count = data.len() / 8;
+    let mut hashes = Vec::with_capacity(count);
     let mut r = ByteReader::new(data);
-    match r.u32_le() {
-        Ok(0) => None,
-        Ok(h) => Some(AssetHash(h)),
-        Err(_) => None,
+    for _ in 0..count {
+        let hash = r.u32_le().unwrap_or(0);
+        let _pad = r.u32_le().unwrap_or(0);
+        if hash != 0 {
+            hashes.push(AssetHash(hash));
+        }
     }
+    hashes
 }
 
 fn classify_role(name: &str) -> PartRole {

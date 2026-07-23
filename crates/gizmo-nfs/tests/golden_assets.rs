@@ -96,11 +96,10 @@ fn geometry_parser_extracts_valid_parts() {
     assert!((len - 1.0).abs() < 0.02, "normal not unit length: {len}");
 }
 
-/// The TPK parser on a real car: the known descriptor count, an RGBA8 pixel pool assembled
-/// from the JDLZ blocks, and every descriptor carrying the RGBA8888 format code with an
-/// in-pool origin.
+/// The TPK parser on a real car: the known descriptor count, and every JDLZ-compressed
+/// texture decoded to a correctly-sized RGBA8 image whose embedded header hash matches.
 #[test]
-fn tpk_parser_assembles_rgba_pool() {
+fn tpk_parser_decodes_textures() {
     let Some(root) = root() else {
         eprintln!("NFSU2_ROOT unset — skipping TPK parser test");
         return;
@@ -108,15 +107,24 @@ fn tpk_parser_assembles_rgba_pool() {
     let bytes = std::fs::read(root.join("CARS/240SX/TEXTURES.BIN")).expect("read TEXTURES.BIN");
     let tpk = gizmo_nfs::texture::Tpk::parse(&bytes).expect("parse TPK");
 
-    // 240SX ships 73 textures; the pixel pool decompresses to a few MB of RGBA8.
+    // 240SX ships 73 textures; every one decodes now that both JDLZ and HUFF are supported.
     assert_eq!(tpk.entries.len(), 73, "descriptor count");
-    assert!(tpk.pool.len() > 1_000_000, "pool should be several MB, got {}", tpk.pool.len());
-    assert_eq!(tpk.pool.len() % gizmo_nfs::texture::BYTES_PER_PIXEL, 0, "pool is whole RGBA pixels");
+    assert_eq!(tpk.textures.len(), 73, "all 73 textures decode (JDLZ + HUFF)");
+    assert_eq!(
+        tpk.entries.iter().map(|e| e.header_from_end).collect::<std::collections::HashSet<_>>(),
+        std::iter::once(0x100).collect(),
+        "every descriptor's header_from_end is the constant 0x100"
+    );
 
-    for e in &tpk.entries {
-        assert_eq!(e.format_code, gizmo_nfs::texture::FORMAT_RGBA8, "every texture is RGBA8888");
-        let (x, _y) = e.origin();
-        assert!(x < gizmo_nfs::texture::PAGE_WIDTH, "origin x within page width");
-        assert!((e.pool_offset as usize) < tpk.pool.len(), "pool_offset within the pool");
+    let mut dxt1 = 0;
+    for tex in tpk.textures.values() {
+        // Dimensions are powers of two and the RGBA buffer is exactly W*H*4.
+        assert!(tex.width.is_power_of_two() && tex.height.is_power_of_two(), "dims power of two");
+        assert_eq!(tex.rgba.len(), tex.width as usize * tex.height as usize * 4, "tight RGBA8");
+        assert_eq!(tex.format, gizmo_nfs::PixelFormat::Rgba8);
+        if matches!(tex.source_format, gizmo_nfs::TexFormat::Dxt1) {
+            dxt1 += 1;
+        }
     }
+    assert!(dxt1 >= 5, "expected several DXT1 textures, got {dxt1}");
 }
