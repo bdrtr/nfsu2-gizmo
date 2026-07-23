@@ -85,8 +85,11 @@ pub enum PartRole {
 #[non_exhaustive]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct NfsMaterialRange {
-    /// The material/texture hash for this run.
+    /// The material/texture hash for this run (from `0x00134012`).
     pub hash: AssetHash,
+    /// The shader hash for this run (from `0x00134013`). Shaders are shared across all cars,
+    /// so this identifies the material *type* (e.g. the same value marks glass on every car).
+    pub shader: AssetHash,
     /// Start index into [`NfsMeshPart::indices`].
     pub index_offset: usize,
     /// Number of indices in this run (a multiple of 3).
