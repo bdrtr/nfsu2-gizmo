@@ -83,6 +83,15 @@ fn main() {
                 ));
             }
 
+            // Dark cabin filler so the glass-less windows don't read as see-through.
+            scene.world.spawn_bundle((
+                Transform::default(),
+                GlobalTransform::default(),
+                car.interior,
+                make_material(PbrLook { rgb: [0.02, 0.02, 0.025], roughness: 0.9, metallic: 0.0 }),
+                MeshRenderer::new(),
+            ));
+
             // Textured parts: upload each decoded TPK texture and use it as albedo.
             for tp in car.textured {
                 let key = format!("nfs_tex_{:08X}", tp.texture.hash.0);

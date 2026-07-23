@@ -158,6 +158,15 @@ fn setup_scene(world: &mut World, renderer: &gizmo::renderer::Renderer) -> Drive
         world.add_component(e, MeshRenderer::new());
         visual_ids.push(e.id());
     }
+    // Dark cabin filler so the glass-less windows don't read as see-through.
+    {
+        let e = world.spawn();
+        add_transform(world, e, Transform::new(Vec3::ZERO));
+        world.add_component(e, car.interior);
+        world.add_component(e, mat([0.02, 0.02, 0.025], 0.9, 0.0));
+        world.add_component(e, MeshRenderer::new());
+        visual_ids.push(e.id());
+    }
     // Textured parts: upload each decoded TPK texture and material-ise it as albedo.
     let mut textured_count = 0;
     for tp in car.textured {

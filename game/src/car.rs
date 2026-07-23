@@ -6,7 +6,7 @@
 //! ([`build_car_visuals`]) turning a [`PbrLook`] into an engine `Material`, so texture and
 //! bind-group setup stays in the app while the assembly stays here and testable in spirit.
 
-use crate::mesh::{bbox, build_mesh};
+use crate::mesh::{bbox, build_box, build_mesh};
 use crate::part_groups::{group_of, select_stock_car, Grp};
 use gizmo::prelude::*;
 use gizmo_nfs::{AssetHash, NfsMeshPart, NfsTexture, Tpk};
@@ -127,6 +127,10 @@ pub struct CarVisuals {
     pub wheel: Option<(Mesh, Material)>,
     /// Wheel radius and corner offsets.
     pub wheel_fit: WheelFit,
+    /// A dark box filling the cabin so the camera can't see through the glass-less window
+    /// openings into the hollow body shell. Sized to sit inside the greenhouse; the caller
+    /// gives it a near-black matte material.
+    pub interior: Mesh,
 }
 
 /// A merged mesh sharing one decoded texture, ready for the caller to upload and material-ise.
@@ -259,5 +263,15 @@ where
         }
     }
 
-    CarVisuals { groups, textured, center, width, height, length, wheel, wheel_fit }
+    // A dark cabin filler occupying the greenhouse cavity (recentered frame: origin = car
+    // centre, +Y = up). Spans from just below the beltline up toward the roof, narrow enough
+    // to stay inside the pillars so it only shows through the window openings.
+    let interior = build_box(
+        device,
+        Vec3::new(-width * 0.27, -height * 0.05, -length * 0.14),
+        Vec3::new(width * 0.27, height * 0.34, length * 0.13),
+        "nfs_interior",
+    );
+
+    CarVisuals { groups, textured, center, width, height, length, wheel, wheel_fit, interior }
 }

@@ -272,6 +272,15 @@ fn setup_scene(world: &mut World, renderer: &gizmo::renderer::Renderer) -> RaceS
         world.add_component(e, MeshRenderer::new());
         visual_ids.push(e.id());
     }
+    // Dark cabin filler so the glass-less windows don't read as see-through.
+    {
+        let e = world.spawn();
+        add_transform(world, e, Transform::new(Vec3::ZERO));
+        world.add_component(e, car.interior);
+        world.add_component(e, mat([0.02, 0.02, 0.025], 0.9, 0.0));
+        world.add_component(e, MeshRenderer::new());
+        visual_ids.push(e.id());
+    }
     world.insert_resource(asset_manager);
 
     // Wheels: the single wheel mesh instanced at four fitted corners.

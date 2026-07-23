@@ -125,9 +125,11 @@ pub fn select_stock_car(all: &[NfsMeshPart]) -> Vec<&NfsMeshPart> {
         let is_default = p.name.contains("_BASE")
             || p.name.contains("_KIT00")
             || (p.name.contains("DECAL") && p.name.contains("WINDOW"));
-        // FULLROOF duplicates ROOF and TRUNK_AUDIO duplicates TRUNK — each is a second
-        // shell over the same surface, so keeping both z-fights. Prefer the plain variant.
-        let is_duplicate_shell = p.name.contains("FULLROOF") || p.name.contains("TRUNK_AUDIO");
+        // TRUNK_AUDIO duplicates TRUNK (second shell → z-fight); drop it. For the roof, keep
+        // FULLROOF (the complete panel) and drop the plain ROOF variant, which has a sunroof
+        // cut-out that reads as a hole in the greenhouse without the sunroof glass.
+        let is_duplicate_shell = p.name.contains("TRUNK_AUDIO")
+            || (p.name.contains("_ROOF_") && !p.name.contains("FULLROOF"));
         if !is_default || is_duplicate_shell || group_of(&p.name) == Grp::Skip {
             continue;
         }
