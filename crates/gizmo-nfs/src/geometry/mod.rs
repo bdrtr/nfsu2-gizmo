@@ -241,14 +241,37 @@ fn classify_role(name: &str) -> PartRole {
     }
 }
 
+/// Classify a part's level of detail from the trailing `_A`..`_D` suffix of its name
+/// (`A` = highest detail). Anything else — including names whose LOD letter was cut off by
+/// the fixed-length name field — is [`LodLevel::Unknown`].
+///
+/// Empirically locked against 54 stock cars (~15k parts): a genuine LOD tag is always a
+/// single `A`..`D` immediately after `_`, and truncation never forges a spurious `_A`..`_D`
+/// tail (the only truncated single-letter tails observed are `L`/`R`/`Q`/`W`/`M`/`U`), so
+/// this predicate has no false positives. Parts whose LOD letter was truncated away
+/// (`..._HEADLIGHT_LEFT_`, `..._HEADLIGHT_L`, `..._SIDE_MIRRO`) are deliberately left
+/// `Unknown` rather than reconstructed by triangle count: names that collide after
+/// truncation are *not* clean per-component LOD ladders — they merge left/right panels and
+/// `STYLE##` variants and carry duplicate triangle counts, so a rank-based guess would be
+/// wrong. Downstream code that needs the best LOD picks it per component by triangle count
+/// instead (see the game's `select_stock_car`), which is why this field can stay honest.
+///
+/// The suffix test mirrors the game's `component_key`, which strips the very same `_[A-D]`.
 fn classify_lod(name: &str) -> LodLevel {
-    match name.rsplit('_').next() {
-        Some("A") => LodLevel::A,
-        Some("B") => LodLevel::B,
-        Some("C") => LodLevel::C,
-        Some("D") => LodLevel::D,
-        _ => LodLevel::Unknown,
+    // A LOD tag is a single A..D at the end, immediately preceded by '_'. Requiring the
+    // delimiter (rather than just the last '_'-segment) means a bare letter or an
+    // underscore-less name can never be misread as a LOD.
+    let b = name.as_bytes();
+    if b.len() >= 2 && b[b.len() - 2] == b'_' {
+        return match b[b.len() - 1] {
+            b'A' => LodLevel::A,
+            b'B' => LodLevel::B,
+            b'C' => LodLevel::C,
+            b'D' => LodLevel::D,
+            _ => LodLevel::Unknown,
+        };
     }
+    LodLevel::Unknown
 }
 
 fn bounds(positions: &[[f32; 3]]) -> ([f32; 3], [f32; 3]) {
@@ -278,6 +301,33 @@ mod tests {
         assert_eq!(classify_role("FOCUS_KIT03_HOOD_B"), PartRole::Kit { slot: 3 });
         assert_eq!(classify_lod("FOCUS_KIT03_HOOD_B"), LodLevel::B);
         assert_eq!(classify_role("FRONT_WHEEL"), PartRole::Wheel);
+    }
+
+    /// Locks the empirical LOD-naming survey (54 stock cars, ~15k parts): genuine LOD tags
+    /// are exactly a trailing `_[A-D]`; every truncation pattern seen in the wild must fall
+    /// through to `Unknown` rather than be misread as (or fabricated into) a LOD.
+    #[test]
+    fn classify_lod_locks_empirical_naming() {
+        // Genuine LOD suffixes at every level.
+        assert_eq!(classify_lod("240SX_BASE_A"), LodLevel::A);
+        assert_eq!(classify_lod("240SX_KIT00_BODY_B"), LodLevel::B);
+        assert_eq!(classify_lod("240SX_KIT00_REAR_BUMPER_C"), LodLevel::C);
+        assert_eq!(classify_lod("240SX_KIT00_BODY_D"), LodLevel::D);
+        // Truncated away entirely (trailing '_'): two LODs collapse to one name → Unknown.
+        assert_eq!(classify_lod("240SX_KIT00_HEADLIGHT_LEFT_"), LodLevel::Unknown);
+        // Left/right letter survived but the LOD letter is gone.
+        assert_eq!(classify_lod("MUSTANGGT_KIT00_HEADLIGHT_L"), LodLevel::Unknown);
+        assert_eq!(classify_lod("MUSTANGGT_KIT00_HEADLIGHT_R"), LodLevel::Unknown);
+        // Mid-word truncations observed in the survey.
+        assert_eq!(classify_lod("240SX_KIT00_LEFT_SIDE_MIRRO"), LodLevel::Unknown);
+        assert_eq!(classify_lod("240SX_KIT00_TRUNK_AUDIO_UNL"), LodLevel::Unknown);
+        // Non-LOD single-letter tails that DO occur (`R` from `..._QUARTER_R`) must not read
+        // as a LOD — only A..D are LOD letters.
+        assert_eq!(classify_lod("240SX_DECAL_RIGHT_QUARTER_R"), LodLevel::Unknown);
+        // Robustness: a bare letter or an underscore-less/empty name is never a LOD.
+        assert_eq!(classify_lod("A"), LodLevel::Unknown);
+        assert_eq!(classify_lod("BODY"), LodLevel::Unknown);
+        assert_eq!(classify_lod(""), LodLevel::Unknown);
     }
 
     #[test]
