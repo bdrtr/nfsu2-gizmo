@@ -19,7 +19,7 @@ layer (a demo binary or an optional `gizmo-nfs-engine` crate), not this crate.
 | BIGF / VIV archive reader | `viv` | ✅ done |
 | Output data contract | `types` | ✅ defined |
 | `GEOMETRY.BIN` car models | `geometry` | ✅ done — stride-36 vertices (pos/normal/uv) + u16 indices, validated on real cars |
-| TPK textures → RGBA (DXT/P8) | `texture` | 🚧 in progress — 24-byte descriptors (73 textures) mapped; width/height/format decode next |
+| TPK textures → RGBA pool | `texture` | 🟡 mostly done — pixel pool is **JDLZ-compressed RGBA8** (not DXT) in 512-wide pages; 24-byte descriptors decoded (hash + pool offset → x,y + format). Per-texture **width/height** still to resolve before cropping individual textures. |
 | `GLOBALB.LZC` global data | `global` | 🔜 later |
 | World / city (`STREAM*.BUN`, `L4RA.BUN`) | `world` | 🔴 research-frontier |
 

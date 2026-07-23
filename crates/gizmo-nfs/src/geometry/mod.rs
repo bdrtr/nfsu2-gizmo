@@ -28,6 +28,7 @@ use crate::types::{AssetHash, LodLevel, Mat4, NfsMeshPart, PartRole};
 
 const SOLID: u32 = 0x8013_4010;
 const SOLID_HEADER: u32 = 0x0013_4011;
+const MATERIAL_LIST: u32 = 0x0013_4012;
 const MESH_HEADER: u32 = 0x0013_4900;
 const VERTEX_BUFFER: u32 = 0x0013_4B01;
 const INDEX_BUFFER: u32 = 0x0013_4B03;
@@ -88,6 +89,7 @@ fn parse_solid(solid: &ChunkNode, root: &[u8]) -> NfsResult<Option<NfsMeshPart>>
     let role = classify_role(&name);
     let lod = classify_lod(&name);
     let (bbox_min, bbox_max) = bounds(&positions);
+    let material_ref = solid.find(MATERIAL_LIST).and_then(|m| first_material_hash(m.data(root)));
 
     Ok(Some(NfsMeshPart {
         name,
@@ -96,7 +98,7 @@ fn parse_solid(solid: &ChunkNode, root: &[u8]) -> NfsResult<Option<NfsMeshPart>>
         normals,
         uvs,
         indices,
-        material_ref: None, // texture/material resolution is a later RE step
+        material_ref,
         role,
         lod,
         transform,
@@ -205,6 +207,19 @@ fn part_name(header: &[u8]) -> String {
         i += 1;
     }
     best.to_owned()
+}
+
+/// The `0x00134012` material list is an array of 8-byte entries (`u32` hash, `u32` zero).
+/// The first hash is the solid's primary material — it resolves to a `TEXTURES.BIN` texture
+/// for the parts that carry one (head-lamps, badges, ...), or to a paint/shader hash the
+/// texture table won't contain (the body), which the renderer treats as untextured.
+fn first_material_hash(data: &[u8]) -> Option<AssetHash> {
+    let mut r = ByteReader::new(data);
+    match r.u32_le() {
+        Ok(0) => None,
+        Ok(h) => Some(AssetHash(h)),
+        Err(_) => None,
+    }
 }
 
 fn classify_role(name: &str) -> PartRole {

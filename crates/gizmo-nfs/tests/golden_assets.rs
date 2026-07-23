@@ -95,3 +95,28 @@ fn geometry_parser_extracts_valid_parts() {
     let len = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt();
     assert!((len - 1.0).abs() < 0.02, "normal not unit length: {len}");
 }
+
+/// The TPK parser on a real car: the known descriptor count, an RGBA8 pixel pool assembled
+/// from the JDLZ blocks, and every descriptor carrying the RGBA8888 format code with an
+/// in-pool origin.
+#[test]
+fn tpk_parser_assembles_rgba_pool() {
+    let Some(root) = root() else {
+        eprintln!("NFSU2_ROOT unset — skipping TPK parser test");
+        return;
+    };
+    let bytes = std::fs::read(root.join("CARS/240SX/TEXTURES.BIN")).expect("read TEXTURES.BIN");
+    let tpk = gizmo_nfs::texture::Tpk::parse(&bytes).expect("parse TPK");
+
+    // 240SX ships 73 textures; the pixel pool decompresses to a few MB of RGBA8.
+    assert_eq!(tpk.entries.len(), 73, "descriptor count");
+    assert!(tpk.pool.len() > 1_000_000, "pool should be several MB, got {}", tpk.pool.len());
+    assert_eq!(tpk.pool.len() % gizmo_nfs::texture::BYTES_PER_PIXEL, 0, "pool is whole RGBA pixels");
+
+    for e in &tpk.entries {
+        assert_eq!(e.format_code, gizmo_nfs::texture::FORMAT_RGBA8, "every texture is RGBA8888");
+        let (x, _y) = e.origin();
+        assert!(x < gizmo_nfs::texture::PAGE_WIDTH, "origin x within page width");
+        assert!((e.pool_offset as usize) < tpk.pool.len(), "pool_offset within the pool");
+    }
+}

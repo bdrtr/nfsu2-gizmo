@@ -54,6 +54,9 @@ cargo run --release -p nfsu2 --bin nfs_race
 
 ## Status
 
-Complete NFSU2 → Gizmo **geometry** pipeline (M1–M3 done). The one open blocker for a
-visually faithful car is the **TPK texture format** (data at the descriptor offset is not
-raw DXT; no public byte-level spec found). See the parser's `README.md` for format details.
+Complete NFSU2 → Gizmo **geometry** pipeline (M1–M3 done). The **TPK texture format** is now
+largely decoded: the pixel pool is **JDLZ-compressed RGBA8** (not DXT) laid out in 512-wide
+pages, and the 24-byte descriptors (hash + pool offset → x,y + format) are parsed by
+`gizmo-nfs::texture`. Remaining before textured cars: per-texture **width/height** (not in any
+identified descriptor field yet) and wiring textures onto the car's materials. See the
+parser's `README.md` for format details.

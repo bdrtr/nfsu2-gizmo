@@ -3,6 +3,7 @@
 
 use gizmo_nfs::chunk::ChunkNode;
 use gizmo_nfs::compression;
+use gizmo_nfs::texture::Tpk;
 use gizmo_nfs::viv::VivArchive;
 use proptest::prelude::*;
 
@@ -20,6 +21,11 @@ proptest! {
     #[test]
     fn viv_parse_never_panics(data in proptest::collection::vec(any::<u8>(), 0..4096)) {
         let _ = VivArchive::parse(&data);
+    }
+
+    #[test]
+    fn tpk_parse_never_panics(data in proptest::collection::vec(any::<u8>(), 0..4096)) {
+        let _ = Tpk::parse(&data);
     }
 
     // Force a RefPack-looking signature + a plausible small output size so the decoder's

@@ -14,9 +14,10 @@
 //! * [`viv`] — BIGF/VIV archive extraction.
 //! * [`types`] — the engine-agnostic output contract.
 //!
-//! Texture (`TPK`/DXT), geometry (`GEOMETRY.BIN`) and world modules are added in later
-//! phases; several of their exact byte layouts have no public spec and are locked
-//! empirically with the `nfs_dump` example against a legally-owned install.
+//! [`texture`] parses `TPK` (`TEXTURES.BIN`) into an RGBA8 pixel pool + per-texture
+//! descriptors; [`geometry`] parses `GEOMETRY.BIN`. World modules come later. Several of
+//! these byte layouts have no public spec and were locked empirically with the `nfs_dump`
+//! example against a legally-owned install.
 //!
 //! # Safety / robustness
 //! Input is always untrusted. Every read is bounds-checked and returns an [`NfsError`];
@@ -34,11 +35,13 @@ pub mod error;
 pub mod fourcc;
 pub mod geometry;
 pub mod reader;
+pub mod texture;
 pub mod types;
 pub mod viv;
 
 pub use error::{NfsError, NfsResult};
 pub use geometry::parse_geometry;
+pub use texture::{Tpk, TpkEntry};
 pub use types::{
     AssetHash, LodLevel, Mat4, NfsCar, NfsMeshPart, NfsTexture, PartRole, PixelFormat, TexFormat,
 };
@@ -58,6 +61,7 @@ pub mod prelude {
     pub use crate::chunk::{BinSectionHeader, ChunkKind, ChunkNode, Visit};
     pub use crate::compression::{decompress, detect, Codec};
     pub use crate::fourcc::FourCc;
+    pub use crate::texture::{Tpk, TpkEntry};
     pub use crate::types::{AssetHash, NfsCar, NfsMeshPart, NfsTexture};
     pub use crate::viv::VivArchive;
     pub use crate::{NfsError, NfsResult};
