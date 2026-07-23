@@ -6,7 +6,7 @@
 //! ([`build_car_visuals`]) turning a [`PbrLook`] into an engine `Material`, so texture and
 //! bind-group setup stays in the app while the assembly stays here and testable in spirit.
 
-use crate::mesh::{bbox, build_box, build_mesh};
+use crate::mesh::{bbox, build_box, build_mesh, build_mesh_inflated};
 use crate::part_groups::{group_of, select_stock_car, Grp};
 use gizmo::prelude::*;
 use gizmo_nfs::{AssetHash, NfsMeshPart, NfsTexture, Tpk};
@@ -235,7 +235,17 @@ where
     for (group, label, look) in body_palette(paint) {
         let parts: Vec<&NfsMeshPart> =
             untextured.iter().copied().filter(|p| group_of(&p.name) == group).collect();
-        if let Some(mesh) = build_mesh(device, &parts, center, label) {
+        // Sink the shared BASE shell a few mm behind the kit body panels: the two model the
+        // same greenhouse belt near-coplanar and would otherwise z-fight into flickering
+        // slivers along the roof/windshield edge.
+        let mesh = build_mesh_inflated(
+            device,
+            &parts,
+            center,
+            |p| if p.name.contains("_BASE") { -0.006 } else { 0.0 },
+            label,
+        );
+        if let Some(mesh) = mesh {
             groups.push(GroupVisual { group, mesh, material: make_material(look) });
         }
     }

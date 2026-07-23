@@ -69,9 +69,25 @@ pub fn build_box(device: &wgpu::Device, min: Vec3, max: Vec3, label: &str) -> Me
 /// `off` (usually the car centre). Returns `None` if the parts contribute no triangles.
 #[must_use]
 pub fn build_mesh(device: &wgpu::Device, parts: &[&NfsMeshPart], off: Vec3, label: &str) -> Option<Mesh> {
+    build_mesh_inflated(device, parts, off, |_| 0.0, label)
+}
+
+/// Like [`build_mesh`], but each part's vertices are pushed along their normals by
+/// `inflate(part)` metres. A small negative inflation on one of two near-coplanar shells
+/// (e.g. a car's shared `BASE` body under a kit panel) sinks it behind the other and breaks
+/// the depth-fighting they would otherwise flicker into.
+#[must_use]
+pub fn build_mesh_inflated(
+    device: &wgpu::Device,
+    parts: &[&NfsMeshPart],
+    off: Vec3,
+    inflate: impl Fn(&NfsMeshPart) -> f32,
+    label: &str,
+) -> Option<Mesh> {
     let mut verts = Vec::new();
     for p in parts {
         let has_n = !p.normals.is_empty();
+        let push = inflate(p);
         for &idx in &p.indices {
             let i = idx as usize;
             let Some(&pos) = p.positions.get(i) else { continue };
@@ -80,8 +96,8 @@ pub fn build_mesh(device: &wgpu::Device, parts: &[&NfsMeshPart], off: Vec3, labe
             } else {
                 [0.0, 0.0, 1.0]
             };
-            let gp = remap(pos) - off;
             let gn = remap(n);
+            let gp = remap(pos) - off + gn * push;
             verts.push(Vertex {
                 position: [gp.x, gp.y, gp.z],
                 normal: [gn.x, gn.y, gn.z],
