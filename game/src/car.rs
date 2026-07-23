@@ -164,7 +164,15 @@ fn texture_for_name<'a>(part_name: &str, tpk: &'a Tpk) -> Option<&'a NfsTexture>
         .values()
         .map(|t| (common_prefix_len(part_name, &t.name), t))
         .filter(|(cpl, _)| *cpl >= NAME_MATCH_MIN)
-        .max_by_key(|(cpl, _)| *cpl)
+        // Break prefix-length ties deterministically. NFSU2 ships lens textures in pairs that
+        // share one DebugName (the two `240SX_KIT00_BRAKELIGHT_` maps, or `_HEADLIGHT_G`/`_O`)
+        // alongside `_MASK` alpha companions; plain `max_by_key(cpl)` otherwise let `HashMap`
+        // iteration order pick one at random per run. Prefer a non-`_MASK` map, then the larger
+        // image (the detailed diffuse over its lower-res companion), then the lowest hash so the
+        // pick is fully stable across runs.
+        .max_by_key(|(cpl, t)| {
+            (*cpl, !t.name.ends_with("_MASK"), t.width * t.height, std::cmp::Reverse(t.hash.0))
+        })
         .map(|(_, t)| t)
 }
 
