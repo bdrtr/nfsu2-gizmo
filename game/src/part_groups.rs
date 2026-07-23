@@ -118,22 +118,18 @@ pub fn component_key(name: &str) -> &str {
 #[must_use]
 pub fn select_stock_car(all: &[NfsMeshPart]) -> Vec<&NfsMeshPart> {
     use std::collections::HashMap;
-    // When the car ships a KIT00 body, `BASE` is a redundant inner / no-kit shell: on some
-    // cars it is a full second body (harmless overlap), on others the low-poly interior/chassis
-    // structure that pokes out through the kit skin as jagged z-fighting slivers. The KIT00 body
-    // is the complete one either way, so drop BASE whenever a KIT00 body is present. Cars with no
-    // KIT00 body keep BASE (it is then their only body).
-    let has_kit_body = all.iter().any(|p| p.name.contains("_KIT00_BODY"));
     let mut best: HashMap<&str, &NfsMeshPart> = HashMap::new();
     for p in all {
-        // The showroom set is kit slot 00 (or the shared BASE body if there is no KIT00 body),
-        // plus the window glass (on un-kitted `DECAL_*_WINDOW` parts, so admit it explicitly).
-        let is_default = (p.name.contains("_BASE") && !has_kit_body)
+        // The showroom set is the shared BASE part (which carries the greenhouse: glass,
+        // window masks, interior and trim) plus kit slot 00, plus the window glass on any
+        // un-kitted `DECAL_*_WINDOW` parts. BASE is kept — its materials are routed per-shader,
+        // so its interior/trim reads correctly instead of as a bright painted shell.
+        let is_default = p.name.contains("_BASE")
             || p.name.contains("_KIT00")
             || (p.name.contains("DECAL") && p.name.contains("WINDOW"));
-        // Drop the second-shell duplicates that z-fight the parts they sit on: TRUNK_AUDIO
-        // over TRUNK, and the separate ROOF / FULLROOF panels over the BASE roof they overlay.
-        let is_duplicate_shell = p.name.contains("TRUNK_AUDIO") || p.name.contains("ROOF");
+        // Drop only the TRUNK_AUDIO second shell that z-fights the TRUNK it sits on. (ROOF is
+        // kept — it is the only roof; closing the cabin is what stops the interior spilling out.)
+        let is_duplicate_shell = p.name.contains("TRUNK_AUDIO");
         if !is_default || is_duplicate_shell || group_of(&p.name) == Grp::Skip {
             continue;
         }

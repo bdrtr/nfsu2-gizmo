@@ -6,7 +6,7 @@
 //! ([`build_car_visuals`]) turning a [`PbrLook`] into an engine `Material`, so texture and
 //! bind-group setup stays in the app while the assembly stays here and testable in spirit.
 
-use crate::mesh::{bbox, build_box, build_mesh, build_mesh_items};
+use crate::mesh::{bbox, build_mesh, build_mesh_items};
 use crate::part_groups::{group_of, select_stock_car, Grp};
 use gizmo::prelude::*;
 use gizmo_nfs::{AssetHash, NfsMeshPart, NfsTexture, Tpk};
@@ -36,7 +36,7 @@ impl PbrLook {
 pub fn body_palette(paint: [f32; 3]) -> [(Grp, &'static str, PbrLook); 7] {
     [
         (Grp::Paint, "nfs_paint", PbrLook::new(paint, 0.30, 0.55)),
-        (Grp::Glass, "nfs_glass", PbrLook::new([0.02, 0.03, 0.05], 0.08, 0.25)),
+        (Grp::Glass, "nfs_glass", PbrLook::new([0.03, 0.04, 0.06], 0.30, 0.0)),
         (Grp::Chrome, "nfs_chrome", PbrLook::new([0.80, 0.82, 0.85], 0.12, 1.00)),
         (Grp::Headlight, "nfs_head", PbrLook::new([0.90, 0.92, 0.96], 0.10, 0.30)),
         (Grp::Brakelight, "nfs_brake", PbrLook::new([0.72, 0.03, 0.03], 0.25, 0.10)),
@@ -160,6 +160,43 @@ pub struct TexturedPart {
     pub metallic: f32,
 }
 
+/// NFSU2 shares one shader set across every car, so a material's shader hash (`0x00134013`)
+/// names its *type* — the reliable signal for how to render a run, independent of the
+/// car-specific texture it happens to reference. Hashes are `h = 0xFFFF_FFFF; for b in
+/// NAME.bytes() { h = h.wrapping_mul(33).wrapping_add(b) }` of the uppercase shader name.
+mod shader {
+    pub const CARSKIN: u32 = 0xd6d6_080a; // painted body panels
+    pub const WINDSHIELD: u32 = 0x471a_1dca; // transparent glass (windscreen + windows)
+    pub const WINDOWMASK: u32 = 0x3ed7_0c43; // opaque black window frame / frit
+    pub const INTERIOR: u32 = 0x2787_edab; // seats / dash (behind the glass)
+    pub const CHROME: u32 = 0x5494_9afd; // bright metal trim + mirrors
+    pub const DULLPLASTIC: u32 = 0x0fed_ee40; // matte black plastic
+    pub const MOLDINGS: u32 = 0x12c9_453c; // dark rubber/plastic mouldings
+    pub const PLAINNOTHING: u32 = 0x010c_b64a; // unshaded filler
+    pub const BOTTOM: u32 = 0x52bf_4c34; // underbody / rocker
+    pub const GRILL: u32 = 0x02dd_dad9; // dark front grille
+}
+
+/// Map a shader hash to the flat material group it should render as, for the runs whose look
+/// is decided by shader alone (glass, chrome, and the dark interior/trim family that would
+/// otherwise paint bright). Returns `None` for shaders that instead carry a texture (head/
+/// brake lights, tyres, badging) or that we don't recognise — those fall back to texture/name.
+fn shader_group(shader: u32) -> Option<Grp> {
+    match shader {
+        shader::CARSKIN => Some(Grp::Paint),
+        shader::WINDSHIELD => Some(Grp::Glass),
+        shader::CHROME => Some(Grp::Chrome),
+        shader::INTERIOR
+        | shader::WINDOWMASK
+        | shader::DULLPLASTIC
+        | shader::MOLDINGS
+        | shader::PLAINNOTHING
+        | shader::BOTTOM
+        | shader::GRILL => Some(Grp::Trim),
+        _ => None,
+    }
+}
+
 /// Minimum shared-prefix length for a part name to match a texture's DebugName — long
 /// enough to reach past the shared `CAR_KIT00_` prefix into the component word.
 const NAME_MATCH_MIN: usize = 16;
@@ -228,6 +265,9 @@ where
     F: Fn(PbrLook) -> Material,
 {
     let stock = select_stock_car(all);
+    // When a KIT00 body provides the outer paint, BASE's painted panels are inner structure
+    // (firewall, inner fenders) or a redundant shell that only pokes out through the skin.
+    let has_kit_body = all.iter().any(|p| p.name.contains("_KIT00_BODY"));
     let body_like: Vec<&NfsMeshPart> =
         stock.iter().copied().filter(|p| group_of(&p.name) != Grp::Wheel).collect();
     let paint_parts: Vec<&NfsMeshPart> =
@@ -256,10 +296,24 @@ where
             }
             continue;
         }
+        let base_paint = has_kit_body && p.name.contains("_BASE");
         for m in &p.materials {
             let Some(slice) = p.indices.get(m.index_offset..m.index_offset + m.index_count) else {
                 continue;
             };
+            // Skip BASE's painted runs when the kit body supplies the paint: they are inner
+            // structure that only shows as jagged slivers poking through the outer skin.
+            if base_paint && m.shader.0 == shader::CARSKIN {
+                continue;
+            }
+            // The shader decides the run's type. Glass/chrome/interior/trim/paint runs render
+            // as their flat group — this is what turns BASE's greenhouse (glass, window frames,
+            // seats, mouldings) into proper dark glass + trim instead of a bright painted mess.
+            if let Some(g) = shader_group(m.shader.0) {
+                by_group.entry(g).or_default().push((p, slice));
+                continue;
+            }
+            // Everything else (head/brake-light lenses, tyres, badging) carries its own texture.
             match tpk.and_then(|t| t.texture(m.hash)).map(|_| m.hash) {
                 Some(h) => by_texture.entry(h).or_default().push((p, slice)),
                 None => by_group.entry(grp).or_default().push((p, slice)),
@@ -315,18 +369,9 @@ where
         }
     }
 
-    // A dark cabin filler occupying the greenhouse cavity (recentered frame: origin = car
-    // centre, +Y = up). Only for hollow shells: skip it when the car models a real interior
-    // (its geometry is textured above), which the heuristic box would otherwise poke through.
-    let has_interior = textured.iter().any(|tp| tp.texture.name.contains("INTERIOR"));
-    let interior = (!has_interior).then(|| {
-        build_box(
-            device,
-            Vec3::new(-width * 0.27, -height * 0.05, -length * 0.14),
-            Vec3::new(width * 0.27, height * 0.34, length * 0.13),
-            "nfs_interior",
-        )
-    });
+    // No cabin filler: BASE now supplies the real interior geometry (routed per-shader) and the
+    // windscreen glass covers the openings, so the old hollow-shell box is obsolete.
+    let interior: Option<Mesh> = None;
 
     CarVisuals { groups, textured, center, width, height, length, wheel, wheel_fit, interior }
 }
