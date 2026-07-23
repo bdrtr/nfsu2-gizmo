@@ -98,7 +98,13 @@ impl Tpk {
     /// supported. Returns an error only if the descriptor chunk is absent or malformed; an
     /// individual texture that fails to decode is skipped, not fatal.
     pub fn parse(bytes: &[u8]) -> NfsResult<Tpk> {
-        let roots = ChunkNode::parse(bytes)?;
+        // Only the directory (near the file start) is needed here — the pixel blobs are read
+        // later by absolute offset, never by walking. Tool-compiled TPKs (e.g. nfsu360's
+        // Texture Compiler) pack raw compressed blocks after the directory with no wrapping
+        // chunk, so a strict full-file walk misreads them and overruns; walk tolerantly so the
+        // clean directory still yields the descriptor table.
+        let opts = crate::chunk::WalkOptions { stop_on_overrun: true, ..Default::default() };
+        let roots = ChunkNode::parse_with(bytes, opts)?;
         let desc = find_leaf(&roots, DESCRIPTORS, bytes)
             .ok_or(NfsError::CorruptArchive { detail: "TPK missing descriptor chunk 0x33310003" })?;
         let entries = parse_descriptors(desc);

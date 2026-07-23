@@ -89,11 +89,17 @@ pub struct WalkOptions {
     /// When true, trailing bytes too short to form a header (< 8) are an error; when
     /// false they are tolerated (the common real-world case, due to alignment padding).
     pub strict: bool,
+    /// When true, a chunk whose declared size overruns its parent ends the walk of that
+    /// level gracefully (the chunks already parsed are kept) instead of raising
+    /// [`NfsError::ChunkOverrun`]. Off by default. Used to read files whose header is a clean
+    /// chunk tree but whose trailing payload region is not (e.g. tool-compiled TPKs that pack
+    /// raw compressed blocks after the directory, which a strict walk would misread as chunks).
+    pub stop_on_overrun: bool,
 }
 
 impl Default for WalkOptions {
     fn default() -> Self {
-        Self { max_depth: DEFAULT_MAX_DEPTH, strict: false }
+        Self { max_depth: DEFAULT_MAX_DEPTH, strict: false, stop_on_overrun: false }
     }
 }
 
@@ -142,6 +148,9 @@ where
         let header = BinSectionHeader { id, size };
         let size_usize = size as usize;
         if size_usize > r.remaining() {
+            if opts.stop_on_overrun {
+                break;
+            }
             return Err(NfsError::ChunkOverrun {
                 offset: start,
                 size,
@@ -259,6 +268,9 @@ fn parse_nodes(buf: &[u8], base: usize, depth: u32, opts: WalkOptions) -> NfsRes
         let header = BinSectionHeader { id, size };
         let size_usize = size as usize;
         if size_usize > r.remaining() {
+            if opts.stop_on_overrun {
+                break;
+            }
             return Err(NfsError::ChunkOverrun {
                 offset: base + local_start,
                 size,
@@ -320,7 +332,7 @@ pub fn dump(buf: &[u8], out: &mut impl std::fmt::Write, opts: DumpOptions) -> Nf
     // *print*, not how deep we parse.
     let nodes = ChunkNode::parse_with(
         buf,
-        WalkOptions { max_depth: DEFAULT_MAX_DEPTH, strict: false },
+        WalkOptions { max_depth: DEFAULT_MAX_DEPTH, strict: false, stop_on_overrun: false },
     )?;
     for node in &nodes {
         dump_node(node, buf, out, 0, opts)?;
@@ -462,13 +474,34 @@ mod tests {
     }
 
     #[test]
+    fn stop_on_overrun_keeps_clean_prefix() {
+        // Mirror a tool-compiled TPK: a root container whose directory (a clean leaf) is
+        // followed by a raw payload region that a strict walk misreads as an oversized chunk.
+        let mut inner = chunk(0x0000_0011, &[1, 2, 3, 4]); // the "descriptor" leaf
+        inner.extend_from_slice(&0x0000_0099u32.to_le_bytes());
+        inner.extend_from_slice(&0x7fff_ffffu32.to_le_bytes()); // absurd size -> overrun
+        inner.extend_from_slice(&[0xDE, 0xAD]);
+        let buf = chunk(0x8000_0010, &inner);
+
+        // Default: the overrun is fatal and loses the whole tree.
+        assert!(matches!(ChunkNode::parse(&buf), Err(NfsError::ChunkOverrun { .. })));
+
+        // Tolerant: the clean prefix (and the descriptor leaf inside it) survives.
+        let opts = WalkOptions { stop_on_overrun: true, ..WalkOptions::default() };
+        let roots = ChunkNode::parse_with(&buf, opts).unwrap();
+        assert_eq!(roots.len(), 1);
+        assert_eq!(roots[0].header.id, 0x8000_0010);
+        assert!(roots[0].find(0x0000_0011).is_some(), "the clean leaf before the bad region is kept");
+    }
+
+    #[test]
     fn depth_bomb_is_capped() {
         // Deeply nested containers, each wrapping the next, exceeding a tiny max_depth.
         let mut payload = chunk(0x0000_0001, &[0xFF]);
         for _ in 0..10 {
             payload = chunk(0x8000_0001, &payload);
         }
-        let opts = WalkOptions { max_depth: 3, strict: false };
+        let opts = WalkOptions { max_depth: 3, strict: false, stop_on_overrun: false };
         assert!(matches!(
             ChunkNode::parse_with(&payload, opts),
             Err(NfsError::MaxDepthExceeded { max_depth: 3 })
