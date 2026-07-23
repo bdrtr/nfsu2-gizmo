@@ -1,0 +1,34 @@
+[package]
+name = "gizmo-nfs"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+description = "Parser for Need for Speed: Underground 2 (2004) asset files (BIGF/VIV archives, RefPack/QFS + JDLZ compression, chunked containers) into engine-agnostic CPU data."
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+keywords = ["nfs", "reverse-engineering", "assets", "parser", "gamedev"]
+categories = ["parser-implementations", "game-development"]
+
+[package.metadata.docs.rs]
+all-features = true
+
+[dependencies]
+# Optional: derive serde on the engine-agnostic output types (caching parsed cars,
+# RON/JSON dumps during reverse-engineering). Off by default to keep the crate lean.
+serde = { version = "1", features = ["derive"], optional = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+
+[features]
+default = []
+# Derive Serialize/Deserialize on all `types::*` output structs.
+serde = ["dep:serde"]
+# Compile the read-only `nfs_dump` reverse-engineering CLI example.
+tools = []
+
+[[example]]
+name = "nfs_dump"
+path = "examples/nfs_dump.rs"
+required-features = ["tools"]

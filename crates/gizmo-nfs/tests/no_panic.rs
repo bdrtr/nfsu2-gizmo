@@ -1,0 +1,33 @@
+//! Property tests: the untrusted-input parsers must never panic, hang, or over-allocate
+//! on arbitrary or adversarial byte streams — they either succeed or return an `NfsError`.
+
+use gizmo_nfs::chunk::ChunkNode;
+use gizmo_nfs::compression;
+use gizmo_nfs::viv::VivArchive;
+use proptest::prelude::*;
+
+proptest! {
+    #[test]
+    fn decompress_never_panics(data in proptest::collection::vec(any::<u8>(), 0..4096)) {
+        let _ = compression::decompress(&data);
+    }
+
+    #[test]
+    fn chunk_parse_never_panics(data in proptest::collection::vec(any::<u8>(), 0..4096)) {
+        let _ = ChunkNode::parse(&data);
+    }
+
+    #[test]
+    fn viv_parse_never_panics(data in proptest::collection::vec(any::<u8>(), 0..4096)) {
+        let _ = VivArchive::parse(&data);
+    }
+
+    // Force a RefPack-looking signature + a plausible small output size so the decoder's
+    // opcode loop and its bounds guards get exercised on garbage payloads.
+    #[test]
+    fn refpack_signed_never_panics(mut data in proptest::collection::vec(any::<u8>(), 5..4096)) {
+        data[0] = 0x10;
+        data[1] = 0xFB;
+        let _ = compression::decompress(&data);
+    }
+}

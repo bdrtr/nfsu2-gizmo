@@ -1,0 +1,22 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/gizmo-nfs",
+    "game",
+]
+
+# Ortak paket metadatası — gizmo-nfs bunları `*.workspace = true` ile devralır.
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["Bedir"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/bdrtr/nfsu2-gizmo"
+
+[workspace.dependencies]
+proptest = "1"
+
+# Fiziksel demoların çalışma-zamanı performansı için: release'de tam optimizasyon.
+# (Debug build broad/narrow-phase'de ciddi CPU darboğazına girer — Gizmo ile aynı sebep.)
+[profile.release]
+opt-level = 3

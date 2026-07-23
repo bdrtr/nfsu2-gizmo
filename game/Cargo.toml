@@ -1,0 +1,28 @@
+[package]
+publish = false
+name = "nfsu2"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+default-run = "nfs_drive"
+
+[dependencies]
+# Gizmo motoru — YEREL PATH bağımlılığı (kardeş checkout). Her zaman güncel yerel
+# motoru kullanır (Collider::trimesh + gelecek narrowphase düzeltmeleri dahil), push
+# gerekmez. Portatif değildir: iki repo yan yana checkout'lu olmalı.
+gizmo = { package = "gizmo-engine", path = "../../Gizmo-engine/crates/gizmo", features = ["audio", "scripting", "scene", "editor", "render", "window", "ui"] }
+# Saf NFSU2 asset parser'ı (motordan bağımsız).
+gizmo-nfs = { path = "../crates/gizmo-nfs" }
+
+[[bin]]
+name = "nfs_viewer"
+path = "src/bin/nfs_viewer.rs"
+
+[[bin]]
+name = "nfs_drive"
+path = "src/bin/nfs_drive.rs"
+
+[[bin]]
+name = "nfs_race"
+path = "src/bin/nfs_race.rs"

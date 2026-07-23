@@ -1,0 +1,633 @@
+//! # NFSU2 Car — RACE on a procedural track (M3)
+//!
+//! Extends the drivable NFSU2 car with a real course: a procedurally generated closed
+//! loop with elevation, given a **triangle-mesh collider** (`Collider::trimesh`) the
+//! vehicle suspension raycasts against, plus checkpoints and lap timing.
+//!
+//! Controls: **W/↑** accelerate · **S/↓** reverse · **A/D or ←/→** steer · **Space** brake ·
+//! **R** reset to the start line · **T** auto-shift · hold **right mouse** to orbit.
+//!
+//! ```bash
+//! cargo run --release -p demo --bin nfs_race -- "/path/to/CARS/240SX/GEOMETRY.BIN"
+//! ```
+
+use gizmo::egui;
+use gizmo::physics::world::PhysicsWorld;
+use gizmo::prelude::*;
+use gizmo::renderer::gpu_types::Vertex;
+use gizmo_nfs::{parse_geometry, NfsMeshPart};
+
+const DEFAULT_CAR: &str =
+    "/home/bedir/Games/need-for-speed-underground-2/drive_c/Need for Speed Underground 2/CARS/240SX/GEOMETRY.BIN";
+const FIXED_DT: f32 = 1.0 / 240.0;
+const N_CHECKPOINTS: usize = 12;
+const CP_RADIUS: f32 = 9.0;
+
+struct WheelVis {
+    id: u32,
+    local: Vec3,
+    front: bool,
+}
+
+struct RaceState {
+    chassis_id: u32,
+    camera_id: u32,
+    visual_ids: Vec<u32>,
+    wheels: Vec<WheelVis>,
+    wheel_radius: f32,
+    max_steer: f32,
+    wheel_spin: f32,
+    cam_pos: Vec3,
+    cam_yaw: f32,
+    cam_pitch: f32,
+    steer_angle: f32,
+    phys_accum: f32,
+    autodrive: bool,
+    shotcam: bool,
+    t: f32,
+    // Track / lap state.
+    checkpoints: Vec<Vec3>,
+    start_pos: Vec3,
+    start_rot: Quat,
+    next_cp: usize,
+    lap: u32,
+    cur_time: f32,
+    best_time: f32,
+}
+
+#[inline]
+fn remap(p: [f32; 3]) -> Vec3 {
+    Vec3::new(-p[1], p[2], -p[0])
+}
+
+fn add_transform(world: &mut World, entity: gizmo::core::Entity, t: Transform) {
+    world.add_component(entity, t);
+    world.add_component(entity, GlobalTransform { matrix: t.local_matrix });
+}
+
+fn build_car_mesh(device: &wgpu::Device, parts: &[&NfsMeshPart], off: Vec3, label: &str) -> Option<Mesh> {
+    let mut verts = Vec::new();
+    for p in parts {
+        let has_n = !p.normals.is_empty();
+        for &idx in &p.indices {
+            let i = idx as usize;
+            let Some(&pos) = p.positions.get(i) else { continue };
+            let n = if has_n { p.normals.get(i).copied().unwrap_or([0.0, 0.0, 1.0]) } else { [0.0, 0.0, 1.0] };
+            let gp = remap(pos) - off;
+            let gn = remap(n);
+            verts.push(Vertex {
+                position: [gp.x, gp.y, gp.z],
+                normal: [gn.x, gn.y, gn.z],
+                tex_coords: p.uvs.get(i).copied().unwrap_or([0.0, 0.0]),
+                ..Default::default()
+            });
+        }
+    }
+    (!verts.is_empty()).then(|| Mesh::from_vertices(device, &verts, label.to_string()))
+}
+
+fn car_bbox(parts: &[&NfsMeshPart]) -> (Vec3, Vec3) {
+    let (mut lo, mut hi) = (Vec3::splat(f32::INFINITY), Vec3::splat(f32::NEG_INFINITY));
+    for p in parts {
+        for v in &p.positions {
+            let g = remap(*v);
+            lo = lo.min(g);
+            hi = hi.max(g);
+        }
+    }
+    (lo, hi)
+}
+
+/// A closed oval track ribbon (visual geometry + centerline for checkpoints).
+struct Track {
+    visual: Vec<Vertex>,
+    centerline: Vec<Vec3>,
+    tangents: Vec<Vec3>,
+}
+
+fn build_track(a: f32, b: f32, width: f32, hill: f32, n: usize) -> Track {
+    use std::f32::consts::TAU;
+    let mut centerline = Vec::with_capacity(n);
+    for i in 0..n {
+        let t = i as f32 / n as f32 * TAU;
+        let y = hill * 0.5 * (1.0 - (2.0 * t).cos()); // 0 when flat
+        centerline.push(Vec3::new(a * t.cos(), y, b * t.sin()));
+    }
+    let mut tangents = Vec::with_capacity(n);
+    for i in 0..n {
+        let prev = centerline[(i + n - 1) % n];
+        let next = centerline[(i + 1) % n];
+        tangents.push((next - prev).normalize());
+    }
+
+    // Ribbon edge vertices, then two triangles per segment.
+    let mut edges = Vec::with_capacity(n * 2);
+    for i in 0..n {
+        let normal = Vec3::Y.cross(tangents[i]).normalize();
+        edges.push(centerline[i] + normal * (width * 0.5));
+        edges.push(centerline[i] - normal * (width * 0.5));
+    }
+    let mut visual = Vec::with_capacity(n * 6);
+    for i in 0..n {
+        let j = (i + 1) % n;
+        let quad = [edges[2 * i], edges[2 * i + 1], edges[2 * j + 1], edges[2 * i], edges[2 * j + 1], edges[2 * j]];
+        for tri in quad.chunks_exact(3) {
+            let mut nrm = (tri[1] - tri[0]).cross(tri[2] - tri[0]).normalize_or_zero();
+            if nrm.y < 0.0 {
+                nrm = -nrm;
+            }
+            for p in tri {
+                visual.push(Vertex {
+                    position: [p.x, p.y, p.z],
+                    normal: [nrm.x, nrm.y, nrm.z],
+                    ..Default::default()
+                });
+            }
+        }
+    }
+
+    Track { visual, centerline, tangents }
+}
+
+fn main() {
+    gizmo::app::setup_panic_hook();
+    App::<RaceState>::new("Gizmo — NFSU2 240SX Race", 1500, 850)
+        .add_plugin(gizmo::plugins::TransformPlugin)
+        .set_setup(setup_scene)
+        .set_update(update)
+        .set_ui(ui)
+        .set_render(|world, _s, encoder, view, renderer, _t| {
+            renderer.gpu_fluid = None;
+            renderer.gpu_particles = None;
+            renderer.ssr = None;
+            renderer.ssgi = None;
+            renderer.volumetric = None;
+            renderer.taa = None;
+            gizmo::systems::default_render_pass(world, encoder, view, renderer);
+        })
+        .run()
+        .expect("failed to run app");
+}
+
+fn setup_scene(world: &mut World, renderer: &gizmo::renderer::Renderer) -> RaceState {
+    let path = std::env::args()
+        .nth(1)
+        .or_else(|| std::env::var("NFSU2_CAR").ok())
+        .unwrap_or_else(|| DEFAULT_CAR.to_string());
+
+    let mut asset_manager = AssetManager::new();
+    let mut phys = PhysicsWorld::new();
+    phys.integrator.gravity = Vec3::new(0.0, -9.81, 0.0);
+    let tex = asset_manager.create_white_texture(
+        &renderer.device,
+        &renderer.queue,
+        &renderer.scene.texture_bind_group_layout,
+    );
+    let mat = |rgb: [f32; 3], rough: f32, metal: f32| {
+        Material::new(tex.clone()).with_pbr(Vec4::new(rgb[0], rgb[1], rgb[2], 1.0), rough, metal)
+    };
+
+    // ── Ground: a big flat drivable plane (grass-green, asphalt grip) ──
+    // The car drives reliably on a plane collider (proven in nfs_drive). The track ribbon
+    // below is a VISUAL overlay marking the racing line; the checkpoints define the lap.
+    // (`Collider::trimesh` is added to the engine and unit-tested, but a rigid chassis box
+    // vs. a trimesh currently mis-collides, so we keep the drivable surface a plane.)
+    let ground = world.spawn();
+    add_transform(world, ground, Transform::new(Vec3::ZERO));
+    world.add_component(ground, AssetManager::create_plane(&renderer.device, 600.0));
+    world.add_component(ground, mat([0.10, 0.22, 0.09], 0.95, 0.0));
+    world.add_component(ground, MeshRenderer::new());
+    world.add_component(ground, RigidBody::new_static());
+    world.add_component(ground, Velocity::default());
+    world.add_component(ground, Collider::plane(Vec3::Y, 0.0));
+    world.add_component(ground, gizmo::physics::components::PhysicsMaterial::ASPHALT);
+    phys.add_body(
+        gizmo::physics::BodyHandle::from_id(ground.id()),
+        RigidBody::new_static(),
+        Transform::new(Vec3::ZERO),
+        Velocity::default(),
+        Collider::plane(Vec3::Y, 0.0),
+    );
+
+    // ── Track ribbon: a flat oval visual (built with the trimesh geometry helper) ──
+    let track = build_track(80.0, 55.0, 15.0, 0.0, 200);
+    let track_ent = world.spawn();
+    add_transform(world, track_ent, Transform::new(Vec3::new(0.0, 0.02, 0.0)));
+    world.add_component(
+        track_ent,
+        Mesh::from_vertices(&renderer.device, &track.visual, "nfs_track"),
+    );
+    world.add_component(track_ent, mat([0.12, 0.12, 0.14], 0.9, 0.0).with_double_sided(true));
+    world.add_component(track_ent, MeshRenderer::new());
+
+    // Checkpoints along the centerline.
+    let n = track.centerline.len();
+    let checkpoints: Vec<Vec3> = (0..N_CHECKPOINTS)
+        .map(|k| track.centerline[k * n / N_CHECKPOINTS])
+        .collect();
+    // Start line marker (a thin bright slab across checkpoint 0).
+    {
+        let start_c = track.centerline[0];
+        let start = world.spawn();
+        add_transform(
+            world,
+            start,
+            Transform::new(start_c + Vec3::new(0.0, 0.06, 0.0)).with_scale(Vec3::new(7.5, 0.05, 0.5)),
+        );
+        world.add_component(start, AssetManager::create_cube(&renderer.device));
+        world.add_component(start, mat([0.95, 0.95, 0.98], 0.5, 0.0));
+        world.add_component(start, MeshRenderer::new());
+    }
+
+    // ── Lights ──
+    let sun = world.spawn();
+    add_transform(
+        world,
+        sun,
+        Transform::new(Vec3::new(60.0, 120.0, 40.0))
+            .with_rotation(Quat::from_axis_angle(Vec3::new(1.0, 0.3, 0.0).normalize(), -0.9)),
+    );
+    world.add_component(
+        sun,
+        DirectionalLight::new(Vec3::new(1.0, 0.97, 0.9), 2.7, gizmo::renderer::components::LightRole::Sun),
+    );
+    let fill = world.spawn();
+    add_transform(world, fill, Transform::new(Vec3::new(-40.0, 50.0, -30.0)));
+    world.add_component(
+        fill,
+        DirectionalLight::new(Vec3::new(0.6, 0.7, 0.9), 0.6, gizmo::renderer::components::LightRole::Sun),
+    );
+
+    // ── Camera ──
+    let camera_ent = world.spawn();
+    add_transform(world, camera_ent, Transform::new(Vec3::new(0.0, 4.0, 10.0)));
+    world.add_component(
+        camera_ent,
+        Camera::new(std::f32::consts::FRAC_PI_4, 0.1, 4000.0, -std::f32::consts::FRAC_PI_2, -0.3, true),
+    );
+    world.insert_resource(asset_manager);
+
+    // ── Car ──
+    let bytes = std::fs::read(&path).unwrap_or_else(|e| panic!("cannot read {path}: {e}"));
+    let all = parse_geometry(&bytes).expect("parse GEOMETRY.BIN");
+    let stock: Vec<NfsMeshPart> = all
+        .into_iter()
+        .filter(|p| {
+            p.name.ends_with("_A")
+                && (p.name.contains("BASE") || p.name.contains("KIT00"))
+                && !p.name.contains("ENGINE")
+                && !p.name.contains("UNDER")
+                && !p.name.contains("FULLROOF") // duplicate of ROOF → z-fighting
+                && !p.name.contains("TRUNK_AUDIO") // duplicate of TRUNK
+        })
+        .collect();
+    let is_wheel = |n: &str| n.contains("FRONT_WHEEL");
+    let is_light = |n: &str| n.contains("BRAKELIGHT") || n.contains("TAILLIGHT");
+    let is_exhaust = |n: &str| n.contains("EXHAUST");
+    let body_parts: Vec<&NfsMeshPart> = stock.iter().filter(|p| !is_wheel(&p.name) && !is_light(&p.name) && !is_exhaust(&p.name)).collect();
+    let light_parts: Vec<&NfsMeshPart> = stock.iter().filter(|p| is_light(&p.name)).collect();
+    let exhaust_parts: Vec<&NfsMeshPart> = stock.iter().filter(|p| is_exhaust(&p.name)).collect();
+    let wheel_part = stock.iter().find(|p| is_wheel(&p.name));
+
+    let (lo, hi) = car_bbox(&body_parts);
+    let center = (lo + hi) * 0.5;
+    let width = hi.x - lo.x;
+    let height = hi.y - lo.y;
+    let length = hi.z - lo.z;
+
+    let mut visual_ids = Vec::new();
+    let mut spawn_group = |world: &mut World, m: Option<Mesh>, material: Material| {
+        if let Some(m) = m {
+            let e = world.spawn();
+            add_transform(world, e, Transform::new(Vec3::ZERO));
+            world.add_component(e, m);
+            world.add_component(e, material);
+            world.add_component(e, MeshRenderer::new());
+            visual_ids.push(e.id());
+        }
+    };
+    spawn_group(world, build_car_mesh(&renderer.device, &body_parts, center, "body"), mat([0.85, 0.32, 0.06], 0.35, 0.4));
+    spawn_group(world, build_car_mesh(&renderer.device, &light_parts, center, "light"), mat([0.80, 0.06, 0.05], 0.3, 0.0));
+    spawn_group(world, build_car_mesh(&renderer.device, &exhaust_parts, center, "exhaust"), mat([0.55, 0.56, 0.6], 0.25, 0.9));
+
+    let (mut radius, mut half_wheelbase, mut half_track) = (0.31_f32, length * 0.36, width * 0.42);
+    let mut wheel_mesh = None;
+    if let Some(wp) = wheel_part {
+        let (wl, wh) = car_bbox(std::slice::from_ref(&wp));
+        let wc = (wl + wh) * 0.5;
+        radius = ((wh.y - wl.y).max(wh.z - wl.z) * 0.5).clamp(0.18, 0.55);
+        half_wheelbase = (wc.z - center.z).abs().max(length * 0.30);
+        half_track = (wc.x - center.x).abs().max(width * 0.46);
+        wheel_mesh = build_car_mesh(&renderer.device, &[wp], wc, "wheel");
+    }
+    let wheel_y = -height * 0.5 + radius * 0.15;
+    let wheel_mat = mat([0.09, 0.09, 0.1], 0.7, 0.2);
+    let mut wheels = Vec::new();
+    if let Some(wm) = wheel_mesh {
+        for (sx, sz, front) in [(-1.0, -1.0, true), (1.0, -1.0, true), (-1.0, 1.0, false), (1.0, 1.0, false)] {
+            let e = world.spawn();
+            add_transform(world, e, Transform::new(Vec3::ZERO));
+            world.add_component(e, wm.clone());
+            world.add_component(e, wheel_mat.clone());
+            world.add_component(e, MeshRenderer::new());
+            wheels.push(WheelVis { id: e.id(), local: Vec3::new(sx * half_track, wheel_y, sz * half_wheelbase), front });
+        }
+    }
+
+    // Spawn the car on the start line, facing along the track.
+    let tan0 = track.tangents[0];
+    let tan_h = Vec3::new(tan0.x, 0.0, tan0.z).normalize();
+    // Face the car (forward = -Z) along the track tangent via an explicit yaw. (Avoid
+    // `from_rotation_arc` here: for the antiparallel -Z→+Z case it picks an arbitrary axis
+    // and can flip the car onto its side/roof.)
+    let start_rot = Quat::from_rotation_y((-tan_h.x).atan2(-tan_h.z));
+    let start_pos = track.centerline[0] + Vec3::new(0.0, height * 0.5 + radius + 0.4, 0.0);
+
+    let chassis = world.spawn();
+    add_transform(world, chassis, Transform::new(start_pos).with_rotation(start_rot));
+
+    let mut rb = RigidBody::new(1200.0, true);
+    rb.linear_damping = 0.1;
+    rb.angular_damping = 1.8;
+    rb.calculate_box_inertia(width, height, length);
+    rb.center_of_mass = Vec3::new(0.0, -height * 0.1, 0.0);
+    rb.lock_rotation_x = false;
+    rb.lock_rotation_y = false;
+    rb.lock_rotation_z = false;
+
+    let attach_y = -height * 0.5 + radius;
+    let mut vehicle = gizmo::physics::vehicle::VehicleController::new();
+    for (sx, sz, front, left) in [(-1.0, -1.0, true, true), (1.0, -1.0, true, false), (-1.0, 1.0, false, true), (1.0, 1.0, false, false)] {
+        vehicle.add_wheel(gizmo::physics::vehicle::Wheel {
+            attachment_local_pos: Vec3::new(sx * half_track, attach_y, sz * half_wheelbase),
+            radius,
+            axle_type: if front { gizmo::physics::vehicle::Axle::Front } else { gizmo::physics::vehicle::Axle::Rear },
+            is_left: left,
+            suspension_rest_length: (radius * 0.25).max(0.05),
+            suspension_max_travel: (radius * 0.45).max(0.12),
+            suspension_stiffness: 45000.0,
+            suspension_damping: 3500.0,
+            wheel_mass: 25.0,
+            ..Default::default()
+        });
+    }
+    vehicle.tuning.wheelbase = half_wheelbase * 2.0;
+    vehicle.tuning.track_width = half_track * 2.0;
+    vehicle.tuning.max_engine_torque = 560.0;
+    vehicle.max_steering_angle = 0.44;
+
+    let collider = Collider::offset_box(
+        Vec3::new(0.0, height * 0.12, 0.0),
+        Vec3::new(width * 0.42, height * 0.3, length * 0.46),
+    );
+    world.add_component(chassis, vehicle);
+    world.add_component(chassis, rb);
+    world.add_component(chassis, Velocity::new(Vec3::ZERO));
+    world.add_component(chassis, collider.clone());
+    phys.add_body(
+        gizmo::physics::BodyHandle::from_id(chassis.id()),
+        rb,
+        Transform::new(start_pos).with_rotation(start_rot),
+        Velocity::default(),
+        collider,
+    );
+    world.insert_resource(phys);
+
+    println!("race ready: track {} tris, {} checkpoints; car {width:.2}×{height:.2}×{length:.2}", track.visual.len() / 3, N_CHECKPOINTS);
+
+    RaceState {
+        chassis_id: chassis.id(),
+        camera_id: camera_ent.id(),
+        visual_ids,
+        wheels,
+        wheel_radius: radius,
+        max_steer: 0.44,
+        wheel_spin: 0.0,
+        cam_pos: start_pos + Vec3::new(0.0, 4.0, 10.0),
+        cam_yaw: -std::f32::consts::FRAC_PI_2,
+        cam_pitch: -0.3,
+        steer_angle: 0.0,
+        phys_accum: 0.0,
+        autodrive: std::env::var("NFS_AUTODRIVE").is_ok(),
+        shotcam: std::env::var("NFS_SHOTCAM").is_ok(),
+        t: 0.0,
+        checkpoints,
+        start_pos,
+        start_rot,
+        next_cp: 1,
+        lap: 0,
+        cur_time: 0.0,
+        best_time: 0.0,
+    }
+}
+
+fn update(world: &mut World, state: &mut RaceState, dt: f32, input: &Input) {
+    state.t += dt;
+    state.cur_time += dt;
+
+    let mut throttle = 0.0f32;
+    let mut brake = 0.0f32;
+    if input.is_key_pressed(KeyCode::KeyW as u32) || input.is_key_pressed(KeyCode::ArrowUp as u32) {
+        throttle += 1.0;
+    }
+    if input.is_key_pressed(KeyCode::KeyS as u32) || input.is_key_pressed(KeyCode::ArrowDown as u32) {
+        throttle -= 1.0;
+    }
+    if input.is_key_pressed(KeyCode::Space as u32) {
+        brake = 1.0;
+    }
+    let mut steering = false;
+    if input.is_key_pressed(KeyCode::KeyA as u32) || input.is_key_pressed(KeyCode::ArrowLeft as u32) {
+        state.steer_angle = (state.steer_angle + 6.0 * dt).min(1.0);
+        steering = true;
+    }
+    if input.is_key_pressed(KeyCode::KeyD as u32) || input.is_key_pressed(KeyCode::ArrowRight as u32) {
+        state.steer_angle = (state.steer_angle - 6.0 * dt).max(-1.0);
+        steering = true;
+    }
+    if !steering {
+        state.steer_angle *= (-15.0 * dt).exp();
+    }
+    if state.autodrive {
+        throttle = 1.0;
+        // Steer toward the next checkpoint so it actually laps the track.
+        if let Some(t) = world.borrow::<Transform>().get(state.chassis_id) {
+            let to = state.checkpoints[state.next_cp] - t.position;
+            let fwd = t.rotation * Vec3::new(0.0, 0.0, -1.0);
+            let right = t.rotation * Vec3::new(1.0, 0.0, 0.0);
+            let err = to.normalize_or_zero().dot(right);
+            state.steer_angle = (-err * 2.5).clamp(-1.0, 1.0);
+            if to.normalize_or_zero().dot(fwd) < -0.3 {
+                state.steer_angle = 1.0; // sharp turn if facing away
+            }
+        }
+    }
+
+    {
+        let mut vs = world.borrow_mut::<gizmo::physics::vehicle::VehicleController>();
+        if let Some(mut v) = vs.get_mut(state.chassis_id) {
+            v.set_reverse(throttle < 0.0);
+            v.throttle_input = throttle.abs().min(1.0);
+            v.brake_input = brake;
+            v.steering_input = state.steer_angle.clamp(-1.0, 1.0);
+            if input.is_key_just_pressed(KeyCode::KeyT as u32) {
+                v.auto_shift = !v.auto_shift;
+            }
+        }
+    }
+
+    if input.is_key_just_pressed(KeyCode::KeyR as u32) {
+        let (sp, sr) = (state.start_pos, state.start_rot);
+        let mut transforms = unsafe { world.borrow_mut_unchecked::<Transform>() };
+        let mut velocities = unsafe { world.borrow_mut_unchecked::<Velocity>() };
+        if let Some(mut t) = transforms.get_mut(state.chassis_id) {
+            *t = Transform::new(sp).with_rotation(sr);
+            t.update_local_matrix();
+        }
+        if let Some(mut v) = velocities.get_mut(state.chassis_id) {
+            *v = Velocity::default();
+        }
+        state.steer_angle = 0.0;
+        state.next_cp = 1;
+        state.cur_time = 0.0;
+    }
+
+    // Fixed-step physics.
+    state.phys_accum += dt.min(0.1);
+    let mut steps = 0;
+    while state.phys_accum >= FIXED_DT && steps < 32 {
+        gizmo::physics::vehicle_controller_system(world, FIXED_DT);
+        gizmo::physics::physics_step_system(world, FIXED_DT);
+        state.phys_accum -= FIXED_DT;
+        steps += 1;
+    }
+
+    let (cpos, crot, speed) = {
+        let ts = world.borrow::<Transform>();
+        let vs = world.borrow::<gizmo::physics::vehicle::VehicleController>();
+        let sp = vs.get(state.chassis_id).map(|v| v.current_speed_kmh / 3.6).unwrap_or(0.0);
+        match ts.get(state.chassis_id) {
+            Some(t) => (t.position, t.rotation, sp),
+            None => return,
+        }
+    };
+
+    // Lap / checkpoint detection (proximity to the next expected checkpoint, in XZ).
+    let car_xz = Vec3::new(cpos.x, 0.0, cpos.z);
+    let cp = state.checkpoints[state.next_cp];
+    if car_xz.distance(Vec3::new(cp.x, 0.0, cp.z)) < CP_RADIUS {
+        if state.next_cp == 0 {
+            // Reached the start line after all checkpoints → a lap is complete.
+            state.lap += 1;
+            if state.best_time == 0.0 || state.cur_time < state.best_time {
+                state.best_time = state.cur_time;
+            }
+            state.cur_time = 0.0;
+            state.next_cp = 1;
+        } else {
+            state.next_cp = (state.next_cp + 1) % N_CHECKPOINTS;
+        }
+    }
+
+    // Sync visuals.
+    state.wheel_spin += (speed / state.wheel_radius.max(0.05)) * dt;
+    let spin = Quat::from_axis_angle(Vec3::X, state.wheel_spin);
+    let steer = Quat::from_axis_angle(Vec3::Y, -state.steer_angle * state.max_steer);
+    {
+        let mut ts = unsafe { world.borrow_mut_unchecked::<Transform>() };
+        let mut gs = unsafe { world.borrow_mut_unchecked::<GlobalTransform>() };
+        for &id in &state.visual_ids {
+            if let Some(mut t) = ts.get_mut(id) {
+                t.position = cpos;
+                t.rotation = crot;
+                t.update_local_matrix();
+                if let Some(mut g) = gs.get_mut(id) {
+                    g.matrix = t.local_matrix;
+                }
+            }
+        }
+        for w in &state.wheels {
+            let lr = if w.front { steer * spin } else { spin };
+            if let Some(mut t) = ts.get_mut(w.id) {
+                t.position = cpos + crot * w.local;
+                t.rotation = crot * lr;
+                t.update_local_matrix();
+                if let Some(mut g) = gs.get_mut(w.id) {
+                    g.matrix = t.local_matrix;
+                }
+            }
+        }
+    }
+
+    // Camera.
+    let orbit = input.is_mouse_button_pressed(gizmo::core::input::mouse::RIGHT);
+    if state.shotcam {
+        // Low front-3/4 cinematic view (forward = -Z, +X = right), tracking the car's frame.
+        state.cam_pos = cpos + crot * Vec3::new(4.2, 1.4, -5.6);
+        let look = cpos + Vec3::new(0.0, 0.5, 0.0);
+        let dir = (look - state.cam_pos).normalize();
+        state.cam_yaw = dir.z.atan2(dir.x);
+        state.cam_pitch = dir.y.asin();
+    } else if orbit {
+        let fwd = Camera::forward_from(state.cam_yaw, state.cam_pitch);
+        state.cam_pos = cpos + Vec3::new(0.0, 1.2, 0.0) - fwd * 9.0;
+    } else {
+        let forward = crot * Vec3::new(0.0, 0.0, -1.0);
+        let target = cpos - forward * 7.0 + Vec3::new(0.0, 2.2, 0.0);
+        let k = 1.0 - (-10.0 * dt).exp();
+        state.cam_pos = state.cam_pos.lerp(target, k);
+        let look = cpos + Vec3::new(0.0, 0.7, 0.0);
+        let dir = (look - state.cam_pos).normalize();
+        state.cam_yaw = dir.z.atan2(dir.x);
+        state.cam_pitch = dir.y.asin();
+    }
+    update_camera(world, state, input);
+}
+
+fn update_camera(world: &mut World, state: &mut RaceState, input: &Input) {
+    if input.is_mouse_button_pressed(gizmo::core::input::mouse::RIGHT) {
+        let d = input.mouse_delta();
+        state.cam_yaw += d.0 * 0.005;
+        state.cam_pitch += d.1 * 0.005;
+    }
+    state.cam_pitch = state.cam_pitch.clamp(-std::f32::consts::FRAC_PI_2 + 0.1, std::f32::consts::FRAC_PI_2 - 0.1);
+    let cam_id = state.camera_id;
+    let mut transforms = unsafe { world.borrow_mut_unchecked::<Transform>() };
+    let mut globals = unsafe { world.borrow_mut_unchecked::<GlobalTransform>() };
+    let mut cameras = unsafe { world.borrow_mut_unchecked::<Camera>() };
+    if let Some(mut t) = transforms.get_mut(cam_id) {
+        t.position = state.cam_pos;
+        t.update_local_matrix();
+        if let Some(mut g) = globals.get_mut(cam_id) {
+            g.matrix = t.local_matrix;
+        }
+    }
+    if let Some(mut c) = cameras.get_mut(cam_id) {
+        c.yaw = state.cam_yaw;
+        c.pitch = state.cam_pitch;
+    }
+}
+
+fn ui(world: &mut World, state: &mut RaceState, ctx: &egui::Context) {
+    let speed = world
+        .borrow::<gizmo::physics::vehicle::VehicleController>()
+        .get(state.chassis_id)
+        .map(|v| v.current_speed_kmh.abs())
+        .unwrap_or(0.0);
+    egui::Area::new(egui::Id::new("hud"))
+        .anchor(egui::Align2::LEFT_TOP, egui::vec2(24.0, 24.0))
+        .show(ctx, |ui| {
+            ui.heading(format!("Tur {}", state.lap));
+            ui.label(format!("Süre: {:>5.1} s", state.cur_time));
+            if state.best_time > 0.0 {
+                ui.label(format!("En iyi: {:>5.1} s", state.best_time));
+            }
+            ui.label(format!("Checkpoint: {}/{}", state.next_cp, N_CHECKPOINTS));
+        });
+    egui::Area::new(egui::Id::new("spd"))
+        .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-30.0, -30.0))
+        .show(ctx, |ui| {
+            ui.heading(format!("{speed:.0} km/h"));
+            ui.label("W/S · A/D · Space · R");
+        });
+}

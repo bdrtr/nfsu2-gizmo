@@ -1,0 +1,16 @@
+/target
+**/*.rs.bk
+Cargo.lock.orig
+
+# Editör / IDE
+.idea/
+.vscode/
+*.swp
+
+# NFSU2 oyun verisi ASLA commit'lenmez (telif hakkı). Testler env-gated / sentetik.
+# Oyun kökü: $NFSU2_ROOT
+/game-data/
+*.BIN
+*.VIV
+*.bun
+*.lzc
