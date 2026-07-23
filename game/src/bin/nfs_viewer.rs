@@ -15,7 +15,7 @@
 use gizmo::prelude::*;
 use gizmo::simple::{SimpleAppExt, SimpleSceneState};
 use gizmo_nfs::parse_geometry;
-use nfsu2::car::{build_car_visuals, env_color, PbrLook};
+use nfsu2::car::{build_car_visuals, env_color, load_tpk_beside, PbrLook};
 
 const DEFAULT_CAR: &str =
     "/home/bedir/Games/need-for-speed-underground-2/drive_c/Need for Speed Underground 2/CARS/240SX/GEOMETRY.BIN";
@@ -28,6 +28,7 @@ fn main() {
 
     let bytes = std::fs::read(&path).unwrap_or_else(|e| panic!("cannot read {path}: {e}"));
     let all = parse_geometry(&bytes).expect("failed to parse GEOMETRY.BIN");
+    let tpk = load_tpk_beside(&path); // TEXTURES.BIN next to the model, if present
     let paint = env_color("NFS_COLOR", [0.10, 0.28, 0.72]); // override "r,g,b" in 0..1
 
     App::<SimpleSceneState>::new("Gizmo — NFSU2 240SX Viewer", 1400, 820)
@@ -58,8 +59,12 @@ fn main() {
                     .with_double_sided(true)
             };
 
-            let car = build_car_visuals(&scene.renderer.device, &all, paint, make_material);
-            println!("loaded {} material groups from {path}", car.groups.len());
+            let car = build_car_visuals(&scene.renderer.device, &all, tpk.as_ref(), paint, make_material);
+            println!(
+                "loaded {} material groups + {} textured parts from {path}",
+                car.groups.len(),
+                car.textured.len()
+            );
 
             // Meshes are recentered to the car centre, so frame the camera on the origin.
             let radius =
@@ -74,6 +79,32 @@ fn main() {
                     GlobalTransform::default(),
                     gv.mesh,
                     gv.material,
+                    MeshRenderer::new(),
+                ));
+            }
+
+            // Textured parts: upload each decoded TPK texture and use it as albedo.
+            for tp in car.textured {
+                let key = format!("nfs_tex_{:08X}", tp.texture.hash.0);
+                let Ok(bg) = scene.asset_manager.install_decoded_material_texture(
+                    &scene.renderer.device,
+                    &scene.renderer.queue,
+                    &scene.renderer.scene.texture_bind_group_layout,
+                    &key,
+                    &tp.texture.rgba,
+                    tp.texture.width,
+                    tp.texture.height,
+                ) else {
+                    continue;
+                };
+                let material = Material::new(bg)
+                    .with_pbr(Vec4::new(tp.tint[0], tp.tint[1], tp.tint[2], 1.0), tp.roughness, tp.metallic)
+                    .with_double_sided(true);
+                scene.world.spawn_bundle((
+                    Transform::default(),
+                    GlobalTransform::default(),
+                    tp.mesh,
+                    material,
                     MeshRenderer::new(),
                 ));
             }

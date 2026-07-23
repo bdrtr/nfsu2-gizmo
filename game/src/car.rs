@@ -9,7 +9,8 @@
 use crate::mesh::{bbox, build_mesh};
 use crate::part_groups::{group_of, select_stock_car, Grp};
 use gizmo::prelude::*;
-use gizmo_nfs::NfsMeshPart;
+use gizmo_nfs::{AssetHash, NfsMeshPart, NfsTexture, Tpk};
+use std::collections::HashMap;
 
 /// A physically-based surface look for one material group: base colour plus roughness and
 /// metallic in `0..1`. The caller turns this into an engine `Material`.
@@ -74,6 +75,15 @@ pub fn fit_wheel(wmin: Vec3, wmax: Vec3, center: Vec3, width: f32, length: f32) 
     }
 }
 
+/// Load and decode the `TEXTURES.BIN` sitting next to a car's `GEOMETRY.BIN`, if present.
+/// Returns `None` (untextured car) when the file is absent or unparseable.
+#[must_use]
+pub fn load_tpk_beside(geometry_path: &str) -> Option<Tpk> {
+    let dir = std::path::Path::new(geometry_path).parent()?;
+    let bytes = std::fs::read(dir.join("TEXTURES.BIN")).ok()?;
+    Tpk::parse(&bytes).ok()
+}
+
 /// Parse a `"r,g,b"` (each `0..1`) colour from an environment variable, else the default.
 #[must_use]
 pub fn env_color(var: &str, default: [f32; 3]) -> [f32; 3] {
@@ -99,8 +109,12 @@ pub struct GroupVisual {
 /// A fully assembled car ready to spawn: the body groups, its dimensions, and the (single,
 /// centre-relative) wheel mesh plus the fit describing where to instance it at four corners.
 pub struct CarVisuals {
-    /// Body material groups (paint, glass, …); never includes wheels.
+    /// Body material groups (paint, glass, …) for parts with no resolvable texture; never
+    /// includes wheels.
     pub groups: Vec<GroupVisual>,
+    /// Per-texture parts: parts whose `material_ref` resolved to a decoded TPK texture,
+    /// merged by texture. The caller uploads each `texture` and builds a `Material` from it.
+    pub textured: Vec<TexturedPart>,
     /// Car centre in the Gizmo frame (all meshes are recentered by this).
     pub center: Vec3,
     /// Body width (X).
@@ -115,6 +129,31 @@ pub struct CarVisuals {
     pub wheel_fit: WheelFit,
 }
 
+/// A merged mesh sharing one decoded texture, ready for the caller to upload and material-ise.
+pub struct TexturedPart {
+    /// The merged, recentered GPU mesh (carries the parts' UVs).
+    pub mesh: Mesh,
+    /// The decoded RGBA8 texture to use as this mesh's albedo.
+    pub texture: NfsTexture,
+    /// Base-colour tint the texture is multiplied by: the paint colour for body panels
+    /// (whose texture is a neutral detail atlas the paint shader would tint), white for
+    /// detail parts (whose texture is their full colour).
+    pub tint: [f32; 3],
+    /// Suggested PBR roughness (from the part's material group).
+    pub roughness: f32,
+    /// Suggested PBR metallic (from the part's material group).
+    pub metallic: f32,
+}
+
+/// Roughness/metallic to pair with a texture for a given material group.
+fn group_pbr(group: Grp) -> (f32, f32) {
+    body_palette([0.0; 3])
+        .into_iter()
+        .find(|(g, _, _)| *g == group)
+        .map(|(_, _, look)| (look.roughness, look.metallic))
+        .unwrap_or((0.4, 0.2))
+}
+
 /// Assemble the default car's renderable visuals from parsed parts.
 ///
 /// Selects the showroom configuration ([`select_stock_car`]), merges each material group
@@ -125,6 +164,7 @@ pub struct CarVisuals {
 pub fn build_car_visuals<F>(
     device: &wgpu::Device,
     all: &[NfsMeshPart],
+    tpk: Option<&Tpk>,
     paint: [f32; 3],
     make_material: F,
 ) -> CarVisuals
@@ -142,13 +182,48 @@ where
     let center = (lo + hi) * 0.5;
     let (width, height, length) = (hi.x - lo.x, hi.y - lo.y, hi.z - lo.z);
 
+    // A part is textured when a hash in its material list resolves to a decoded texture.
+    // Painted body panels are excluded: their listed texture is a shared *detail atlas*
+    // (badge/marker/panel-line sheet) whose non-neutral regions bleed onto the panel when
+    // used as raw albedo, and in-game they're the player's flat paint colour anyway. Detail
+    // parts *are* their texture, so those get textured. (Many detail parts reference a
+    // shader/material hash that indirects to a texture we can't follow yet, so they still
+    // fall back to their flat group colour.)
+    let resolve = |p: &NfsMeshPart| -> Option<AssetHash> {
+        if group_of(&p.name) == Grp::Paint {
+            return None;
+        }
+        let tpk = tpk?;
+        p.material_refs.iter().copied().find(|h| tpk.texture(*h).is_some())
+    };
+    let mut by_texture: HashMap<AssetHash, Vec<&NfsMeshPart>> = HashMap::new();
+    let mut untextured: Vec<&NfsMeshPart> = Vec::new();
+    for p in body_like.iter().copied() {
+        match resolve(p) {
+            Some(hash) => by_texture.entry(hash).or_default().push(p),
+            None => untextured.push(p),
+        }
+    }
+
     let mut groups = Vec::new();
     for (group, label, look) in body_palette(paint) {
         let parts: Vec<&NfsMeshPart> =
-            body_like.iter().copied().filter(|p| group_of(&p.name) == group).collect();
+            untextured.iter().copied().filter(|p| group_of(&p.name) == group).collect();
         if let Some(mesh) = build_mesh(device, &parts, center, label) {
             groups.push(GroupVisual { group, mesh, material: make_material(look) });
         }
+    }
+
+    let mut textured = Vec::new();
+    for (hash, parts) in by_texture {
+        let Some(mesh) = build_mesh(device, &parts, center, "nfs_textured") else { continue };
+        let Some(texture) = tpk.and_then(|t| t.texture(hash)).cloned() else { continue };
+        let group = group_of(&parts[0].name);
+        let (roughness, metallic) = group_pbr(group);
+        // Body panels carry a neutral detail atlas → tint by paint; details are their own
+        // colour → white.
+        let tint = if group == Grp::Paint { paint } else { [1.0, 1.0, 1.0] };
+        textured.push(TexturedPart { mesh, texture, tint, roughness, metallic });
     }
 
     let mut wheel = None;
@@ -162,5 +237,5 @@ where
         }
     }
 
-    CarVisuals { groups, center, width, height, length, wheel, wheel_fit }
+    CarVisuals { groups, textured, center, width, height, length, wheel, wheel_fit }
 }

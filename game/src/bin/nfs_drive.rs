@@ -18,7 +18,7 @@ use gizmo::egui;
 use gizmo::physics::world::PhysicsWorld;
 use gizmo::prelude::*;
 use gizmo_nfs::parse_geometry;
-use nfsu2::car::{build_car_visuals, env_color, WheelFit};
+use nfsu2::car::{build_car_visuals, env_color, load_tpk_beside, WheelFit};
 use nfsu2::mesh::add_transform;
 
 const DEFAULT_CAR: &str =
@@ -137,13 +137,12 @@ fn setup_scene(world: &mut World, renderer: &gizmo::renderer::Renderer) -> Drive
         camera_ent,
         Camera::new(std::f32::consts::FRAC_PI_4, 0.1, 2000.0, -std::f32::consts::FRAC_PI_2, -0.3, true),
     );
-    world.insert_resource(asset_manager);
-
     // ── Parse & assemble the default (showroom) car ──
     let bytes = std::fs::read(&path).unwrap_or_else(|e| panic!("cannot read {path}: {e}"));
     let all = parse_geometry(&bytes).expect("parse GEOMETRY.BIN");
+    let tpk = load_tpk_beside(&path); // TEXTURES.BIN next to the model, if present
     let paint = env_color("NFS_COLOR", [0.10, 0.28, 0.72]); // override "r,g,b" in 0..1
-    let car = build_car_visuals(&renderer.device, &all, paint, |look| {
+    let car = build_car_visuals(&renderer.device, &all, tpk.as_ref(), paint, |look| {
         mat(look.rgb, look.roughness, look.metallic)
     });
     let (width, height, length) = (car.width, car.height, car.length);
@@ -159,6 +158,33 @@ fn setup_scene(world: &mut World, renderer: &gizmo::renderer::Renderer) -> Drive
         world.add_component(e, MeshRenderer::new());
         visual_ids.push(e.id());
     }
+    // Textured parts: upload each decoded TPK texture and material-ise it as albedo.
+    let mut textured_count = 0;
+    for tp in car.textured {
+        let key = format!("nfs_tex_{:08X}", tp.texture.hash.0);
+        let Ok(bg) = asset_manager.install_decoded_material_texture(
+            &renderer.device,
+            &renderer.queue,
+            &renderer.scene.texture_bind_group_layout,
+            &key,
+            &tp.texture.rgba,
+            tp.texture.width,
+            tp.texture.height,
+        ) else {
+            continue;
+        };
+        let material = Material::new(bg)
+            .with_pbr(Vec4::new(tp.tint[0], tp.tint[1], tp.tint[2], 1.0), tp.roughness, tp.metallic)
+            .with_double_sided(true);
+        let e = world.spawn();
+        add_transform(world, e, Transform::new(Vec3::ZERO));
+        world.add_component(e, tp.mesh);
+        world.add_component(e, material);
+        world.add_component(e, MeshRenderer::new());
+        visual_ids.push(e.id());
+        textured_count += 1;
+    }
+    world.insert_resource(asset_manager);
 
     // ── Wheels: the single wheel mesh instanced at four fitted corners ──
     // Wheel centre near the bottom of the body so the lower half sticks out of the arch.
@@ -232,7 +258,7 @@ fn setup_scene(world: &mut World, renderer: &gizmo::renderer::Renderer) -> Drive
     world.insert_resource(phys);
 
     println!(
-        "car ready: {} material groups, {} wheels; dims {width:.2}×{height:.2}×{length:.2}, r={radius:.2}",
+        "car ready: {} visual groups ({textured_count} textured), {} wheels; dims {width:.2}×{height:.2}×{length:.2}, r={radius:.2}",
         visual_ids.len(),
         wheels.len()
     );
