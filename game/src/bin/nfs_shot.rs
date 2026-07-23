@@ -44,7 +44,27 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
 
     // ── Car ──
     let bytes = std::fs::read(path).unwrap_or_else(|e| panic!("read {path}: {e}"));
-    let all = parse_geometry(&bytes).expect("parse GEOMETRY.BIN");
+    let mut all = parse_geometry(&bytes).expect("parse GEOMETRY.BIN");
+    // Diagnostic filters (comma-separated substrings): NFS_ONLY keeps parts matching ANY,
+    // NFS_DROP removes parts matching ANY.
+    if let Ok(only) = std::env::var("NFS_ONLY") {
+        let pats: Vec<String> = only.split(',').map(|s| s.trim().to_string()).collect();
+        all.retain(|p| pats.iter().any(|s| p.name.contains(s.as_str())));
+    }
+    if let Ok(drop) = std::env::var("NFS_DROP") {
+        let pats: Vec<String> = drop.split(',').map(|s| s.trim().to_string()).collect();
+        all.retain(|p| !pats.iter().any(|s| p.name.contains(s.as_str())));
+    }
+    if std::env::var("NFS_LIST").is_ok() {
+        for p in nfsu2::part_groups::select_stock_car(&all) {
+            eprintln!(
+                "{:<36} tris={:<6} grp={:?}",
+                p.name,
+                p.triangle_count(),
+                nfsu2::part_groups::group_of(&p.name)
+            );
+        }
+    }
     let tpk = load_tpk_beside(path);
     let paint = env_color("NFS_COLOR", [0.10, 0.28, 0.72]);
     let car = build_car_visuals(&renderer.device, &all, tpk.as_ref(), paint, |look| {
