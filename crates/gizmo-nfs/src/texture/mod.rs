@@ -193,6 +193,10 @@ fn decode_texture(file: &[u8], e: &TpkEntry) -> NfsResult<NfsTexture> {
     if name_hash != e.hash.0 {
         return Err(NfsError::CorruptArchive { detail: "TPK header hash mismatch" });
     }
+    // The `DebugName[24]` sits just before the NameHash (struct 0x0C, i.e. `P − 0x18`); it
+    // carries the texture's readable name (e.g. `240SX_KIT00_HEADLIGHT`), which the renderer
+    // matches to part names.
+    let name = texture_name(&pool, p);
     let width = u16::from_le_bytes([hdr[32], hdr[33]]) as usize;
     let height = u16::from_le_bytes([hdr[34], hdr[35]]) as usize;
     let comp = hdr[38];
@@ -215,7 +219,7 @@ fn decode_texture(file: &[u8], e: &TpkEntry) -> NfsResult<NfsTexture> {
     };
 
     Ok(NfsTexture {
-        name: String::new(),
+        name,
         hash: e.hash,
         width: width as u32,
         height: height as u32,
@@ -223,6 +227,19 @@ fn decode_texture(file: &[u8], e: &TpkEntry) -> NfsResult<NfsTexture> {
         source_format,
         format: PixelFormat::Rgba8,
     })
+}
+
+/// Read the `DebugName[24]` that precedes the `NameHash` at pool offset `p` (ASCII, NUL-
+/// terminated). Empty if it runs off the buffer.
+fn texture_name(pool: &[u8], p: usize) -> String {
+    let start = p.saturating_sub(0x18);
+    pool.get(start..p)
+        .unwrap_or(&[])
+        .iter()
+        .take_while(|&&b| b != 0)
+        .filter(|&&b| b.is_ascii_graphic() || b == b' ')
+        .map(|&b| b as char)
+        .collect()
 }
 
 /// Byte size of the top mipmap for `width`x`height` in the given compression type, or `None`

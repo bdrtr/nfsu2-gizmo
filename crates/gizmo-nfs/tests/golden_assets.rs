@@ -127,4 +127,9 @@ fn tpk_parser_decodes_textures() {
         }
     }
     assert!(dxt1 >= 5, "expected several DXT1 textures, got {dxt1}");
+
+    // The embedded DebugNames are recovered and carry the expected part-linked names.
+    let names: Vec<&str> = tpk.textures.values().map(|t| t.name.as_str()).collect();
+    assert!(names.iter().any(|n| n.starts_with("240SX_KIT00_HEADLIGHT")), "headlight texture named");
+    assert!(names.iter().any(|n| n.starts_with("240SX_KIT00_BRAKELIGHT")), "brakelight texture named");
 }

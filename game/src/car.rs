@@ -145,6 +145,25 @@ pub struct TexturedPart {
     pub metallic: f32,
 }
 
+/// Minimum shared-prefix length for a part name to match a texture's DebugName — long
+/// enough to reach past the shared `CAR_KIT00_` prefix into the component word.
+const NAME_MATCH_MIN: usize = 16;
+
+fn common_prefix_len(a: &str, b: &str) -> usize {
+    a.bytes().zip(b.bytes()).take_while(|(x, y)| x == y).count()
+}
+
+/// The decoded texture whose DebugName best matches `part_name` (longest common prefix,
+/// at least [`NAME_MATCH_MIN`] characters), or `None` if nothing matches closely.
+fn texture_for_name<'a>(part_name: &str, tpk: &'a Tpk) -> Option<&'a NfsTexture> {
+    tpk.textures
+        .values()
+        .map(|t| (common_prefix_len(part_name, &t.name), t))
+        .filter(|(cpl, _)| *cpl >= NAME_MATCH_MIN)
+        .max_by_key(|(cpl, _)| *cpl)
+        .map(|(_, t)| t)
+}
+
 /// Roughness/metallic to pair with a texture for a given material group.
 fn group_pbr(group: Grp) -> (f32, f32) {
     body_palette([0.0; 3])
@@ -182,18 +201,21 @@ where
     let center = (lo + hi) * 0.5;
     let (width, height, length) = (hi.x - lo.x, hi.y - lo.y, hi.z - lo.z);
 
-    // A part is textured when a hash in its material list resolves to a decoded texture.
-    // Painted body panels are excluded: their listed texture is a shared *detail atlas*
-    // (badge/marker/panel-line sheet) whose non-neutral regions bleed onto the panel when
-    // used as raw albedo, and in-game they're the player's flat paint colour anyway. Detail
-    // parts *are* their texture, so those get textured. (Many detail parts reference a
-    // shader/material hash that indirects to a texture we can't follow yet, so they still
-    // fall back to their flat group colour.)
+    // Resolve each part to a texture. Primary link is by *name*: every texture carries a
+    // DebugName (`240SX_KIT00_HEADLIGHT`, `240SX_KIT00_BRAKELIGHT`, …) that shares a long
+    // prefix with the part it dresses — far more reliable than the material-hash list, which
+    // for most detail parts holds a shader hash that indirects to the texture elsewhere. The
+    // hash list is kept as a fallback. Painted body panels are excluded: their texture is a
+    // shared detail atlas that only reads right through the paint shader, and in-game the
+    // body is the player's flat paint colour anyway.
     let resolve = |p: &NfsMeshPart| -> Option<AssetHash> {
         if group_of(&p.name) == Grp::Paint {
             return None;
         }
         let tpk = tpk?;
+        if let Some(tex) = texture_for_name(&p.name, tpk) {
+            return Some(tex.hash);
+        }
         p.material_refs.iter().copied().find(|h| tpk.texture(*h).is_some())
     };
     let mut by_texture: HashMap<AssetHash, Vec<&NfsMeshPart>> = HashMap::new();
