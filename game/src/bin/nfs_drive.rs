@@ -142,7 +142,8 @@ fn setup_scene(world: &mut World, renderer: &gizmo::renderer::Renderer) -> Drive
     let all = parse_geometry(&bytes).expect("parse GEOMETRY.BIN");
     let tpk = load_tpk_beside(&path); // TEXTURES.BIN next to the model, if present
     let paint = env_color("NFS_COLOR", [0.10, 0.28, 0.72]); // override "r,g,b" in 0..1
-    let car = build_car_visuals(&renderer.device, &all, tpk.as_ref(), paint, |look| {
+    let cfg = nfsu2::part_groups::CarConfig::from_env();
+    let car = build_car_visuals(&renderer.device, &all, tpk.as_ref(), paint, &cfg, |look| {
         Material::new(tex.clone())
             .with_pbr(
                 Vec4::new(look.rgb[0], look.rgb[1], look.rgb[2], look.alpha),

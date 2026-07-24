@@ -8,7 +8,7 @@ Recreating **Need for Speed: Underground 2 (2004)** inside the [Gizmo engine](ht
 
 - **`crates/gizmo-nfs`** — a pure, engine-agnostic NFSU2 asset parser. Depends on **no** `gizmo-*` crate and no GPU/graphics types (`wgpu`, `glam`). It reads NFSU2 binary containers and returns plain CPU data (`NfsCar`, `NfsMeshPart`, `NfsTexture` — `Vec<f32>`/`Vec<u32>`/`Vec<u8>`). Publishable standalone.
 - **`game/`** (package `nfsu2`) — the playable integration layer. Turns parsed CPU data into Gizmo meshes/materials and drives it with the engine's raycast `VehicleController`. The reusable logic lives in a **library** (`game/src/`), with the binaries (`game/src/bin/*.rs`) as thin orchestrators over it:
-  - `part_groups` — **pure, engine-free** part-classification policy: `group_of` (name → material group), `component_key`, and `select_stock_car` (the default/showroom KIT00 car at the highest available LOD). Unit-tested; no `gizmo`/`wgpu` types, so keep it that way.
+  - `part_groups` — **pure, engine-free** part-classification policy: `group_of` (name → material group), `component_key`, and `select_car` (assemble a car in a given `CarConfig` — body kit / hood style / light style / widebody — at the highest available LOD; `select_stock_car` is the all-stock wrapper). Unit-tested; no `gizmo`/`wgpu` types, so keep it that way.
   - `mesh` — engine-coupled geometry: the NFSU2 → Gizmo coordinate `remap`, `bbox`, `build_mesh` (indexed parts → GPU `Mesh`), `add_transform`.
   - `car` — the car as a whole: `body_palette` (per-group `PbrLook`), `wheel_look`, `fit_wheel`, `env_color`.
 
@@ -42,6 +42,12 @@ cargo run --release -p nfsu2 --bin nfs_race
 ```
 
 Binaries: `nfs_viewer` (M1, in-engine car viewer), `nfs_drive` (M2, drivable car, default binary), `nfs_race` (M3, oval track + lap timing).
+
+All of them read the car's configuration from the environment (`0`/absent = stock, an
+unavailable part number silently falls back to stock):
+`NFS_KIT` (body kit `KIT##`: front + rear bumper + skirt), `NFS_STYLE_HOOD` (`STYLE##` hood),
+`NFS_STYLE_LIGHT` (`STYLE##` head/tail lights), `NFS_WIDE` (widebody `KITW##`: body + doors).
+Use the `nfs_parts` example to see which numbers a given car actually ships.
 
 ### Reverse-engineering tool (`nfs_dump`)
 

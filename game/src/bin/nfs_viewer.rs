@@ -30,6 +30,7 @@ fn main() {
     let all = parse_geometry(&bytes).expect("failed to parse GEOMETRY.BIN");
     let tpk = load_tpk_beside(&path); // TEXTURES.BIN next to the model, if present
     let paint = env_color("NFS_COLOR", [0.10, 0.28, 0.72]); // override "r,g,b" in 0..1
+    let cfg = nfsu2::part_groups::CarConfig::from_env();
 
     App::<SimpleSceneState>::new("Gizmo — NFSU2 240SX Viewer", 1400, 820)
         .with_simple_scene(move |scene, state| {
@@ -63,7 +64,7 @@ fn main() {
                     .with_double_sided(true)
             };
 
-            let car = build_car_visuals(&scene.renderer.device, &all, tpk.as_ref(), paint, make_material);
+            let car = build_car_visuals(&scene.renderer.device, &all, tpk.as_ref(), paint, &cfg, make_material);
             println!(
                 "loaded {} material groups + {} textured parts from {path}",
                 car.groups.len(),

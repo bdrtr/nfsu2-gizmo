@@ -108,7 +108,8 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
     }
     let tpk = load_tpk_beside(path);
     let paint = env_color("NFS_COLOR", [0.10, 0.28, 0.72]);
-    let car = build_car_visuals(&renderer.device, &all, tpk.as_ref(), paint, |look| {
+    let cfg = nfsu2::part_groups::CarConfig::from_env();
+    let car = build_car_visuals(&renderer.device, &all, tpk.as_ref(), paint, &cfg, |look| {
         two(Material::new(white.clone()).with_pbr(
             Vec4::new(look.rgb[0], look.rgb[1], look.rgb[2], look.alpha),
             look.roughness,

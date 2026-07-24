@@ -149,35 +149,203 @@ fn door_zone_verts(p: &NfsMeshPart) -> usize {
         .count()
 }
 
-/// Assemble the default (showroom) car: the shared `BASE` body plus kit slot `KIT00`,
-/// picking the **highest-detail** variant of each logical component.
+/// A car configuration: which aftermarket parts replace the stock ones. `0` in any field means
+/// "stock" (kit slot `KIT00`), so [`CarConfig::stock`] (all zero) is the default showroom car.
+/// The NFSU2 geometry only holds body kits, hood/light styles and widebody sets per car; the
+/// universal aftermarket spoilers and rims live in a separate global bundle, so they are not
+/// configured here.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CarConfig {
+    /// Body kit `KIT##` sourcing the front bumper, rear bumper and side skirt (`0` = stock).
+    pub body_kit: u8,
+    /// Hood design `STYLE##` (`0` = stock `KIT00` hood).
+    pub hood_style: u8,
+    /// Head- and tail-light design `STYLE##` (`STYLE01..14`; `0` = stock).
+    pub light_style: u8,
+    /// Widebody kit `KITW##` replacing the body and doors (`0` = stock body).
+    pub widebody: u8,
+}
+
+impl CarConfig {
+    /// The stock showroom car (all slots `KIT00`).
+    #[must_use]
+    pub const fn stock() -> Self {
+        Self { body_kit: 0, hood_style: 0, light_style: 0, widebody: 0 }
+    }
+
+    /// Build a config from `NFS_KIT` / `NFS_STYLE_HOOD` / `NFS_STYLE_LIGHT` / `NFS_WIDE`
+    /// environment variables (each a decimal part number; absent or unparsable = stock).
+    #[must_use]
+    pub fn from_env() -> Self {
+        let n = |k: &str| std::env::var(k).ok().and_then(|v| v.trim().parse().ok()).unwrap_or(0);
+        Self {
+            body_kit: n("NFS_KIT"),
+            hood_style: n("NFS_STYLE_HOOD"),
+            light_style: n("NFS_STYLE_LIGHT"),
+            widebody: n("NFS_WIDE"),
+        }
+    }
+}
+
+impl Default for CarConfig {
+    fn default() -> Self {
+        Self::stock()
+    }
+}
+
+/// The customization namespace a part name belongs to, parsed from its `KIT##` / `KITW##` /
+/// `STYLE##` token (or `BASE`). Survives NFSU2's 27-char name truncation, which only clips the
+/// trailing LOD/side suffix, never the leading namespace token.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Ns {
+    /// The shared `BASE` part (greenhouse, interior, trim).
+    Base,
+    /// Kit slot `KIT##` (`00` = stock; `01+` aftermarket body kits).
+    Kit(u8),
+    /// Purchasable `STYLE##` (hoods, lights, engine bays).
+    Style(u8),
+    /// Widebody kit `KITW##`.
+    Wide(u8),
+    /// No customization token (miscellaneous / decals).
+    Other,
+}
+
+/// Parse the decimal number immediately following `tag` in `name`, if any.
+fn num_after(name: &str, tag: &str) -> Option<u8> {
+    let i = name.find(tag)? + tag.len();
+    let digits: String = name[i..].chars().take_while(char::is_ascii_digit).collect();
+    digits.parse().ok()
+}
+
+fn namespace(name: &str) -> Ns {
+    // `KITW##` before `KIT##` (the former contains the latter's letters).
+    if let Some(n) = num_after(name, "KITW") {
+        return Ns::Wide(n);
+    }
+    if let Some(n) = num_after(name, "STYLE") {
+        return Ns::Style(n);
+    }
+    if let Some(n) = num_after(name, "KIT") {
+        return Ns::Kit(n);
+    }
+    if name.contains("_BASE") {
+        return Ns::Base;
+    }
+    Ns::Other
+}
+
+/// The customization slot a part fills — decides which namespace sources it (see [`select_car`]).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Slot {
+    FrontBumper,
+    RearBumper,
+    Skirt,
+    Hood,
+    Headlight,
+    Brakelight,
+    Body,
+    Door,
+    /// Everything not swapped by a config dimension (mirrors, trunk, exhaust, wheel, spoiler,
+    /// roof, …) — always sourced from the stock kit.
+    Fixed,
+}
+
+fn slot_of(name: &str) -> Slot {
+    if name.contains("FRONT_BUMPER") {
+        Slot::FrontBumper
+    } else if name.contains("REAR_BUMPER") {
+        Slot::RearBumper
+    } else if name.contains("SKIRT") {
+        Slot::Skirt
+    } else if name.contains("HOOD") {
+        Slot::Hood
+    } else if name.contains("HEADLIGHT") {
+        Slot::Headlight
+    } else if name.contains("BRAKELIGHT") {
+        Slot::Brakelight
+    } else if name.contains("BODY") {
+        Slot::Body
+    } else if name.contains("DOOR") {
+        Slot::Door
+    } else {
+        Slot::Fixed
+    }
+}
+
+/// Assemble a car in configuration `cfg` from all parsed parts: the shared `BASE` greenhouse plus
+/// one part per component, each sourced from the namespace `cfg` selects for its slot, picking the
+/// **highest-detail** LOD of the chosen part.
 ///
-/// Highest detail = most triangles, which stays correct even when the LOD letter was
-/// truncated out of the name (two LODs then share a [`component_key`]). Everything else is
-/// dropped: other kits (`KIT01`+) and the `STYLE##` purchasable variants (a dozen alternate
-/// headlights/spoilers/rims) would otherwise render as overlapping duplicates.
+/// The routing is per-slot: bumpers + skirt come from the body kit; the hood from the hood style;
+/// head/tail lights from the light style; body + doors from the widebody kit (else stock). Because
+/// a part's [`component_key`] embeds its `KIT##`/`STYLE##` token, an *unselected* namespace's part
+/// is NOT collapsed away by the LOD dedup — so it must be filtered out **before** the dedup, or two
+/// hoods/bumpers would render on top of each other. If the requested variant has no part for a slot
+/// (kit numbering is sparse; not every car has every style), that dimension falls back to stock so
+/// a bad pick degrades to `KIT00` rather than leaving a hole.
 ///
-/// **Body exception:** a car with no paintable door skin ([`has_paintable_door_skin`]) bakes the
-/// door into a lower body LOD; its highest-triangle LOD has a bare door hole. For the body
-/// component of such a car, pick the LOD with the best [`door_zone_verts`] coverage (the one that
-/// fills the door) instead of the one with the most triangles.
+/// **Body exception** (unchanged from stock): a car with no paintable door skin bakes the door into
+/// a lower body LOD, so its body component picks the LOD with the best [`door_zone_verts`] coverage.
 #[must_use]
-pub fn select_stock_car(all: &[NfsMeshPart]) -> Vec<&NfsMeshPart> {
+pub fn select_car<'a>(all: &'a [NfsMeshPart], cfg: &CarConfig) -> Vec<&'a NfsMeshPart> {
     use std::collections::HashMap;
+
+    // A requested variant that has no part for its target slots falls back to stock (0).
+    let has = |ns: Ns, slots: &[Slot]| {
+        all.iter().any(|p| namespace(&p.name) == ns && slots.contains(&slot_of(&p.name)))
+    };
+    let bumper_slots = [Slot::FrontBumper, Slot::RearBumper, Slot::Skirt];
+    let eff_kit = if cfg.body_kit != 0 && has(Ns::Kit(cfg.body_kit), &bumper_slots) { cfg.body_kit } else { 0 };
+    let eff_hood = if cfg.hood_style != 0 && has(Ns::Style(cfg.hood_style), &[Slot::Hood]) { cfg.hood_style } else { 0 };
+    let light_slots = [Slot::Headlight, Slot::Brakelight];
+    let eff_light = if cfg.light_style != 0 && has(Ns::Style(cfg.light_style), &light_slots) { cfg.light_style } else { 0 };
+    let eff_wide = if cfg.widebody != 0 && has(Ns::Wide(cfg.widebody), &[Slot::Body, Slot::Door]) { cfg.widebody } else { 0 };
+
+    // Traffic cars (TAXI, BUS, SUV, …) and the shared prop bundles (WHEELS, SPOILER, …) carry no
+    // customization token at all: every part is `NAME_BODY_A`. They have exactly one configuration,
+    // so with nothing to choose between, everything is admitted — otherwise they'd render empty.
+    let customizable = all.iter().any(|p| matches!(namespace(&p.name), Ns::Kit(_) | Ns::Base));
+
+    // Whether a part is part of the configured car (before LOD dedup).
+    let admit = |name: &str| -> bool {
+        if !customizable {
+            return true;
+        }
+        // The BASE greenhouse (glass/interior/trim) is always kept; window decals are the glass
+        // panels; any other decal is texture-only livery, dropped until textured.
+        if name.contains("_BASE") {
+            return true;
+        }
+        if name.contains("DECAL") {
+            return name.contains("WINDOW");
+        }
+        match namespace(name) {
+            Ns::Kit(n) => match slot_of(name) {
+                Slot::FrontBumper | Slot::RearBumper | Slot::Skirt => n == eff_kit,
+                Slot::Hood => n == 0 && eff_hood == 0,
+                Slot::Headlight | Slot::Brakelight => n == 0 && eff_light == 0,
+                Slot::Body | Slot::Door => n == 0 && eff_wide == 0,
+                Slot::Fixed => n == 0,
+            },
+            Ns::Style(n) => match slot_of(name) {
+                Slot::Hood => eff_hood != 0 && n == eff_hood,
+                Slot::Headlight | Slot::Brakelight => eff_light != 0 && n == eff_light,
+                _ => false,
+            },
+            Ns::Wide(n) => match slot_of(name) {
+                Slot::Body | Slot::Door => eff_wide != 0 && n == eff_wide,
+                _ => false,
+            },
+            Ns::Base => true,
+            Ns::Other => false,
+        }
+    };
+
     let fill_body_door = !has_paintable_door_skin(all);
     let mut best: HashMap<&str, &NfsMeshPart> = HashMap::new();
     for p in all {
-        // The showroom set is the shared BASE part (which carries the greenhouse: glass,
-        // window masks, interior and trim) plus kit slot 00, plus the window glass on any
-        // un-kitted `DECAL_*_WINDOW` parts. BASE is kept — its materials are routed per-shader,
-        // so its interior/trim reads correctly instead of as a bright painted shell.
-        let is_default = p.name.contains("_BASE")
-            || p.name.contains("_KIT00")
-            || (p.name.contains("DECAL") && p.name.contains("WINDOW"));
-        // Drop only the TRUNK_AUDIO second shell that z-fights the TRUNK it sits on. (ROOF is
-        // kept — it is the only roof; closing the cabin is what stops the interior spilling out.)
-        let is_duplicate_shell = p.name.contains("TRUNK_AUDIO");
-        if !is_default || is_duplicate_shell || group_of(&p.name) == Grp::Skip {
+        // Drop the TRUNK_AUDIO second shell (z-fights the TRUNK) and any hidden/decal Skip parts.
+        if !admit(&p.name) || p.name.contains("TRUNK_AUDIO") || group_of(&p.name) == Grp::Skip {
             continue;
         }
         let prefer_door_fill = fill_body_door && p.name.contains("_BODY");
@@ -197,6 +365,13 @@ pub fn select_stock_car(all: &[NfsMeshPart]) -> Vec<&NfsMeshPart> {
             .or_insert(p);
     }
     best.into_values().collect()
+}
+
+/// The default (showroom) car — [`select_car`] with the stock [`CarConfig`]. Kept as a named
+/// wrapper for the many call sites and tests that only want the stock configuration.
+#[must_use]
+pub fn select_stock_car(all: &[NfsMeshPart]) -> Vec<&NfsMeshPart> {
+    select_car(all, &CarConfig::stock())
 }
 
 #[cfg(test)]
@@ -277,6 +452,91 @@ mod tests {
             .find(|p| p.name.contains("_BODY"))
             .expect("a body part");
         assert_eq!(body.name, "240SX_KIT00_BODY_A");
+    }
+
+    /// A minimal named part with a triangle count — enough for selection, which only reads names
+    /// and triangle counts (except for the body door-fill rule, which `body_lod` covers).
+    fn part(name: &str, tris: usize) -> NfsMeshPart {
+        let mut p = NfsMeshPart::default();
+        p.name = name.to_string();
+        p.indices = vec![0; tris * 3];
+        p
+    }
+
+    /// The 240SX's real slot layout, trimmed to one LOD per component.
+    fn customizable_car() -> Vec<NfsMeshPart> {
+        vec![
+            part("240SX_BASE_A", 496),
+            part("240SX_KIT00_BODY_A", 728),
+            part("240SX_KIT00_DOOR_LEFT_A", 68),
+            part("240SX_KIT00_FRONT_BUMPER_A", 532),
+            part("240SX_KIT00_REAR_BUMPER_A", 505),
+            part("240SX_KIT00_SKIRT_A", 184),
+            part("240SX_KIT00_HOOD_A", 148),
+            part("240SX_KIT00_BRAKELIGHT_A", 148),
+            part("240SX_KIT00_SPOILER_A", 116), // Fixed slot — never swapped
+            part("240SX_KIT01_FRONT_BUMPER_A", 673),
+            part("240SX_KIT01_REAR_BUMPER_A", 473),
+            part("240SX_KIT01_SKIRT_A", 170),
+            part("240SX_STYLE04_HOOD_A", 258),
+            part("240SX_STYLE04_BRAKELIGHT_A", 208),
+            part("240SX_KITW01_BODY_A", 2006),
+            part("240SX_KITW01_DOOR_LEFT_A", 131),
+        ]
+    }
+
+    fn names_of(sel: &[&NfsMeshPart]) -> Vec<String> {
+        let mut v: Vec<String> = sel.iter().map(|p| p.name.clone()).collect();
+        v.sort();
+        v
+    }
+
+    #[test]
+    fn stock_config_takes_only_base_and_kit00() {
+        let all = customizable_car();
+        let names = names_of(&select_stock_car(&all));
+        assert!(names.iter().all(|n| n.contains("_BASE") || n.contains("_KIT00")), "{names:?}");
+        // One part per slot: nothing from KIT01 / STYLE04 / KITW01 leaks in as a second shell.
+        assert_eq!(names.len(), 9);
+    }
+
+    #[test]
+    fn each_config_dimension_swaps_only_its_own_slots() {
+        let all = customizable_car();
+        let cfg = CarConfig { body_kit: 1, hood_style: 4, light_style: 4, widebody: 1 };
+        let names = names_of(&select_car(&all, &cfg));
+        assert_eq!(
+            names,
+            [
+                "240SX_BASE_A",
+                "240SX_KIT00_SPOILER_A", // Fixed slot stays stock
+                "240SX_KIT01_FRONT_BUMPER_A",
+                "240SX_KIT01_REAR_BUMPER_A",
+                "240SX_KIT01_SKIRT_A",
+                "240SX_KITW01_BODY_A",
+                "240SX_KITW01_DOOR_LEFT_A",
+                "240SX_STYLE04_BRAKELIGHT_A",
+                "240SX_STYLE04_HOOD_A",
+            ]
+        );
+    }
+
+    #[test]
+    fn a_variant_the_car_does_not_have_falls_back_to_stock() {
+        // Kit numbering is sparse (the 240SX has no KIT19/27/28) and not every car has every
+        // style — an absent pick must degrade to KIT00, not leave a hole.
+        let all = customizable_car();
+        let cfg = CarConfig { body_kit: 19, hood_style: 27, light_style: 9, widebody: 3 };
+        let names = names_of(&select_car(&all, &cfg));
+        assert!(names.iter().all(|n| n.contains("_BASE") || n.contains("_KIT00")), "{names:?}");
+    }
+
+    #[test]
+    fn an_uncustomizable_model_keeps_every_part() {
+        // Traffic cars and the shared prop bundles carry no KIT/STYLE token; with nothing to
+        // choose between, dropping the un-namespaced parts would render them empty.
+        let all = vec![part("TAXI_BODY_A", 900), part("TAXI_TIRE_FRONT_A", 120)];
+        assert_eq!(names_of(&select_stock_car(&all)), ["TAXI_BODY_A", "TAXI_TIRE_FRONT_A"]);
     }
 
     #[test]

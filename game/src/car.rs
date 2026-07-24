@@ -7,7 +7,7 @@
 //! bind-group setup stays in the app while the assembly stays here and testable in spirit.
 
 use crate::mesh::{bbox, build_mesh, build_mesh_items};
-use crate::part_groups::{group_of, select_stock_car, Grp};
+use crate::part_groups::{group_of, select_car, CarConfig, Grp};
 use gizmo::prelude::*;
 use gizmo_nfs::{AssetHash, CarTypeInfo, NfsMeshPart, NfsTexture, Tpk, WheelSpec};
 use std::collections::HashMap;
@@ -350,15 +350,17 @@ pub fn build_car_visuals<F>(
     all: &[NfsMeshPart],
     tpk: Option<&Tpk>,
     paint: [f32; 3],
+    cfg: &CarConfig,
     make_material: F,
 ) -> CarVisuals
 where
     F: Fn(PbrLook) -> Material,
 {
-    let stock = select_stock_car(all);
-    // When a KIT00 body provides the outer paint, BASE's painted panels are inner structure
-    // (firewall, inner fenders) or a redundant shell that only pokes out through the skin.
-    let has_kit_body = all.iter().any(|p| p.name.contains("_KIT00_BODY"));
+    let stock = select_car(all, cfg);
+    // When a kit or widebody body provides the outer paint, BASE's painted panels are inner
+    // structure (firewall, inner fenders) or a redundant shell that only pokes out through the
+    // skin. Keyed off the *selected* body (KIT00 or a KITW## widebody), not a literal KIT00.
+    let has_kit_body = stock.iter().any(|p| p.name.contains("_BODY") && !p.name.contains("_BASE"));
     let body_like: Vec<&NfsMeshPart> =
         stock.iter().copied().filter(|p| group_of(&p.name) != Grp::Wheel).collect();
     let paint_parts: Vec<&NfsMeshPart> =
