@@ -8,9 +8,11 @@ Recreating **Need for Speed: Underground 2 (2004)** inside the [Gizmo engine](ht
 
 - **`crates/gizmo-nfs`** — a pure, engine-agnostic NFSU2 asset parser. Depends on **no** `gizmo-*` crate and no GPU/graphics types (`wgpu`, `glam`). It reads NFSU2 binary containers and returns plain CPU data (`NfsCar`, `NfsMeshPart`, `NfsTexture` — `Vec<f32>`/`Vec<u32>`/`Vec<u8>`). Publishable standalone.
 - **`game/`** (package `nfsu2`) — the playable integration layer. Turns parsed CPU data into Gizmo meshes/materials and drives it with the engine's raycast `VehicleController`. The reusable logic lives in a **library** (`game/src/`), with the binaries (`game/src/bin/*.rs`) as thin orchestrators over it:
-  - `part_groups` — **pure, engine-free** part-classification policy: `group_of` (name → material group), `component_key`, and `select_car` (assemble a car in a given `CarConfig` — body kit / hood style / light style / widebody — at the highest available LOD; `select_stock_car` is the all-stock wrapper). Unit-tested; no `gizmo`/`wgpu` types, so keep it that way.
-  - `mesh` — engine-coupled geometry: the NFSU2 → Gizmo coordinate `remap`, `bbox`, `build_mesh` (indexed parts → GPU `Mesh`), `add_transform`.
-  - `car` — the car as a whole: `body_palette` (per-group `PbrLook`), `wheel_look`, `fit_wheel`, `env_color`.
+  - `parts` — **pure, engine-free** part policy. `group` (`group_of`: name → material group), `name` (`component_key`, the `KIT##`/`KITW##`/`STYLE##` namespace and the slot a part fills), `config` (`CarConfig`), `select` (`select_car`: assemble a car in a given config at the highest available LOD; `select_stock_car` is the all-stock wrapper). Unit-tested; no `gizmo`/`wgpu` types, so **keep it that way**.
+  - `geom` — engine-coupled geometry: `frame` (the NFSU2 → Gizmo `remap` and `bbox`), `place` (what a part's file matrix means — placement vs. baked pose), `build` (indexed parts → GPU `Mesh`, `add_transform`).
+  - `car` — the car as a whole: `look` (per-group `PbrLook`), `shader` (routing a material run by its shader hash), `skin` (texture matching + the doorline overlay), `wheel` (`fit_wheel`, `wheel_mount`), and `build_car_visuals` tying them together.
+  - `assets` — the I/O edge: `load_tpk_beside`, `load_cartypeinfo_beside`, `env_color`. Everything else is a pure function of bytes already in memory.
+  - `scene` — the engine-side scaffolding the binaries share: `spawn_body` (one entity per group/textured mesh, compositing the doorline overlay), `wheel_mounts`/`wheel_mirror`/`wheel_material`, `add_lights`, `car_path`.
 
 ## Critical setup: the engine dependency
 

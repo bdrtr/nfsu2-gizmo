@@ -7,11 +7,12 @@
 //! Prints one line: `WxH format=<TextureFormat>` so the reader knows the channel order.
 
 use gizmo::prelude::*;
-use gizmo::renderer::components::LightRole;
 use gizmo::renderer::Renderer;
 use gizmo::wgpu;
 use gizmo_nfs::parse_geometry;
-use nfsu2::car::{build_car_visuals, env_color, load_cartypeinfo_beside, load_tpk_beside, wheel_mount, WheelSurface};
+use nfsu2::assets::{env_color, load_cartypeinfo_beside, load_tpk_beside};
+use nfsu2::car::build_car_visuals;
+use nfsu2::scene::{self, Textures};
 
 fn main() {
     let path = std::env::args().nth(1).expect("usage: nfs_shot GEOMETRY.BIN OUT.raw [W H]");
@@ -108,18 +109,18 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
         }
     }
     if std::env::var("NFS_LIST").is_ok() {
-        for p in nfsu2::part_groups::select_stock_car(&all) {
+        for p in nfsu2::parts::select_stock_car(&all) {
             eprintln!(
                 "{:<36} tris={:<6} grp={:?}",
                 p.name,
                 p.triangle_count(),
-                nfsu2::part_groups::group_of(&p.name)
+                nfsu2::parts::group_of(&p.name)
             );
         }
     }
     let tpk = load_tpk_beside(path);
     let paint = env_color("NFS_COLOR", [0.10, 0.28, 0.72]);
-    let cfg = nfsu2::part_groups::CarConfig::from_env();
+    let cfg = nfsu2::parts::CarConfig::from_env();
     let car = build_car_visuals(&renderer.device, &all, tpk.as_ref(), paint, &cfg, |look| {
         two(Material::new(white.clone()).with_pbr(
             Vec4::new(look.rgb[0], look.rgb[1], look.rgb[2], look.alpha),
@@ -134,91 +135,36 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
     // CarTypeInfo when the game bundle is reachable; else the symmetric fit_wheel corners.
     let cti = load_cartypeinfo_beside(path);
 
-    for gv in car.groups {
-        spawn(&mut world, gv.mesh, gv.material, Transform::new(Vec3::ZERO));
-    }
-    if let Some(interior) = car.interior {
+    let mut car = car;
+    let mut tex = Textures {
+        assets: &mut assets,
+        device: &renderer.device,
+        queue: &renderer.queue,
+        layout: &renderer.scene.texture_bind_group_layout,
+    };
+    scene::spawn_body(&mut world, &mut car, &mut tex, |bg, tint, rough, metal| {
+        two(Material::new(bg).with_pbr(Vec4::new(tint[0], tint[1], tint[2], 1.0), rough, metal))
+    });
+    if let Some(interior) = car.interior.take() {
         spawn(&mut world, interior, mat([0.02, 0.02, 0.025], 0.9, 0.0), Transform::new(Vec3::ZERO));
     }
-    for tp in car.textured {
-        // A body-detail (doorline) overlay is composited over the paint; a full-colour detail
-        // (light lens, badging) uploads as-is.
-        let rgba = match tp.composite_over {
-            Some(paint) => nfsu2::car::composite_over_paint(&tp.texture.rgba, paint),
-            None => tp.texture.rgba.clone(),
-        };
-        let key = format!("nfs_tex_{:08X}_{}", tp.texture.hash.0, tp.composite_over.is_some() as u8);
-        let Ok(bg) = assets.install_decoded_material_texture(
-            &renderer.device,
-            &renderer.queue,
-            &renderer.scene.texture_bind_group_layout,
-            &key,
-            &rgba,
-            tp.texture.width,
-            tp.texture.height,
-        ) else {
-            continue;
-        };
-        let material = two(Material::new(bg).with_pbr(
-            Vec4::new(tp.tint[0], tp.tint[1], tp.tint[2], 1.0),
-            tp.roughness,
-            tp.metallic,
-        ));
-        spawn(&mut world, tp.mesh, material, Transform::new(Vec3::ZERO));
-    }
-    let wheel_y = -ch * 0.5 + fit.radius * 0.95;
-    if let Some((wm, surface)) = car.wheel {
-        let wmat = match surface {
-            WheelSurface::Flat(m) => m,
-            WheelSurface::Textured(tex) => {
-                let key = format!("nfs_tex_{:08X}", tex.hash.0);
-                match assets.install_decoded_material_texture(
-                    &renderer.device,
-                    &renderer.queue,
-                    &renderer.scene.texture_bind_group_layout,
-                    &key,
-                    &tex.rgba,
-                    tex.width,
-                    tex.height,
-                ) {
-                    Ok(bg) => two(Material::new(bg).with_pbr(Vec4::new(1.0, 1.0, 1.0, 1.0), 0.7, 0.2)),
-                    Err(_) => mat([0.09, 0.09, 0.10], 0.7, 0.2),
-                }
-            }
-        };
-        let mounts: Vec<Vec3> = match &cti {
-            Some(c) => c.wheels.iter().map(|w| wheel_mount(w, car_center)).collect(),
-            None => [(-1.0, -1.0), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)]
-                .iter()
-                .map(|(sx, sz)| Vec3::new(sx * fit.half_track, wheel_y, sz * fit.half_wheelbase))
-                .collect(),
-        };
-        for pos in mounts {
-            // The wheel mesh is modelled for one side only; the other side must be turned to
-            // face its rim outward, else it shows its flat inboard back as a black slab. A 180°
-            // yaw (not a reflection — keeps winding/normals) mirrors it about the car centreline.
-            let t = if pos.x < 0.0 {
-                Transform::new(pos).with_rotation(Quat::from_rotation_y(std::f32::consts::PI))
-            } else {
-                Transform::new(pos)
-            };
-            spawn(&mut world, wm.clone(), wmat.clone(), t);
+    if let Some((wheel_mesh, surface)) = car.wheel.take() {
+        let wmat = scene::wheel_material(surface, &mut tex, |bg| {
+            two(Material::new(bg).with_pbr(Vec4::new(1.0, 1.0, 1.0, 1.0), 0.7, 0.2))
+        });
+        for mount in scene::wheel_mounts(cti.as_ref(), fit, car_center, ch) {
+            let t = Transform::new(mount).with_rotation(scene::wheel_mirror(mount));
+            spawn(&mut world, wheel_mesh.clone(), wmat.clone(), t);
         }
     }
 
-    // ── Lights ──
-    let sun = world.spawn();
-    world.add_component(
-        sun,
+    scene::add_lights(
+        &mut world,
         Transform::new(Vec3::new(30.0, 80.0, 40.0))
             .with_rotation(Quat::from_axis_angle(Vec3::new(1.0, 0.3, 0.0).normalize(), -0.8)),
+        2.6,
+        Vec3::new(-30.0, 40.0, -20.0),
     );
-    world.add_component(sun, GlobalTransform::default());
-    world.add_component(sun, DirectionalLight::new(Vec3::new(1.0, 0.97, 0.9), 2.6, LightRole::Sun));
-    let fill = world.spawn();
-    world.add_component(fill, Transform::new(Vec3::new(-30.0, 40.0, -20.0)));
-    world.add_component(fill, GlobalTransform::default());
-    world.add_component(fill, DirectionalLight::new(Vec3::new(0.6, 0.7, 0.9), 0.6, LightRole::Sun));
 
     // ── Camera: 3/4 auto-frame on the origin (meshes are recentered there) ──
     let radius = (cw * cw + ch * ch + cl * cl).sqrt() * 0.5;

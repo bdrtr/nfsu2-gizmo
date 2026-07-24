@@ -18,8 +18,10 @@ use gizmo::egui;
 use gizmo::physics::world::PhysicsWorld;
 use gizmo::prelude::*;
 use gizmo_nfs::parse_geometry;
-use nfsu2::car::{build_car_visuals, env_color, load_tpk_beside, WheelFit, WheelSurface};
-use nfsu2::mesh::add_transform;
+use nfsu2::assets::{env_color, load_tpk_beside};
+use nfsu2::car::{build_car_visuals, WheelFit};
+use nfsu2::scene::{self, Textures};
+use nfsu2::geom::add_transform;
 
 const DEFAULT_CAR: &str =
     "/home/bedir/Games/need-for-speed-underground-2/drive_c/Need for Speed Underground 2/CARS/240SX/GEOMETRY.BIN";
@@ -142,7 +144,7 @@ fn setup_scene(world: &mut World, renderer: &gizmo::renderer::Renderer) -> Drive
     let all = parse_geometry(&bytes).expect("parse GEOMETRY.BIN");
     let tpk = load_tpk_beside(&path); // TEXTURES.BIN next to the model, if present
     let paint = env_color("NFS_COLOR", [0.10, 0.28, 0.72]); // override "r,g,b" in 0..1
-    let cfg = nfsu2::part_groups::CarConfig::from_env();
+    let cfg = nfsu2::parts::CarConfig::from_env();
     let car = build_car_visuals(&renderer.device, &all, tpk.as_ref(), paint, &cfg, |look| {
         Material::new(tex.clone())
             .with_pbr(
@@ -155,96 +157,43 @@ fn setup_scene(world: &mut World, renderer: &gizmo::renderer::Renderer) -> Drive
     let (width, height, length) = (car.width, car.height, car.length);
     let WheelFit { radius, half_wheelbase, half_track } = car.wheel_fit;
 
-    // Each material group is its own entity that rigidly follows the chassis.
-    let mut visual_ids = Vec::new();
-    for gv in car.groups {
-        let e = world.spawn();
-        add_transform(world, e, Transform::new(Vec3::ZERO));
-        world.add_component(e, gv.mesh);
-        world.add_component(e, gv.material);
-        world.add_component(e, MeshRenderer::new());
-        visual_ids.push(e.id());
-    }
+    let mut car = car;
+    let mut tex = Textures {
+        assets: &mut asset_manager,
+        device: &renderer.device,
+        queue: &renderer.queue,
+        layout: &renderer.scene.texture_bind_group_layout,
+    };
+    // Resolve the wheel material first: it borrows the uploader, as `spawn_body` does.
+    let wheel = car.wheel.take().map(|(mesh, surface)| {
+        let m = scene::wheel_material(surface, &mut tex, |bg| {
+            Material::new(bg).with_pbr(Vec4::new(1.0, 1.0, 1.0, 1.0), 0.7, 0.2).with_double_sided(true)
+        });
+        (mesh, m)
+    });
+    // Each body mesh is its own entity that rigidly follows the chassis.
+    let mut visual_ids = scene::spawn_body(world, &mut car, &mut tex, |bg, tint, rough, metal| {
+        Material::new(bg)
+            .with_pbr(Vec4::new(tint[0], tint[1], tint[2], 1.0), rough, metal)
+            .with_double_sided(true)
+    });
     // Dark cabin filler so the glass-less windows don't read as see-through (only for cars
     // without a modelled interior).
-    if let Some(interior) = car.interior {
-        let e = world.spawn();
-        add_transform(world, e, Transform::new(Vec3::ZERO));
-        world.add_component(e, interior);
-        world.add_component(e, mat([0.02, 0.02, 0.025], 0.9, 0.0));
-        world.add_component(e, MeshRenderer::new());
-        visual_ids.push(e.id());
-    }
-    // Textured parts: upload each decoded TPK texture and material-ise it as albedo.
-    let mut textured_count = 0;
-    for tp in car.textured {
-        // A body-detail (doorline) overlay is composited over the paint; a full-colour detail
-        // (light lens, badging) uploads as-is.
-        let rgba = match tp.composite_over {
-            Some(paint) => nfsu2::car::composite_over_paint(&tp.texture.rgba, paint),
-            None => tp.texture.rgba.clone(),
-        };
-        let key = format!("nfs_tex_{:08X}_{}", tp.texture.hash.0, tp.composite_over.is_some() as u8);
-        let Ok(bg) = asset_manager.install_decoded_material_texture(
-            &renderer.device,
-            &renderer.queue,
-            &renderer.scene.texture_bind_group_layout,
-            &key,
-            &rgba,
-            tp.texture.width,
-            tp.texture.height,
-        ) else {
-            continue;
-        };
-        let material = Material::new(bg)
-            .with_pbr(Vec4::new(tp.tint[0], tp.tint[1], tp.tint[2], 1.0), tp.roughness, tp.metallic)
-            .with_double_sided(true);
-        let e = world.spawn();
-        add_transform(world, e, Transform::new(Vec3::ZERO));
-        world.add_component(e, tp.mesh);
-        world.add_component(e, material);
-        world.add_component(e, MeshRenderer::new());
-        visual_ids.push(e.id());
-        textured_count += 1;
+    if let Some(interior) = car.interior.take() {
+        let m = mat([0.02, 0.02, 0.025], 0.9, 0.0);
+        visual_ids.push(scene::spawn_mesh(world, interior, m, Transform::new(Vec3::ZERO)));
     }
     // ── Wheels: the single wheel mesh instanced at four fitted corners ──
     // Wheel centre near the bottom of the body so the lower half sticks out of the arch.
     let wheel_y = -height * 0.5 + radius * 0.95;
     let mut wheels = Vec::new();
-    if let Some((wm, surface)) = car.wheel {
-        // Build the wheel material once (uploading the tire/rim texture if present), then
-        // instance the mesh at the four corners.
-        let wmat = match surface {
-            WheelSurface::Flat(m) => m,
-            WheelSurface::Textured(tex) => {
-                let key = format!("nfs_tex_{:08X}", tex.hash.0);
-                match asset_manager.install_decoded_material_texture(
-                    &renderer.device,
-                    &renderer.queue,
-                    &renderer.scene.texture_bind_group_layout,
-                    &key,
-                    &tex.rgba,
-                    tex.width,
-                    tex.height,
-                ) {
-                    Ok(bg) => Material::new(bg)
-                        .with_pbr(Vec4::new(1.0, 1.0, 1.0, 1.0), 0.7, 0.2)
-                        .with_double_sided(true),
-                    Err(_) => mat([0.09, 0.09, 0.10], 0.7, 0.2),
-                }
-            }
-        };
+    if let Some((mesh, wmat)) = wheel {
+        // The driven wheels sit at the same four corners the vehicle controller attaches to,
+        // each mirrored so its rim faces outward.
         for (sx, sz, front) in [(-1.0, -1.0, true), (1.0, -1.0, true), (-1.0, 1.0, false), (1.0, 1.0, false)] {
-            let e = world.spawn();
-            add_transform(world, e, Transform::new(Vec3::ZERO));
-            world.add_component(e, wm.clone());
-            world.add_component(e, wmat.clone());
-            world.add_component(e, MeshRenderer::new());
-            wheels.push(WheelVis {
-                id: e.id(),
-                local: Vec3::new(sx * half_track, wheel_y, sz * half_wheelbase),
-                front,
-            });
+            let local = Vec3::new(sx * half_track, wheel_y, sz * half_wheelbase);
+            let id = scene::spawn_mesh(world, mesh.clone(), wmat.clone(), Transform::new(Vec3::ZERO));
+            wheels.push(WheelVis { id, local, front });
         }
     }
     world.insert_resource(asset_manager);
@@ -302,7 +251,7 @@ fn setup_scene(world: &mut World, renderer: &gizmo::renderer::Renderer) -> Drive
     world.insert_resource(phys);
 
     println!(
-        "car ready: {} visual groups ({textured_count} textured), {} wheels; dims {width:.2}×{height:.2}×{length:.2}, r={radius:.2}",
+        "car ready: {} visual meshes, {} wheels; dims {width:.2}×{height:.2}×{length:.2}, r={radius:.2}",
         visual_ids.len(),
         wheels.len()
     );

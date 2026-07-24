@@ -15,22 +15,21 @@
 use gizmo::prelude::*;
 use gizmo::simple::{SimpleAppExt, SimpleSceneState};
 use gizmo_nfs::parse_geometry;
-use nfsu2::car::{build_car_visuals, env_color, load_tpk_beside, PbrLook, WheelSurface};
+use nfsu2::assets::{env_color, load_tpk_beside};
+use nfsu2::car::{build_car_visuals, PbrLook};
+use nfsu2::scene::{self, Textures};
 
 const DEFAULT_CAR: &str =
     "/home/bedir/Games/need-for-speed-underground-2/drive_c/Need for Speed Underground 2/CARS/240SX/GEOMETRY.BIN";
 
 fn main() {
-    let path = std::env::args()
-        .nth(1)
-        .or_else(|| std::env::var("NFSU2_CAR").ok())
-        .unwrap_or_else(|| DEFAULT_CAR.to_string());
+    let path = scene::car_path(DEFAULT_CAR);
 
     let bytes = std::fs::read(&path).unwrap_or_else(|e| panic!("cannot read {path}: {e}"));
     let all = parse_geometry(&bytes).expect("failed to parse GEOMETRY.BIN");
     let tpk = load_tpk_beside(&path); // TEXTURES.BIN next to the model, if present
     let paint = env_color("NFS_COLOR", [0.10, 0.28, 0.72]); // override "r,g,b" in 0..1
-    let cfg = nfsu2::part_groups::CarConfig::from_env();
+    let cfg = nfsu2::parts::CarConfig::from_env();
 
     App::<SimpleSceneState>::new("Gizmo — NFSU2 240SX Viewer", 1400, 820)
         .with_simple_scene(move |scene, state| {
@@ -64,7 +63,8 @@ fn main() {
                     .with_double_sided(true)
             };
 
-            let car = build_car_visuals(&scene.renderer.device, &all, tpk.as_ref(), paint, &cfg, make_material);
+            let mut car =
+                build_car_visuals(&scene.renderer.device, &all, tpk.as_ref(), paint, &cfg, make_material);
             println!(
                 "loaded {} material groups + {} textured parts from {path}",
                 car.groups.len(),
@@ -72,99 +72,40 @@ fn main() {
             );
 
             // Meshes are recentered to the car centre, so frame the camera on the origin.
-            let radius =
-                (car.width.powi(2) + car.height.powi(2) + car.length.powi(2)).sqrt() * 0.5;
+            let radius = (car.width.powi(2) + car.height.powi(2) + car.length.powi(2)).sqrt() * 0.5;
             let eye = Vec3::new(radius * 1.5, radius * 0.75, radius * 1.7);
             scene.spawn_camera(state, eye, Vec3::ZERO);
 
-            // Body material groups.
-            for gv in car.groups {
-                scene.world.spawn_bundle((
-                    Transform::default(),
-                    GlobalTransform::default(),
-                    gv.mesh,
-                    gv.material,
-                    MeshRenderer::new(),
-                ));
-            }
+            let mut tex = Textures {
+                assets: scene.asset_manager,
+                device: &scene.renderer.device,
+                queue: &scene.renderer.queue,
+                layout: &scene.renderer.scene.texture_bind_group_layout,
+            };
+            let textured = |bg, tint: [f32; 3], rough, metal| {
+                Material::new(bg)
+                    .with_pbr(Vec4::new(tint[0], tint[1], tint[2], 1.0), rough, metal)
+                    .with_double_sided(true)
+            };
+            // Resolve the wheel's material first: it borrows the uploader, as `spawn_body` does.
+            let wheel = car.wheel.take().map(|(mesh, surface)| {
+                let m = scene::wheel_material(surface, &mut tex, |bg| textured(bg, [1.0; 3], 0.7, 0.2));
+                (mesh, m)
+            });
+            scene::spawn_body(scene.world, &mut car, &mut tex, textured);
 
             // Dark cabin filler so the glass-less windows don't read as see-through (only for
             // cars without a modelled interior).
-            if let Some(interior) = car.interior {
-                scene.world.spawn_bundle((
-                    Transform::default(),
-                    GlobalTransform::default(),
-                    interior,
-                    make_material(PbrLook { rgb: [0.02, 0.02, 0.025], roughness: 0.9, metallic: 0.0, alpha: 1.0 }),
-                    MeshRenderer::new(),
-                ));
-            }
-
-            // Textured parts: upload each decoded TPK texture and use it as albedo.
-            for tp in car.textured {
-                let key = format!("nfs_tex_{:08X}", tp.texture.hash.0);
-                let Ok(bg) = scene.asset_manager.install_decoded_material_texture(
-                    &scene.renderer.device,
-                    &scene.renderer.queue,
-                    &scene.renderer.scene.texture_bind_group_layout,
-                    &key,
-                    &tp.texture.rgba,
-                    tp.texture.width,
-                    tp.texture.height,
-                ) else {
-                    continue;
-                };
-                let material = Material::new(bg)
-                    .with_pbr(Vec4::new(tp.tint[0], tp.tint[1], tp.tint[2], 1.0), tp.roughness, tp.metallic)
-                    .with_double_sided(true);
-                scene.world.spawn_bundle((
-                    Transform::default(),
-                    GlobalTransform::default(),
-                    tp.mesh,
-                    material,
-                    MeshRenderer::new(),
-                ));
+            if let Some(interior) = car.interior.take() {
+                let look = PbrLook { rgb: [0.02, 0.02, 0.025], roughness: 0.9, metallic: 0.0, alpha: 1.0 };
+                scene::spawn_mesh(scene.world, interior, make_material(look), Transform::default());
             }
 
             // Four static wheels at the fitted corners (lower half tucked into the arch).
-            let fit = car.wheel_fit;
-            let wheel_y = -car.height * 0.5 + fit.radius * 0.95;
-            if let Some((wm, surface)) = car.wheel {
-                // Build the wheel material once, then instance the mesh at the four corners.
-                let wmat = match surface {
-                    WheelSurface::Flat(m) => m,
-                    WheelSurface::Textured(tex) => {
-                        let key = format!("nfs_tex_{:08X}", tex.hash.0);
-                        match scene.asset_manager.install_decoded_material_texture(
-                            &scene.renderer.device,
-                            &scene.renderer.queue,
-                            &scene.renderer.scene.texture_bind_group_layout,
-                            &key,
-                            &tex.rgba,
-                            tex.width,
-                            tex.height,
-                        ) {
-                            Ok(bg) => Material::new(bg)
-                                .with_pbr(Vec4::new(1.0, 1.0, 1.0, 1.0), 0.7, 0.2)
-                                .with_double_sided(true),
-                            Err(_) => make_material(PbrLook {
-                                rgb: [0.09, 0.09, 0.10],
-                                roughness: 0.7,
-                                metallic: 0.2,
-                                alpha: 1.0,
-                            }),
-                        }
-                    }
-                };
-                for (sx, sz) in [(-1.0, -1.0), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)] {
-                    let t = Transform::new(Vec3::new(sx * fit.half_track, wheel_y, sz * fit.half_wheelbase));
-                    scene.world.spawn_bundle((
-                        t,
-                        GlobalTransform { matrix: t.local_matrix },
-                        wm.clone(),
-                        wmat.clone(),
-                        MeshRenderer::new(),
-                    ));
+            if let Some((mesh, wmat)) = wheel {
+                for mount in scene::wheel_mounts(None, car.wheel_fit, car.center, car.height) {
+                    let t = Transform::new(mount).with_rotation(scene::wheel_mirror(mount));
+                    scene::spawn_mesh(scene.world, mesh.clone(), wmat.clone(), t);
                 }
             }
         })

@@ -1,116 +1,10 @@
-//! Pure, engine-free classification of NFSU2 car parts.
-//!
-//! This module owns the *presentation policy* for a car's geometry: which material group
-//! a part belongs to, and which parts make up the default (showroom) configuration. It
-//! touches no engine or GPU types — only part names and triangle counts — so it stays
-//! trivially unit-testable and reusable across every demo binary.
+//! Assembling one configuration of a car out of all its parts: which namespace fills each
+//! slot, and which LOD of the chosen part to keep.
 
+use super::config::CarConfig;
+use super::group::{group_of, Grp};
+use super::name::{component_key, namespace, slot_of, Ns, Slot};
 use gizmo_nfs::NfsMeshPart;
-
-/// The material category a part is rendered with, decided purely from its name.
-///
-/// `Skip` parts are deliberately never rendered: engine-bay and underbody geometry that
-/// is hidden on a grounded car, and texture-only decals that only look right once the TPK
-/// texture is applied (as flat colour they z-fight the body they sit on).
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub enum Grp {
-    /// Painted body panels.
-    Paint,
-    /// Windows / windshield.
-    Glass,
-    /// Chrome trim and mirrors.
-    Chrome,
-    /// Head-lamp lenses.
-    Headlight,
-    /// Brake / tail lights.
-    Brakelight,
-    /// Exhaust tips.
-    Exhaust,
-    /// Dark plastic / miscellaneous trim.
-    Trim,
-    /// Wheels (tire + rim), handled separately from the body.
-    Wheel,
-    /// Never rendered.
-    Skip,
-}
-
-/// Classify a part into a [`Grp`] from its (often fixed-length-truncated) name.
-///
-/// Ordering matters: the `Skip` and `Wheel` keywords are tested before the broad body
-/// keywords so that, e.g., `KIT00_FRONT_WHEEL_A` is a wheel and `..._HOOD_UNDER_A` is
-/// skipped rather than painted.
-#[must_use]
-pub fn group_of(name: &str) -> Grp {
-    // Decals are livery overlays — coplanar with the body, they only look right with the
-    // real texture; as flat colour they z-fight, so drop them until TPK is decoded. The
-    // exception is the window decals, which are the actual glass panels sitting *inside*
-    // the greenhouse openings (not on a painted surface), so render them as glass.
-    if name.contains("DECAL") {
-        if name.contains("WINDOW") {
-            return Grp::Glass;
-        }
-        return Grp::Skip;
-    }
-    // `WHEE`, not `WHEEL`: the fixed-length name field clips the tail, and on a long car name it
-    // eats the L too (`IMPREZAWRX_KIT00_FRONT_WHEE`, `LANCEREVO8_KIT00_REAR_WHEE`). Matching the
-    // full word left those cars' wheels classified as trim — baked into the body mesh as a dark
-    // lump, with nothing left for the wheel instancing, so the car rolled on empty arches.
-    if name.contains("WHEE") || name.contains("TIRE") || name.contains("RIM") {
-        return Grp::Wheel;
-    }
-    // Hidden/internal geometry (engine bay, underbody, unlocked audio panels).
-    if name.contains("ENGINE") || name.contains("UNDER") || name.contains("UNL") {
-        return Grp::Skip;
-    }
-    if name.contains("WINDOW") || name.contains("WINDSHIELD") || name.contains("GLASS") {
-        return Grp::Glass;
-    }
-    if name.contains("HEADLIGHT") {
-        return Grp::Headlight;
-    }
-    if name.contains("BRAKELIGHT") || name.contains("TAILLIGHT") {
-        return Grp::Brakelight;
-    }
-    // NFSU2 truncates long names: the side mirrors arrive as `..._MIRRO` (left) and
-    // `..._MIRR` (right), so match the shortened stem rather than the full word.
-    if name.contains("MIRR") {
-        return Grp::Chrome;
-    }
-    if name.contains("EXHAUST") {
-        return Grp::Exhaust;
-    }
-    if name.contains("BASE")
-        || name.contains("BODY")
-        || name.contains("HOOD")
-        || name.contains("DOOR")
-        || name.contains("FENDER")
-        || name.contains("BUMPER")
-        || name.contains("TRUNK")
-        || name.contains("SKIRT")
-        || name.contains("ROOF")
-        || name.contains("SPOILER")
-        || name.contains("QUARTER")
-    {
-        return Grp::Paint;
-    }
-    Grp::Trim
-}
-
-/// Strip a trailing `_A`..`_D` LOD suffix to get a logical component key, so the four LOD
-/// variants of one panel collapse to a single component.
-///
-/// Names truncated by NFSU2's fixed-length name field (e.g. `..._HEADLIGHT_LEFT_`) have no
-/// such suffix and key as-is; two of their LODs then share a key and are disambiguated by
-/// triangle count in [`select_stock_car`].
-#[must_use]
-pub fn component_key(name: &str) -> &str {
-    let b = name.as_bytes();
-    if b.len() >= 2 && b[b.len() - 2] == b'_' && matches!(b[b.len() - 1], b'A'..=b'D') {
-        &name[..name.len() - 2]
-    } else {
-        name
-    }
-}
 
 /// CARSKIN shader hash (`0x00134013`, a painted body run). Mirrors `car::shader::CARSKIN`;
 /// duplicated here so part selection can tell a paintable door skin from a glass-only door
@@ -151,129 +45,6 @@ fn door_zone_verts(p: &NfsMeshPart) -> usize {
                 && (v[2] - mid(2)).abs() < 0.30 * ext(2) // middle of the height
         })
         .count()
-}
-
-/// A car configuration: which aftermarket parts replace the stock ones. `0` in any field means
-/// "stock" (kit slot `KIT00`), so [`CarConfig::stock`] (all zero) is the default showroom car.
-/// The NFSU2 geometry only holds body kits, hood/light styles and widebody sets per car; the
-/// universal aftermarket spoilers and rims live in a separate global bundle, so they are not
-/// configured here.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct CarConfig {
-    /// Body kit `KIT##` sourcing the front bumper, rear bumper and side skirt (`0` = stock).
-    pub body_kit: u8,
-    /// Hood design `STYLE##` (`0` = stock `KIT00` hood).
-    pub hood_style: u8,
-    /// Head- and tail-light design `STYLE##` (`STYLE01..14`; `0` = stock).
-    pub light_style: u8,
-    /// Widebody kit `KITW##` replacing the body and doors (`0` = stock body).
-    pub widebody: u8,
-}
-
-impl CarConfig {
-    /// The stock showroom car (all slots `KIT00`).
-    #[must_use]
-    pub const fn stock() -> Self {
-        Self { body_kit: 0, hood_style: 0, light_style: 0, widebody: 0 }
-    }
-
-    /// Build a config from `NFS_KIT` / `NFS_STYLE_HOOD` / `NFS_STYLE_LIGHT` / `NFS_WIDE`
-    /// environment variables (each a decimal part number; absent or unparsable = stock).
-    #[must_use]
-    pub fn from_env() -> Self {
-        let n = |k: &str| std::env::var(k).ok().and_then(|v| v.trim().parse().ok()).unwrap_or(0);
-        Self {
-            body_kit: n("NFS_KIT"),
-            hood_style: n("NFS_STYLE_HOOD"),
-            light_style: n("NFS_STYLE_LIGHT"),
-            widebody: n("NFS_WIDE"),
-        }
-    }
-}
-
-impl Default for CarConfig {
-    fn default() -> Self {
-        Self::stock()
-    }
-}
-
-/// The customization namespace a part name belongs to, parsed from its `KIT##` / `KITW##` /
-/// `STYLE##` token (or `BASE`). Survives NFSU2's 27-char name truncation, which only clips the
-/// trailing LOD/side suffix, never the leading namespace token.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum Ns {
-    /// The shared `BASE` part (greenhouse, interior, trim).
-    Base,
-    /// Kit slot `KIT##` (`00` = stock; `01+` aftermarket body kits).
-    Kit(u8),
-    /// Purchasable `STYLE##` (hoods, lights, engine bays).
-    Style(u8),
-    /// Widebody kit `KITW##`.
-    Wide(u8),
-    /// No customization token (miscellaneous / decals).
-    Other,
-}
-
-/// Parse the decimal number immediately following `tag` in `name`, if any.
-fn num_after(name: &str, tag: &str) -> Option<u8> {
-    let i = name.find(tag)? + tag.len();
-    let digits: String = name[i..].chars().take_while(char::is_ascii_digit).collect();
-    digits.parse().ok()
-}
-
-fn namespace(name: &str) -> Ns {
-    // `KITW##` before `KIT##` (the former contains the latter's letters).
-    if let Some(n) = num_after(name, "KITW") {
-        return Ns::Wide(n);
-    }
-    if let Some(n) = num_after(name, "STYLE") {
-        return Ns::Style(n);
-    }
-    if let Some(n) = num_after(name, "KIT") {
-        return Ns::Kit(n);
-    }
-    if name.contains("_BASE") {
-        return Ns::Base;
-    }
-    Ns::Other
-}
-
-/// The customization slot a part fills — decides which namespace sources it (see [`select_car`]).
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum Slot {
-    FrontBumper,
-    RearBumper,
-    Skirt,
-    Hood,
-    Headlight,
-    Brakelight,
-    Body,
-    Door,
-    /// Everything not swapped by a config dimension (mirrors, trunk, exhaust, wheel, spoiler,
-    /// roof, …) — always sourced from the stock kit.
-    Fixed,
-}
-
-fn slot_of(name: &str) -> Slot {
-    if name.contains("FRONT_BUMPER") {
-        Slot::FrontBumper
-    } else if name.contains("REAR_BUMPER") {
-        Slot::RearBumper
-    } else if name.contains("SKIRT") {
-        Slot::Skirt
-    } else if name.contains("HOOD") {
-        Slot::Hood
-    } else if name.contains("HEADLIGHT") {
-        Slot::Headlight
-    } else if name.contains("BRAKELIGHT") {
-        Slot::Brakelight
-    } else if name.contains("BODY") {
-        Slot::Body
-    } else if name.contains("DOOR") {
-        Slot::Door
-    } else {
-        Slot::Fixed
-    }
 }
 
 /// Assemble a car in configuration `cfg` from all parsed parts: the shared `BASE` greenhouse plus
@@ -381,30 +152,6 @@ pub fn select_stock_car(all: &[NfsMeshPart]) -> Vec<&NfsMeshPart> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn classifies_by_keyword_with_correct_precedence() {
-        // A kit-prefixed wheel is a wheel, not paint.
-        assert_eq!(group_of("240SX_KIT00_FRONT_WHEEL_A"), Grp::Wheel);
-        // …and still a wheel when the name field clipped the `L` off (long car names).
-        assert_eq!(group_of("IMPREZAWRX_KIT00_FRONT_WHEE"), Grp::Wheel);
-        assert_eq!(group_of("LANCEREVO8_KIT00_REAR_WHEE"), Grp::Wheel);
-        // Hidden geometry wins over the body keyword it also contains.
-        assert_eq!(group_of("240SX_KIT00_HOOD_UNDER_A"), Grp::Skip);
-        assert_eq!(group_of("240SX_KIT00_ENGINE_A"), Grp::Skip);
-        // Window decals are the glass panels; other decals are texture-only livery.
-        assert_eq!(group_of("240SX_DECAL_FRONT_WINDOW_WI"), Grp::Glass);
-        assert_eq!(group_of("240SX_DECAL_LEFT_QUARTER_RE"), Grp::Skip);
-        // Ordinary body / trim.
-        assert_eq!(group_of("240SX_BASE_A"), Grp::Paint);
-        assert_eq!(group_of("240SX_KIT00_HEADLIGHT_LEFT_"), Grp::Headlight);
-        assert_eq!(group_of("240SX_KIT00_BRAKELIGHT_A"), Grp::Brakelight);
-        // Both side mirrors, truncated to different lengths by the fixed-size name field.
-        assert_eq!(group_of("240SX_KIT00_LEFT_SIDE_MIRRO"), Grp::Chrome);
-        assert_eq!(group_of("240SX_KIT00_RIGHT_SIDE_MIRR"), Grp::Chrome);
-        assert_eq!(group_of("240SX_KIT00_EXHAUST_A"), Grp::Exhaust);
-        assert_eq!(group_of("240SX_KIT00_ANTENNA"), Grp::Trim);
-    }
 
     // NfsMeshPart / NfsMaterialRange are #[non_exhaustive], so build via Default + field set.
     fn body_lod(name: &str, tris: usize, door_verts: usize) -> NfsMeshPart {
@@ -544,14 +291,5 @@ mod tests {
         // choose between, dropping the un-namespaced parts would render them empty.
         let all = vec![part("TAXI_BODY_A", 900), part("TAXI_TIRE_FRONT_A", 120)];
         assert_eq!(names_of(&select_stock_car(&all)), ["TAXI_BODY_A", "TAXI_TIRE_FRONT_A"]);
-    }
-
-    #[test]
-    fn component_key_collapses_lod_suffix_only() {
-        assert_eq!(component_key("240SX_KIT00_BODY_A"), "240SX_KIT00_BODY");
-        assert_eq!(component_key("240SX_KIT00_BODY_D"), "240SX_KIT00_BODY");
-        // No trailing single A..D letter → unchanged (truncated names, or non-LOD names).
-        assert_eq!(component_key("240SX_KIT00_HEADLIGHT_LEFT_"), "240SX_KIT00_HEADLIGHT_LEFT_");
-        assert_eq!(component_key("240SX_KIT00_TRUNK_AUDIO_UNL"), "240SX_KIT00_TRUNK_AUDIO_UNL");
     }
 }
