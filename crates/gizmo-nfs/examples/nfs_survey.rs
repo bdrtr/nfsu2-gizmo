@@ -11,6 +11,13 @@ use gizmo_nfs::{parse_geometry, Mat4, NfsMeshPart};
 const CARSKIN: u32 = 0xd6d6_080a; // painted body panels
 const PLAINNOTHING: u32 = 0x010c_b64a; // unshaded filler (interior tub on BASE, wheel-well filler on kits)
 
+/// Minimum translation (L1, metres) that counts as a placement — mirrors the game's
+/// `mesh::MIN_PLACEMENT_TRANSLATION`. `SURVEY_TMIN` overrides it, so a candidate threshold can be
+/// swept over the fleet (diffing two scans) before it is adopted in the game.
+fn tmin() -> f32 {
+    std::env::var("SURVEY_TMIN").ok().and_then(|v| v.parse().ok()).unwrap_or(0.05)
+}
+
 fn det3(m: &Mat4) -> f32 {
     m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
         + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0])
@@ -25,7 +32,7 @@ fn should_place(m: &Mat4, centroid: &[f32; 3]) -> bool {
     if det3(m) <= 1e-6 {
         return false;
     }
-    if m[3][0].abs() + m[3][1].abs() + m[3][2].abs() > 1e-4 {
+    if m[3][0].abs() + m[3][1].abs() + m[3][2].abs() > tmin() {
         return true;
     }
     (centroid[0] * centroid[0] + centroid[1] * centroid[1] + centroid[2] * centroid[2]).sqrt() < 0.35
@@ -120,7 +127,7 @@ fn main() {
             // Match the game's should_place, and name why each part is/ isn't applied.
             let class = if d < -1e-6 {
                 "reflection" // det<0 → baked mirror, skipped
-            } else if trans > 1e-4 {
+            } else if trans > tmin() {
                 "placement " // real translation → applied
             } else if ident3 <= 1e-3 {
                 "identity  " // no-op

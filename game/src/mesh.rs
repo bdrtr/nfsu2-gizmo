@@ -40,6 +40,14 @@ fn part_centroid(p: &NfsMeshPart) -> [f32; 3] {
     [s[0] / n, s[1] / n, s[2] / n]
 }
 
+/// Below this translation (L1, metres) a matrix is treated as carrying **no** placement, so the
+/// articulation test below decides. A real placement moves a part by tens of centimetres or more
+/// (the closest across the fleet: a 6 cm van body, an 8 cm licence plate, a 16 cm mirror); an
+/// articulation pose carries only matrix noise, 1–3 cm. Taking any non-zero translation as a
+/// placement misread that noise: the taxi and the bus applied their pose and inflated to a 7 m
+/// and a 3×-scaled body, and the coupe rolled 90° onto its side.
+const MIN_PLACEMENT_TRANSLATION: f32 = 0.05;
+
 /// Decide whether a part's file matrix is a real *placement* to apply, or a transform to leave
 /// alone because the vertices are already baked in their assembled position.
 ///
@@ -54,7 +62,7 @@ fn part_centroid(p: &NfsMeshPart) -> [f32; 3] {
 ///   across; the Eclipse's `HOOD_A` carries a det≈15.6 scale and explodes to a 6 m wingspan.
 ///
 /// Applied:
-/// - a real **placement**: non-zero translation (the rear wing sits ~2 m back, brake discs).
+/// - a real **placement**: a *meaningful* translation (the rear wing sits ~2 m back, brake discs).
 /// - an **origin-modelled** detail with only a rotation/scale (wheels, brake discs, exhaust
 ///   tips are modelled at the origin and merely oriented by the matrix): a rotation about the
 ///   origin does not move an origin-centred part, so applying it is what the clean cars already
@@ -65,7 +73,7 @@ fn should_place(m: &Mat4, centroid: &[f32; 3]) -> bool {
         return false;
     }
     let translation = m[3][0].abs() + m[3][1].abs() + m[3][2].abs();
-    if translation > 1e-4 {
+    if translation > MIN_PLACEMENT_TRANSLATION {
         return true;
     }
     // No translation: an origin-modelled part (small centroid) is merely oriented — apply it;
@@ -264,6 +272,25 @@ mod tests {
         let exhaust = m([[0.0, 0.0, 1.0, 0.0], [0.0, 1.0, 0.0, 0.0], [-1.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 1.0]]);
         assert!(det3(&exhaust) > 0.0);
         assert!(should_place(&exhaust, &[0.11, -0.03, 0.0]));
+    }
+
+    #[test]
+    fn centimetre_scale_translation_is_noise_not_a_placement() {
+        // TAXI_BODY_A: a 1.6x scale (det ≈ 4.23) whose only translation is 2 cm of matrix noise,
+        // on a body modelled off the origin (0.69 m up). Reading that noise as a placement applied
+        // the scale and inflated the taxi to a 7.3 m blob; it is an articulation pose to skip.
+        let taxi = m([[1.62, 0.0, 0.0, 0.0], [0.0, 1.62, 0.0, 0.0], [0.0, 0.0, 1.62, 0.0], [0.01, 0.0, 0.01, 1.0]]);
+        assert!(det3(&taxi) > 4.0);
+        assert!(!should_place(&taxi, &[-0.02, 0.0, 0.69]));
+
+        // COUPE_BODY_A: the same shape of noise (3 cm) but a 90° roll about the length axis — it
+        // laid the car on its side. det ≈ 1, so only the translation test separates it.
+        let coupe = m([[1.0, 0.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, -1.0, 0.0, 0.0], [0.01, 0.01, 0.01, 1.0]]);
+        assert!(!should_place(&coupe, &[0.01, 0.0, 0.58]));
+
+        // The closest real placement across the fleet — a 6 cm van body offset — still applies.
+        let van = m([[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.06, 0.0, 0.0, 1.0]]);
+        assert!(should_place(&van, &[0.0, 0.0, 0.9]));
     }
 
     #[test]
