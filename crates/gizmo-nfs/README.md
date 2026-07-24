@@ -41,3 +41,11 @@ cargo run -p gizmo-nfs --features tools --example nfs_dump -- /path/to/FILE
 
 Detects the compression codec, decompresses if needed, and prints the chunk tree (or
 lists a BIGF/VIV archive's contents) — the workhorse for locking the unconfirmed formats.
+
+```bash
+cargo run -p gizmo-nfs --features tools --example nfs_parts -- /path/to/CARS/240SX/GEOMETRY.BIN
+```
+
+Lists a car's parts grouped by customization namespace (`BASE` / `KIT##` / `KITW##` /
+`STYLE##`) with triangle counts — which body kits, widebodies, hoods and light styles a
+given car actually ships, so a configuration can be picked without guessing.
