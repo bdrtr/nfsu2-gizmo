@@ -108,6 +108,47 @@ pub fn component_key(name: &str) -> &str {
     }
 }
 
+/// CARSKIN shader hash (`0x00134013`, a painted body run). Mirrors `car::shader::CARSKIN`;
+/// duplicated here so part selection can tell a paintable door skin from a glass-only door
+/// without reaching into the engine layer.
+const CARSKIN_SHADER: u32 = 0xd6d6_080a;
+
+/// A door "skin" is the exterior door surface — not the inner `PANEL` card or `SILL` rocker.
+fn is_door_skin(name: &str) -> bool {
+    name.contains("DOOR") && !name.contains("PANEL") && !name.contains("SILL")
+}
+
+/// Whether the showroom car ships a **paintable exterior door skin**: a door-skin part carrying
+/// a CARSKIN run, or with no material list (painted flat by name). Most cars do (240SX's
+/// `DOOR_LEFT_A`). Some — RX8, CELICA, IS300, IMPREZAWRX, COROLLA — do not: they bake the door
+/// into a *lower* body LOD, so their highest-triangle body LOD has a bare door hole that exposes
+/// the dark interior (a "black door"). [`select_stock_car`] keys off this.
+fn has_paintable_door_skin(all: &[NfsMeshPart]) -> bool {
+    all.iter()
+        .filter(|p| p.name.contains("_KIT00") || p.name.contains("_BASE"))
+        .any(|p| {
+            is_door_skin(&p.name)
+                && (p.materials.is_empty()
+                    || p.materials.iter().any(|m| m.shader.0 == CARSKIN_SHADER))
+        })
+}
+
+/// Vertices in a part's "door zone" — mid-length, outer-width, mid-height of its own bounding box
+/// (NFSU2 raw coords: x = length, y = width, z = height). A body LOD that bakes the door in has
+/// many here; a LOD with a bare door hole (one that expects a separate door skin) has few.
+fn door_zone_verts(p: &NfsMeshPart) -> usize {
+    let mid = |i: usize| (p.bbox_min[i] + p.bbox_max[i]) * 0.5;
+    let ext = |i: usize| (p.bbox_max[i] - p.bbox_min[i]).max(1e-3);
+    p.positions
+        .iter()
+        .filter(|v| {
+            (v[0] - mid(0)).abs() < 0.30 * ext(0) // middle of the length
+                && (v[1] - mid(1)).abs() > 0.35 * ext(1) // outer width (either side)
+                && (v[2] - mid(2)).abs() < 0.30 * ext(2) // middle of the height
+        })
+        .count()
+}
+
 /// Assemble the default (showroom) car: the shared `BASE` body plus kit slot `KIT00`,
 /// picking the **highest-detail** variant of each logical component.
 ///
@@ -115,9 +156,15 @@ pub fn component_key(name: &str) -> &str {
 /// truncated out of the name (two LODs then share a [`component_key`]). Everything else is
 /// dropped: other kits (`KIT01`+) and the `STYLE##` purchasable variants (a dozen alternate
 /// headlights/spoilers/rims) would otherwise render as overlapping duplicates.
+///
+/// **Body exception:** a car with no paintable door skin ([`has_paintable_door_skin`]) bakes the
+/// door into a lower body LOD; its highest-triangle LOD has a bare door hole. For the body
+/// component of such a car, pick the LOD with the best [`door_zone_verts`] coverage (the one that
+/// fills the door) instead of the one with the most triangles.
 #[must_use]
 pub fn select_stock_car(all: &[NfsMeshPart]) -> Vec<&NfsMeshPart> {
     use std::collections::HashMap;
+    let fill_body_door = !has_paintable_door_skin(all);
     let mut best: HashMap<&str, &NfsMeshPart> = HashMap::new();
     for p in all {
         // The showroom set is the shared BASE part (which carries the greenhouse: glass,
@@ -133,9 +180,17 @@ pub fn select_stock_car(all: &[NfsMeshPart]) -> Vec<&NfsMeshPart> {
         if !is_default || is_duplicate_shell || group_of(&p.name) == Grp::Skip {
             continue;
         }
+        let prefer_door_fill = fill_body_door && p.name.contains("_BODY");
         best.entry(component_key(&p.name))
             .and_modify(|cur| {
-                if p.triangle_count() > cur.triangle_count() {
+                let better = if prefer_door_fill {
+                    // Door coverage first, triangles as the tie-break.
+                    (door_zone_verts(p), p.triangle_count())
+                        > (door_zone_verts(cur), cur.triangle_count())
+                } else {
+                    p.triangle_count() > cur.triangle_count()
+                };
+                if better {
                     *cur = p;
                 }
             })
@@ -167,6 +222,61 @@ mod tests {
         assert_eq!(group_of("240SX_KIT00_RIGHT_SIDE_MIRR"), Grp::Chrome);
         assert_eq!(group_of("240SX_KIT00_EXHAUST_A"), Grp::Exhaust);
         assert_eq!(group_of("240SX_KIT00_ANTENNA"), Grp::Trim);
+    }
+
+    // NfsMeshPart / NfsMaterialRange are #[non_exhaustive], so build via Default + field set.
+    fn body_lod(name: &str, tris: usize, door_verts: usize) -> NfsMeshPart {
+        // bbox mid=0, ext=(4,2,2) → door zone: |x|<1.2, |y|>0.7, |z|<0.6.
+        let mut positions = vec![[0.0, 0.0, 0.0]]; // one out-of-zone vertex
+        positions.extend(std::iter::repeat_n([0.0, 0.9, 0.0], door_verts)); // in-zone
+        let mut p = NfsMeshPart::default();
+        p.name = name.to_string();
+        p.positions = positions;
+        p.indices = vec![0; tris * 3];
+        p.bbox_min = [-2.0, -1.0, -1.0];
+        p.bbox_max = [2.0, 1.0, 1.0];
+        p
+    }
+
+    fn door_skin(name: &str, shader: u32) -> NfsMeshPart {
+        let mut m = gizmo_nfs::types::NfsMaterialRange::default();
+        m.shader = gizmo_nfs::AssetHash(shader);
+        let mut p = NfsMeshPart::default();
+        p.name = name.to_string();
+        p.materials = vec![m];
+        p
+    }
+
+    #[test]
+    fn body_lod_picks_door_fill_when_no_paintable_door_skin() {
+        // A car whose only door skin is glass (no CARSKIN, not empty) has a bare door hole in its
+        // high-triangle body LOD → select the lower-triangle LOD that fills the door.
+        let parts = vec![
+            body_lod("RX8_KIT00_BODY_A", 100, 0), // most triangles, but door hole
+            body_lod("RX8_KIT00_BODY_B", 50, 5),  // fewer triangles, door filled
+            door_skin("RX8_KIT00_DOOR_LEFT_B", 0x471a_1dca), // glass only → not paintable
+        ];
+        let body = select_stock_car(&parts)
+            .into_iter()
+            .find(|p| p.name.contains("_BODY"))
+            .expect("a body part");
+        assert_eq!(body.name, "RX8_KIT00_BODY_B");
+    }
+
+    #[test]
+    fn body_lod_keeps_highest_triangles_when_a_real_door_skin_exists() {
+        // A car with a CARSKIN door skin keeps the max-triangle body LOD (no door-fill override),
+        // so cars like the 240SX are untouched.
+        let parts = vec![
+            body_lod("240SX_KIT00_BODY_A", 100, 0),
+            body_lod("240SX_KIT00_BODY_B", 50, 5),
+            door_skin("240SX_KIT00_DOOR_LEFT_A", CARSKIN_SHADER), // paintable skin
+        ];
+        let body = select_stock_car(&parts)
+            .into_iter()
+            .find(|p| p.name.contains("_BODY"))
+            .expect("a body part");
+        assert_eq!(body.name, "240SX_KIT00_BODY_A");
     }
 
     #[test]

@@ -207,6 +207,16 @@ fn shader_group(shader: u32) -> Option<Grp> {
     }
 }
 
+/// Whether a material run is [`shader::PLAINNOTHING`] filler that should be dropped rather than
+/// rendered. That shader is "unshaded filler": on **BASE** it is the dark interior tub (kept, so
+/// the cabin reads through the glass), but on a **kit body** it is wheel-well filler the real game
+/// hides behind the wheel — drawn as an opaque flat panel it juts out past the arch as a black
+/// square (was visible on RX7/RX8/GTO/GOLF/SKYLINE). Drop it only there, keyed off whether the
+/// owning part is the BASE shell.
+fn is_dropped_filler(shader: u32, part_is_base: bool) -> bool {
+    shader == shader::PLAINNOTHING && !part_is_base
+}
+
 /// Minimum shared-prefix length for a part name to match a texture's DebugName — long
 /// enough to reach past the shared `CAR_KIT00_` prefix into the component word.
 const NAME_MATCH_MIN: usize = 16;
@@ -316,6 +326,11 @@ where
             if base_paint && m.shader.0 == shader::CARSKIN {
                 continue;
             }
+            // PLAINNOTHING filler juts out as a black square on kit bodies — drop it there,
+            // keep it on BASE where it is the interior tub (see `is_dropped_filler`).
+            if is_dropped_filler(m.shader.0, p.name.contains("_BASE")) {
+                continue;
+            }
             // The shader decides the run's type. Glass/chrome/interior/trim/paint runs render
             // as their flat group — this is what turns BASE's greenhouse (glass, window frames,
             // seats, mouldings) into proper dark glass + trim instead of a bright painted mess.
@@ -386,4 +401,27 @@ where
     let interior: Option<Mesh> = None;
 
     CarVisuals { groups, textured, center, width, height, length, wheel, wheel_fit, interior }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn plainnothing_filler_dropped_only_off_base() {
+        // The interior tub on BASE is kept (read through the glass)...
+        assert!(!is_dropped_filler(shader::PLAINNOTHING, true));
+        // ...but the same "unshaded filler" shader on a kit body is the wheel-well filler that
+        // otherwise juts out as an opaque black square, so it is dropped.
+        assert!(is_dropped_filler(shader::PLAINNOTHING, false));
+    }
+
+    #[test]
+    fn other_shaders_are_never_treated_as_filler() {
+        // Only PLAINNOTHING is filler; real materials are never dropped, on BASE or a kit body.
+        for sh in [shader::CARSKIN, shader::WINDSHIELD, shader::CHROME, shader::INTERIOR, shader::BOTTOM] {
+            assert!(!is_dropped_filler(sh, true));
+            assert!(!is_dropped_filler(sh, false));
+        }
+    }
 }
