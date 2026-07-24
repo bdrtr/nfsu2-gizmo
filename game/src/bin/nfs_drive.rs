@@ -143,7 +143,13 @@ fn setup_scene(world: &mut World, renderer: &gizmo::renderer::Renderer) -> Drive
     let tpk = load_tpk_beside(&path); // TEXTURES.BIN next to the model, if present
     let paint = env_color("NFS_COLOR", [0.10, 0.28, 0.72]); // override "r,g,b" in 0..1
     let car = build_car_visuals(&renderer.device, &all, tpk.as_ref(), paint, |look| {
-        mat(look.rgb, look.roughness, look.metallic)
+        Material::new(tex.clone())
+            .with_pbr(
+                Vec4::new(look.rgb[0], look.rgb[1], look.rgb[2], look.alpha),
+                look.roughness,
+                look.metallic,
+            )
+            .with_double_sided(true)
     });
     let (width, height, length) = (car.width, car.height, car.length);
     let WheelFit { radius, half_wheelbase, half_track } = car.wheel_fit;

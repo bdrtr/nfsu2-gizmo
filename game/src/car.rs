@@ -22,11 +22,18 @@ pub struct PbrLook {
     pub roughness: f32,
     /// Metalness (0 = dielectric, 1 = metal).
     pub metallic: f32,
+    /// Base-colour alpha (`< 1.0` marks the group transparent — used for glass so the
+    /// greenhouse blends over the interior instead of stacking opaque panels that z-fight).
+    pub alpha: f32,
 }
 
 impl PbrLook {
     const fn new(rgb: [f32; 3], roughness: f32, metallic: f32) -> Self {
-        Self { rgb, roughness, metallic }
+        Self { rgb, roughness, metallic, alpha: 1.0 }
+    }
+    const fn with_alpha(mut self, alpha: f32) -> Self {
+        self.alpha = alpha;
+        self
     }
 }
 
@@ -36,7 +43,10 @@ impl PbrLook {
 pub fn body_palette(paint: [f32; 3]) -> [(Grp, &'static str, PbrLook); 7] {
     [
         (Grp::Paint, "nfs_paint", PbrLook::new(paint, 0.30, 0.55)),
-        (Grp::Glass, "nfs_glass", PbrLook::new([0.03, 0.04, 0.06], 0.30, 0.0)),
+        // Transparent, lightly-tinted, low-roughness glass: routed to the engine's forward
+        // blend pass so overlapping window panels alpha-blend (soft) instead of opaque-z-fight
+        // (the "greenhouse shards"), and the dark interior reads through it as it should.
+        (Grp::Glass, "nfs_glass", PbrLook::new([0.05, 0.07, 0.10], 0.08, 0.0).with_alpha(0.32)),
         (Grp::Chrome, "nfs_chrome", PbrLook::new([0.80, 0.82, 0.85], 0.12, 1.00)),
         (Grp::Headlight, "nfs_head", PbrLook::new([0.90, 0.92, 0.96], 0.10, 0.30)),
         (Grp::Brakelight, "nfs_brake", PbrLook::new([0.72, 0.03, 0.03], 0.25, 0.10)),
@@ -360,6 +370,8 @@ where
         // + rim atlas, whose UVs cover both. The whole wheel is one mesh; a small untextured hub
         // run just samples the same atlas, which reads fine.
         let wheel_tex = wp.materials.iter().find_map(|m| tpk.and_then(|t| t.texture(m.hash)).cloned());
+        // The parser already normalised the wheel's triangle strips to a clean list, so the whole
+        // wheel builds as one mesh (its runs all share the one tire/rim atlas).
         if let Some(mesh) = build_mesh(device, &[wp], (wl + wh) * 0.5, "nfs_wheel") {
             let surface = match wheel_tex {
                 Some(tex) => WheelSurface::Textured(tex),

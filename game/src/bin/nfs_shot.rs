@@ -109,7 +109,11 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
     let tpk = load_tpk_beside(path);
     let paint = env_color("NFS_COLOR", [0.10, 0.28, 0.72]);
     let car = build_car_visuals(&renderer.device, &all, tpk.as_ref(), paint, |look| {
-        mat(look.rgb, look.roughness, look.metallic)
+        two(Material::new(white.clone()).with_pbr(
+            Vec4::new(look.rgb[0], look.rgb[1], look.rgb[2], look.alpha),
+            look.roughness,
+            look.metallic,
+        ))
     });
     let (cw, ch, cl) = (car.width, car.height, car.length);
     let fit = car.wheel_fit;
@@ -187,10 +191,16 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
     let dir = (-eye).normalize();
     let yaw = dir.z.atan2(dir.x);
     let pitch = dir.y.asin();
+    // Tight near/far around the framed car: the default 0.1..4000 range wrecks depth-buffer
+    // precision so a wheel rim's near-coplanar front/back faces z-fight into shard noise. A
+    // near ≈ eye_dist − 2·radius and far ≈ eye_dist + 2·radius restores precision.
+    let eye_dist = eye.length();
+    let near = (eye_dist - radius * 2.0).max(radius * 0.05).max(0.05);
+    let far = eye_dist + radius * 3.0;
     let cam = world.spawn();
     world.add_component(cam, Transform::new(eye));
     world.add_component(cam, GlobalTransform::default());
-    world.add_component(cam, Camera::new(std::f32::consts::FRAC_PI_4, 0.1, 4000.0, yaw, pitch, true));
+    world.add_component(cam, Camera::new(std::f32::consts::FRAC_PI_4, near, far, yaw, pitch, true));
 
     // ── Render one frame into an offscreen target, then read it back ──
     let format = renderer.config.format;

@@ -55,7 +55,11 @@ fn main() {
             );
             let make_material = |look: PbrLook| {
                 Material::new(white.clone())
-                    .with_pbr(Vec4::new(look.rgb[0], look.rgb[1], look.rgb[2], 1.0), look.roughness, look.metallic)
+                    .with_pbr(
+                        Vec4::new(look.rgb[0], look.rgb[1], look.rgb[2], look.alpha),
+                        look.roughness,
+                        look.metallic,
+                    )
                     .with_double_sided(true)
             };
 
@@ -90,7 +94,7 @@ fn main() {
                     Transform::default(),
                     GlobalTransform::default(),
                     interior,
-                    make_material(PbrLook { rgb: [0.02, 0.02, 0.025], roughness: 0.9, metallic: 0.0 }),
+                    make_material(PbrLook { rgb: [0.02, 0.02, 0.025], roughness: 0.9, metallic: 0.0, alpha: 1.0 }),
                     MeshRenderer::new(),
                 ));
             }
@@ -146,6 +150,7 @@ fn main() {
                                 rgb: [0.09, 0.09, 0.10],
                                 roughness: 0.7,
                                 metallic: 0.2,
+                                alpha: 1.0,
                             }),
                         }
                     }
