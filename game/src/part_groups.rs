@@ -51,7 +51,11 @@ pub fn group_of(name: &str) -> Grp {
         }
         return Grp::Skip;
     }
-    if name.contains("WHEEL") || name.contains("TIRE") || name.contains("RIM") {
+    // `WHEE`, not `WHEEL`: the fixed-length name field clips the tail, and on a long car name it
+    // eats the L too (`IMPREZAWRX_KIT00_FRONT_WHEE`, `LANCEREVO8_KIT00_REAR_WHEE`). Matching the
+    // full word left those cars' wheels classified as trim — baked into the body mesh as a dark
+    // lump, with nothing left for the wheel instancing, so the car rolled on empty arches.
+    if name.contains("WHEE") || name.contains("TIRE") || name.contains("RIM") {
         return Grp::Wheel;
     }
     // Hidden/internal geometry (engine bay, underbody, unlocked audio panels).
@@ -382,6 +386,9 @@ mod tests {
     fn classifies_by_keyword_with_correct_precedence() {
         // A kit-prefixed wheel is a wheel, not paint.
         assert_eq!(group_of("240SX_KIT00_FRONT_WHEEL_A"), Grp::Wheel);
+        // …and still a wheel when the name field clipped the `L` off (long car names).
+        assert_eq!(group_of("IMPREZAWRX_KIT00_FRONT_WHEE"), Grp::Wheel);
+        assert_eq!(group_of("LANCEREVO8_KIT00_REAR_WHEE"), Grp::Wheel);
         // Hidden geometry wins over the body keyword it also contains.
         assert_eq!(group_of("240SX_KIT00_HOOD_UNDER_A"), Grp::Skip);
         assert_eq!(group_of("240SX_KIT00_ENGINE_A"), Grp::Skip);
