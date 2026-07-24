@@ -70,6 +70,17 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
             }
         }
     }
+    // NFS_SHADER_DROP=0xAAAA,0xBBBB removes those shaders' runs — the inverse of NFS_SHADER, for
+    // asking "which shader draws this artefact?" by elimination rather than in isolation.
+    if let Ok(list) = std::env::var("NFS_SHADER_DROP") {
+        let drop: Vec<u32> = list
+            .split(',')
+            .filter_map(|s| u32::from_str_radix(s.trim().trim_start_matches("0x"), 16).ok())
+            .collect();
+        for p in &mut all {
+            p.materials.retain(|m| !drop.contains(&m.shader.0));
+        }
+    }
     if std::env::var("NFS_MATLIST").is_ok() {
         for p in &all {
             for m in &p.materials {

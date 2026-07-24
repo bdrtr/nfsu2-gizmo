@@ -26,7 +26,16 @@ fn main() {
     let mut texs: Vec<_> = tpk.textures.values().collect();
     texs.sort_by_key(|t| t.name.clone());
     for t in &texs {
-        println!("  {:#010x}  {:>4}x{:<4}  {:?}  {}", t.hash.0, t.width, t.height, t.source_format, t.name);
+        // opaque% and mean luminance say whether a map is an alpha overlay (mostly transparent)
+        // or a full-coverage image — the difference that decides if it can be composited over
+        // the paint as a detail layer.
+        let n = (t.rgba.len() / 4).max(1);
+        let opaque = t.rgba.chunks_exact(4).filter(|px| px[3] > 200).count() * 100 / n;
+        let lum: u32 = t.rgba.chunks_exact(4).map(|px| (px[0] as u32 + px[1] as u32 + px[2] as u32) / 3).sum();
+        println!(
+            "  {:#010x}  {:>4}x{:<4}  {:?}  opaque={:>3}%  lum={:>3}  {}",
+            t.hash.0, t.width, t.height, t.source_format, opaque, lum as usize / n, t.name
+        );
     }
 
     println!("\n=== stock body parts: material runs (shader | tex-hash → resolved texture) ===");
