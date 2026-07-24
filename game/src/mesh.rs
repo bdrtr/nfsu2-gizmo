@@ -6,7 +6,7 @@
 
 use gizmo::prelude::*;
 use gizmo::renderer::gpu_types::Vertex;
-use gizmo_nfs::NfsMeshPart;
+use gizmo_nfs::{Mat4, NfsMeshPart};
 
 /// NFSU2 (Z-up, X = length, Y = width) → Gizmo drive frame: length → −Z (forward),
 /// height → +Y. All mesh building and bounds go through this so the whole car shares one
@@ -15,6 +15,49 @@ use gizmo_nfs::NfsMeshPart;
 #[must_use]
 pub fn remap(p: [f32; 3]) -> Vec3 {
     Vec3::new(-p[1], p[2], -p[0])
+}
+
+/// Determinant of a 4x4's upper-left 3x3 — its sign tells a proper placement transform
+/// (rotation/scale, det > 0) from a reflection (det < 0).
+#[inline]
+fn det3(m: &Mat4) -> f32 {
+    m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1])
+        - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
+        + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0])
+}
+
+/// Place a part's local-space vertex into NFSU2 car space by its file transform.
+///
+/// The matrix is row-major with the translation in the last **row** (row-vector convention,
+/// `v' = v · M`). We apply it only for a *proper* transform (`det > 0`): parts modelled around
+/// their own origin (the rear wing, brake discs) carry a real translation there and must be
+/// placed. A **reflection** (`det < 0`) is how NFSU2 marks a mirrored right-side part whose
+/// vertices are *already* baked at their mirrored world position — applying it would flip the
+/// part back across the centreline, so those are left as-is.
+#[inline]
+fn place_point(m: &Mat4, p: [f32; 3]) -> [f32; 3] {
+    if det3(m) <= 1e-6 {
+        return p;
+    }
+    [
+        p[0] * m[0][0] + p[1] * m[1][0] + p[2] * m[2][0] + m[3][0],
+        p[0] * m[0][1] + p[1] * m[1][1] + p[2] * m[2][1] + m[3][1],
+        p[0] * m[0][2] + p[1] * m[1][2] + p[2] * m[2][2] + m[3][2],
+    ]
+}
+
+/// Rotate a part's local-space normal by its file transform's 3x3 (no translation), gated the
+/// same way as [`place_point`]: proper transforms only, reflections left as baked.
+#[inline]
+fn place_dir(m: &Mat4, n: [f32; 3]) -> [f32; 3] {
+    if det3(m) <= 1e-6 {
+        return n;
+    }
+    [
+        n[0] * m[0][0] + n[1] * m[1][0] + n[2] * m[2][0],
+        n[0] * m[0][1] + n[1] * m[1][1] + n[2] * m[2][1],
+        n[0] * m[0][2] + n[1] * m[1][2] + n[2] * m[2][2],
+    ]
 }
 
 /// Attach a `Transform` plus its matching `GlobalTransform` to an entity — the pair the
@@ -30,7 +73,7 @@ pub fn bbox(parts: &[&NfsMeshPart]) -> (Vec3, Vec3) {
     let (mut lo, mut hi) = (Vec3::splat(f32::INFINITY), Vec3::splat(f32::NEG_INFINITY));
     for p in parts {
         for v in &p.positions {
-            let g = remap(*v);
+            let g = remap(place_point(&p.transform, *v));
             lo = lo.min(g);
             hi = hi.max(g);
         }
@@ -112,8 +155,8 @@ pub fn build_mesh_items(
             } else {
                 [0.0, 0.0, 1.0]
             };
-            let gn = remap(n);
-            let gp = remap(pos) - off + gn * push;
+            let gn = remap(place_dir(&p.transform, n));
+            let gp = remap(place_point(&p.transform, pos)) - off + gn * push;
             verts.push(Vertex {
                 position: [gp.x, gp.y, gp.z],
                 normal: [gn.x, gn.y, gn.z],
