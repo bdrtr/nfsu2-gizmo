@@ -1,0 +1,27 @@
+[package]
+name = "strukt"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "STRUKT — a Need for Speed: Underground 2 asset inspector: browse the chunk tree, read the bytes, and be told what looks wrong."
+
+[dependencies]
+# The parser. STRUKT deliberately depends on nothing else of the project: not the game
+# crate, not the Gizmo engine — the engine owns its own window and loop, so embedding egui
+# inside it would be backwards, and the tool must build without the engine checkout.
+gizmo-nfs = { path = "../gizmo-nfs" }
+# egui 0.34.3 is what the workspace already locks; eframe 0.34.3 asks for exactly that
+# (plus winit 0.30 / wgpu 29), so no duplicate toolkit tree is pulled in.
+eframe = { version = "0.34.3", default-features = false, features = [
+    "wgpu",       # the backend the workspace already builds (wgpu 29 / winit 0.30)
+    "wayland",
+    "x11",
+    "default_fonts",
+] }
+egui = "0.34.3"
+
+# No file-dialog crate: on Linux `rfd` drags in either GTK dev libraries or the xdg-portal +
+# tokio stack, which is a heavy price for one button. A file arrives by drag-and-drop, by the
+# path field on the welcome screen, or as argv[1] — the same way `ug2` takes one.

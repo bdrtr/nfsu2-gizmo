@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/gizmo-nfs",
+    "crates/strukt",
     "game",
 ]
 
@@ -18,6 +19,11 @@ proptest = "1"
 # `nfs` CLI (gizmo-nfs, `tools` feature): argument parsing and PNG texture export.
 clap = { version = "4", features = ["derive"] }
 png = "0.17"
+
+# STRUKT hata ayıklama derlemesinde de 7.6 MB'lık dosya açıyor: parser optimize, arayüz
+# ayıklanabilir kalsın. (Ayıklanmamış parser'da açılış saniyeler sürüyor ve araç bozuk hissettiriyor.)
+[profile.dev.package.gizmo-nfs]
+opt-level = 2
 
 # Fiziksel demoların çalışma-zamanı performansı için: release'de tam optimizasyon.
 # (Debug build broad/narrow-phase'de ciddi CPU darboğazına girer — Gizmo ile aynı sebep.)
