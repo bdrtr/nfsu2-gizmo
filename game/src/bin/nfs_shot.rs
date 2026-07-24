@@ -165,7 +165,15 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
             }
         };
         for (sx, sz) in [(-1.0, -1.0), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)] {
-            let t = Transform::new(Vec3::new(sx * fit.half_track, wheel_y, sz * fit.half_wheelbase));
+            let pos = Vec3::new(sx * fit.half_track, wheel_y, sz * fit.half_wheelbase);
+            // The wheel mesh is modelled for one side only; the other side must be turned to
+            // face its rim outward, else it shows its flat inboard back as a black slab. A 180°
+            // yaw (not a reflection — keeps winding/normals) mirrors it about the car centreline.
+            let t = if sx < 0.0 {
+                Transform::new(pos).with_rotation(Quat::from_rotation_y(std::f32::consts::PI))
+            } else {
+                Transform::new(pos)
+            };
             spawn(&mut world, wm.clone(), wmat.clone(), t);
         }
     }

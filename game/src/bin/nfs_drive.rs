@@ -414,7 +414,11 @@ fn update(world: &mut World, state: &mut DriveState, dt: f32, input: &Input) {
             }
         }
         for w in &state.wheels {
-            let lr = if w.front { steer * spin } else { spin };
+            // The wheel mesh is modelled for one side; yaw the left wheels 180° so their rim
+            // faces outward (else the flat inboard back shows). Mirror is innermost, so spin
+            // still turns about the shared chassis axle and both sides roll the same way.
+            let mirror = if w.local.x < 0.0 { Quat::from_rotation_y(std::f32::consts::PI) } else { Quat::IDENTITY };
+            let lr = if w.front { steer * spin * mirror } else { spin * mirror };
             if let Some(mut t) = ts.get_mut(w.id) {
                 t.position = cpos + crot * w.local;
                 t.rotation = crot * lr;
