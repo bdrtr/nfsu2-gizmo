@@ -84,7 +84,7 @@ fn parse_solid(solid: &ChunkNode, root: &[u8]) -> NfsResult<Option<NfsMeshPart>>
         return Ok(None); // not a renderable solid (e.g. a mount point)
     };
 
-    let mesh_data = mesh.data(root);
+    let mesh_data = skip_leading_filler(mesh.data(root));
     let tri_count = mesh_field(mesh_data, MESH_TRI_COUNT_FIELD)? as usize;
     let vert_count = mesh_field(mesh_data, MESH_VERT_COUNT_FIELD)? as usize;
     if vert_count == 0 || tri_count == 0 {
@@ -138,6 +138,23 @@ fn parse_solid(solid: &ChunkNode, root: &[u8]) -> NfsResult<Option<NfsMeshPart>>
         bbox_min,
         bbox_max,
     }))
+}
+
+/// Skip a chunk payload's leading `0x11` alignment filler.
+///
+/// NFSU2 pads to alignment with `0x11` bytes, and on a large minority of solids that padding sits
+/// *in front of* the `0x00134900` mesh header, shifting every field by one or two u32s. Read at the
+/// nominal field offsets, those solids look empty (`vert_count == 0`) and were skipped as
+/// mount/dummy points: fleet-wide that silently dropped ~2500 meshes, including **every** LOD of
+/// `SENTRA_KIT00_BODY` (the Sentra then rendered with no body shell at all, a hole straight into the
+/// cabin) and the highest LOD of many other cars' bodies, doors and headlights. The same filler
+/// already prefixes the index buffer and the material-range table.
+fn skip_leading_filler(data: &[u8]) -> &[u8] {
+    let mut off = 0;
+    while data.len() >= off + 4 && data[off..off + 4] == [0x11; 4] {
+        off += 4;
+    }
+    &data[off..]
 }
 
 /// Read u32 field `n` (0-based) from a mesh header, bounds-checked.
