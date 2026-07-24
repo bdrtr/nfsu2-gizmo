@@ -90,6 +90,14 @@ fn parse_solid(solid: &ChunkNode, root: &[u8]) -> NfsResult<Option<NfsMeshPart>>
     if vert_count == 0 || tri_count == 0 {
         return Ok(None);
     }
+    // A few solids use a packed vertex format with a stride smaller than the standard 36 bytes, so
+    // `vert_count * 36` overruns their buffer. We don't decode that layout; skip the solid rather
+    // than failing the whole car. A survey of every stock car found this only on hidden engine
+    // meshes (e.g. `3000GT_KIT00_ENGINE_B`, a Skip-group part), so nothing visible is lost — and
+    // without the skip the 3000GT geometry would not parse at all.
+    if !standard_vertex_layout(vert_count, vbuf.data(root).len()) {
+        return Ok(None);
+    }
 
     let (positions, normals, uvs) = parse_vertices(vbuf.data(root), vert_count)?;
     let indices = parse_indices(ibuf.data(root), tri_count, vert_count)?;
@@ -136,6 +144,13 @@ fn parse_solid(solid: &ChunkNode, root: &[u8]) -> NfsResult<Option<NfsMeshPart>>
 fn mesh_field(data: &[u8], n: usize) -> NfsResult<u32> {
     let mut r = ByteReader::at(data, n * 4)?;
     r.u32_le()
+}
+
+/// Whether a solid's vertex buffer is big enough for the standard 36-byte (`VERTEX_STRIDE`) layout.
+/// A few solids use a smaller packed stride — in practice only hidden engine meshes such as
+/// `3000GT_KIT00_ENGINE_B` — and those are skipped rather than mis-decoded (or aborting the parse).
+fn standard_vertex_layout(vert_count: usize, vbuf_len: usize) -> bool {
+    vert_count.saturating_mul(VERTEX_STRIDE) <= vbuf_len
 }
 
 /// The vertices occupy the last `count * STRIDE` bytes of the buffer (leading bytes are
@@ -418,6 +433,17 @@ mod tests {
         }
         let idx = parse_indices(&ibuf, 1, 2).unwrap();
         assert_eq!(idx, vec![0, 1, 0]);
+    }
+
+    #[test]
+    fn skips_solids_with_non_standard_vertex_stride() {
+        // 3000GT_KIT00_ENGINE_B: 318 verts in a 7700-byte buffer → a ~24-byte packed stride, so the
+        // standard 36-byte read (318*36 = 11448) overruns it. Such solids are skipped, not decoded.
+        assert!(!standard_vertex_layout(318, 7700));
+        // Standard 36-byte solids (with a little leading pad) are supported.
+        assert!(standard_vertex_layout(2, 8 + 2 * 36));
+        assert!(standard_vertex_layout(730, 26284)); // a real 240SX body LOD
+        assert!(standard_vertex_layout(0, 0));
     }
 
     #[test]
