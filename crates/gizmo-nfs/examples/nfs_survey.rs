@@ -16,10 +16,37 @@ fn det3(m: &Mat4) -> f32 {
         + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0])
 }
 
-/// The game's placement: row-vector `v·M` with translation in the last row, only for det > 0
-/// (a reflection, det < 0, marks an already-baked mirrored part and is left as-is).
-fn place_point(m: &Mat4, p: [f32; 3]) -> [f32; 3] {
+/// Mirror of the game's `mesh::should_place`: apply a matrix only when it is a proper transform
+/// (det > 0) that either carries a real translation OR belongs to a part modelled at the origin
+/// (an oriented instanced detail — wheels, brakes). A reflection (det < 0), or a rotation/scale
+/// with no translation on an *off-origin* part (open-door / raised-hood articulation), is left
+/// as the vertices are already baked.
+fn should_place(m: &Mat4, centroid: &[f32; 3]) -> bool {
     if det3(m) <= 1e-6 {
+        return false;
+    }
+    if m[3][0].abs() + m[3][1].abs() + m[3][2].abs() > 1e-4 {
+        return true;
+    }
+    (centroid[0] * centroid[0] + centroid[1] * centroid[1] + centroid[2] * centroid[2]).sqrt() < 0.35
+}
+
+/// Local (pre-transform) centroid of a part's vertices — how far it is modelled from the origin.
+fn local_centroid(p: &NfsMeshPart) -> [f32; 3] {
+    let n = p.positions.len().max(1) as f64;
+    let mut s = [0.0f64; 3];
+    for v in &p.positions {
+        for k in 0..3 {
+            s[k] += v[k] as f64;
+        }
+    }
+    [(s[0] / n) as f32, (s[1] / n) as f32, (s[2] / n) as f32]
+}
+
+/// The game's placement: row-vector `v·M` with translation in the last row, gated by
+/// [`should_place`] against the part's local centroid.
+fn place_point(m: &Mat4, p: [f32; 3], apply: bool) -> [f32; 3] {
+    if !apply {
         return p;
     }
     [
@@ -37,9 +64,10 @@ fn is_stock(name: &str) -> bool {
 }
 
 fn placed_bounds(p: &NfsMeshPart) -> ([f32; 3], [f32; 3], [f32; 3]) {
+    let apply = should_place(&p.transform, &local_centroid(p));
     let (mut lo, mut hi, mut sum) = ([f32::MAX; 3], [f32::MIN; 3], [0.0f64; 3]);
     for v in &p.positions {
-        let g = place_point(&p.transform, *v);
+        let g = place_point(&p.transform, *v, apply);
         for k in 0..3 {
             lo[k] = lo[k].min(g[k]);
             hi[k] = hi[k].max(g[k]);
@@ -67,6 +95,54 @@ fn main() {
             return;
         }
     };
+
+    // SURVEY_DUMP=<substr>: raw 4x4 matrix + det + local/placed bounds for matching parts.
+    if let Ok(sub) = std::env::var("SURVEY_DUMP") {
+        for p in parts.iter().filter(|p| p.name.contains(sub.as_str())) {
+            let m = &p.transform;
+            let (lo, hi) = {
+                let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
+                for v in &p.positions {
+                    for k in 0..3 {
+                        lo[k] = lo[k].min(v[k]);
+                        hi[k] = hi[k].max(v[k]);
+                    }
+                }
+                (lo, hi)
+            };
+            let (ext, cen, _) = placed_bounds(p);
+            let d = det3(m);
+            let trans = m[3][0].abs() + m[3][1].abs() + m[3][2].abs();
+            let cn = local_centroid(p);
+            let cdist = (cn[0] * cn[0] + cn[1] * cn[1] + cn[2] * cn[2]).sqrt();
+            let ident3 = (m[0][0] - 1.0).abs() + m[0][1].abs() + m[0][2].abs() + m[1][0].abs()
+                + (m[1][1] - 1.0).abs() + m[1][2].abs() + m[2][0].abs() + m[2][1].abs() + (m[2][2] - 1.0).abs();
+            // Match the game's should_place, and name why each part is/ isn't applied.
+            let class = if d < -1e-6 {
+                "reflection" // det<0 → baked mirror, skipped
+            } else if trans > 1e-4 {
+                "placement " // real translation → applied
+            } else if ident3 <= 1e-3 {
+                "identity  " // no-op
+            } else if cdist < 0.35 {
+                "oriented  " // rotation on an origin-modelled detail → applied (no move)
+            } else {
+                "ARTICULATE" // off-origin rotation/scale, no translation → SKIPPED by the fix
+            };
+            eprintln!(
+                "{class} {:<34} det={:+.2} |t|={:5.2} local_cen=[{:+.2},{:+.2},{:+.2}] placed_cen=[{:+.2},{:+.2},{:+.2}] placed_ext=[{:.2},{:.2},{:.2}]",
+                p.name, d, trans,
+                (lo[0] + hi[0]) / 2.0, (lo[1] + hi[1]) / 2.0, (lo[2] + hi[2]) / 2.0,
+                cen[0], cen[1], cen[2], ext[0], ext[1], ext[2]
+            );
+            if std::env::var("SURVEY_MATRIX").is_ok() {
+                for row in m {
+                    eprintln!("       [{:+8.3} {:+8.3} {:+8.3} {:+8.3}]", row[0], row[1], row[2], row[3]);
+                }
+            }
+        }
+        return;
+    }
     let stock: Vec<&NfsMeshPart> = parts.iter().filter(|p| is_stock(&p.name)).collect();
 
     // Whole-car placed extent + per-part explosion / displacement flags.
@@ -116,6 +192,7 @@ fn main() {
     // PLAINNOTHING filler carried on non-BASE (kit) parts — the black-square source.
     let (mut pn_runs, mut pn_tris, mut zmin, mut zmax) = (0u32, 0u32, f32::MAX, f32::MIN);
     for p in stock.iter().filter(|p| !p.name.contains("_BASE")) {
+        let apply = should_place(&p.transform, &local_centroid(p));
         for m in &p.materials {
             if m.shader.0 != PLAINNOTHING {
                 continue;
@@ -124,7 +201,7 @@ fn main() {
             pn_tris += (m.index_count / 3) as u32;
             for &idx in p.indices.get(m.index_offset..m.index_offset + m.index_count).unwrap_or(&[]) {
                 if let Some(pos) = p.positions.get(idx as usize) {
-                    let z = place_point(&p.transform, *pos)[2];
+                    let z = place_point(&p.transform, *pos, apply)[2];
                     zmin = zmin.min(z);
                     zmax = zmax.max(z);
                 }
