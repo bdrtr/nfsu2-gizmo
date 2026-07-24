@@ -177,13 +177,19 @@ fn setup_scene(world: &mut World, renderer: &gizmo::renderer::Renderer) -> Drive
     // Textured parts: upload each decoded TPK texture and material-ise it as albedo.
     let mut textured_count = 0;
     for tp in car.textured {
-        let key = format!("nfs_tex_{:08X}", tp.texture.hash.0);
+        // A body-detail (doorline) overlay is composited over the paint; a full-colour detail
+        // (light lens, badging) uploads as-is.
+        let rgba = match tp.composite_over {
+            Some(paint) => nfsu2::car::composite_over_paint(&tp.texture.rgba, paint),
+            None => tp.texture.rgba.clone(),
+        };
+        let key = format!("nfs_tex_{:08X}_{}", tp.texture.hash.0, tp.composite_over.is_some() as u8);
         let Ok(bg) = asset_manager.install_decoded_material_texture(
             &renderer.device,
             &renderer.queue,
             &renderer.scene.texture_bind_group_layout,
             &key,
-            &tp.texture.rgba,
+            &rgba,
             tp.texture.width,
             tp.texture.height,
         ) else {

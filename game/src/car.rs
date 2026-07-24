@@ -168,6 +168,51 @@ pub struct TexturedPart {
     pub roughness: f32,
     /// Suggested PBR metallic (from the part's material group).
     pub metallic: f32,
+    /// When `Some(paint)`, this texture is a **body-detail overlay** (the doorline: panel gaps,
+    /// door handles and creases on an otherwise transparent field). The caller must alpha-
+    /// composite it over `paint` — via [`composite_over_paint`] — before upload, so the bare
+    /// paint shows through where the overlay is transparent. `None` for a detail texture that is
+    /// its own full colour (light lenses, tyres, badging).
+    pub composite_over: Option<[f32; 3]>,
+}
+
+/// Encode a linear `0..1` channel to an 8-bit sRGB value.
+#[inline]
+fn linear_to_srgb_u8(c: f32) -> u8 {
+    let s = if c <= 0.003_130_8 { 12.92 * c } else { 1.055 * c.powf(1.0 / 2.4) - 0.055 };
+    (s.clamp(0.0, 1.0) * 255.0).round() as u8
+}
+
+/// Alpha-composite a body-detail overlay (`overlay`: doorline panel lines/handles on a
+/// transparent field, RGBA8) over a solid `paint` colour, returning ready-to-upload opaque RGBA8
+/// the same size. Transparent texels become the paint; opaque texels keep the overlay. The paint
+/// is written in sRGB so an sRGB-sampling albedo texture brings it back to the intended linear
+/// colour.
+#[must_use]
+pub fn composite_over_paint(overlay: &[u8], paint: [f32; 3]) -> Vec<u8> {
+    let ps = [linear_to_srgb_u8(paint[0]), linear_to_srgb_u8(paint[1]), linear_to_srgb_u8(paint[2])];
+    let mut out = Vec::with_capacity(overlay.len());
+    for px in overlay.chunks_exact(4) {
+        let a = px[3] as f32 / 255.0;
+        for k in 0..3 {
+            out.push((px[k] as f32 * a + ps[k] as f32 * (1.0 - a)).round() as u8);
+        }
+        out.push(255);
+    }
+    out
+}
+
+/// The car's body-detail (**doorline**) texture — panel gaps, handles and creases UV-mapped
+/// across the paint. It is referenced by naming convention (`<CAR>_DOORLINE`), not by a geometry
+/// material hash, so it is resolved by name here. Prefer the kit-body variant when a KIT00 body
+/// supplies the outer paint, else the base `_DOORLINE`.
+fn doorline_texture(tpk: &Tpk, has_kit_body: bool) -> Option<&NfsTexture> {
+    let pick = |suffix: &str| tpk.textures.values().find(|t| t.name.ends_with(suffix));
+    if has_kit_body {
+        pick("_DOORLINE_KIT").or_else(|| pick("_DOORLINE"))
+    } else {
+        pick("_DOORLINE")
+    }
 }
 
 /// NFSU2 shares one shader set across every car, so a material's shader hash (`0x00134013`)
@@ -305,11 +350,22 @@ where
     // instead of one flat panel. Body paint, glass and chrome carry shader-only hashes that
     // never resolve, so they fall through to their group. A part with no material list is one
     // run resolved the old way (by DebugName, then material-hash; paint stays flat).
+    // The body-detail (doorline) texture, applied to the CARSKIN paint runs by naming
+    // convention. When present, paint runs are collected here (carrying their UVs) and emitted
+    // as one composited textured mesh instead of a flat colour; when absent (untextured car),
+    // they stay flat as before.
+    let doorline = tpk.and_then(|t| doorline_texture(t, has_kit_body));
+    let mut paint_detail: Vec<(&NfsMeshPart, &[u32])> = Vec::new();
+
     let mut by_texture: HashMap<AssetHash, Vec<(&NfsMeshPart, &[u32])>> = HashMap::new();
     let mut by_group: HashMap<Grp, Vec<(&NfsMeshPart, &[u32])>> = HashMap::new();
     for p in body_like.iter().copied() {
         let grp = group_of(&p.name);
         if p.materials.is_empty() {
+            if grp == Grp::Paint && doorline.is_some() {
+                paint_detail.push((p, p.indices.as_slice()));
+                continue;
+            }
             match tpk.and_then(|t| resolve_whole(p, grp, t)) {
                 Some(h) => by_texture.entry(h).or_default().push((p, p.indices.as_slice())),
                 None => by_group.entry(grp).or_default().push((p, p.indices.as_slice())),
@@ -335,7 +391,12 @@ where
             // as their flat group — this is what turns BASE's greenhouse (glass, window frames,
             // seats, mouldings) into proper dark glass + trim instead of a bright painted mess.
             if let Some(g) = shader_group(m.shader.0) {
-                by_group.entry(g).or_default().push((p, slice));
+                // Paint runs get the doorline overlay when the car ships one; else flat colour.
+                if g == Grp::Paint && doorline.is_some() {
+                    paint_detail.push((p, slice));
+                } else {
+                    by_group.entry(g).or_default().push((p, slice));
+                }
                 continue;
             }
             // Everything else (head/brake-light lenses, tyres, badging) carries its own texture.
@@ -372,7 +433,30 @@ where
         };
         let Some(texture) = tpk.and_then(|t| t.texture(hash)).cloned() else { continue };
         let (roughness, metallic) = group_pbr(group_of(&items[0].0.name));
-        textured.push(TexturedPart { mesh, texture, tint: [1.0, 1.0, 1.0], roughness, metallic });
+        textured.push(TexturedPart {
+            mesh,
+            texture,
+            tint: [1.0, 1.0, 1.0],
+            roughness,
+            metallic,
+            composite_over: None,
+        });
+    }
+
+    // The painted body as one textured mesh: the doorline overlay composited over the paint by
+    // the caller. Emitted only when the car ships a doorline (else paint stayed in `by_group`).
+    if let Some(dl) = doorline {
+        if let Some(mesh) = build_mesh_items(device, &paint_detail, center, |_| 0.0, "nfs_paint_detail") {
+            let (roughness, metallic) = group_pbr(Grp::Paint);
+            textured.push(TexturedPart {
+                mesh,
+                texture: dl.clone(),
+                tint: [1.0, 1.0, 1.0],
+                roughness,
+                metallic,
+                composite_over: Some(paint),
+            });
+        }
     }
 
     let mut wheel = None;
@@ -423,5 +507,29 @@ mod tests {
             assert!(!is_dropped_filler(sh, true));
             assert!(!is_dropped_filler(sh, false));
         }
+    }
+
+    #[test]
+    fn composite_transparent_becomes_paint_opaque_keeps_overlay() {
+        // Two texels: fully transparent, then fully opaque. Paint = white (sRGB white = 255).
+        let overlay = [10u8, 20, 30, 0, 100, 150, 200, 255];
+        let out = composite_over_paint(&overlay, [1.0, 1.0, 1.0]);
+        assert_eq!(&out[0..4], &[255, 255, 255, 255], "transparent texel becomes the paint");
+        assert_eq!(&out[4..8], &[100, 150, 200, 255], "opaque texel keeps the overlay colour");
+    }
+
+    #[test]
+    fn composite_output_is_opaque_same_size() {
+        let overlay = [0u8, 0, 0, 128, 0, 0, 0, 200];
+        let out = composite_over_paint(&overlay, [0.0, 0.0, 0.0]);
+        assert_eq!(out.len(), overlay.len());
+        assert_eq!(out[3], 255);
+        assert_eq!(out[7], 255);
+    }
+
+    #[test]
+    fn srgb_encode_endpoints() {
+        assert_eq!(linear_to_srgb_u8(0.0), 0);
+        assert_eq!(linear_to_srgb_u8(1.0), 255);
     }
 }
