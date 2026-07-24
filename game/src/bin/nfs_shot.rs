@@ -145,13 +145,13 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
     scene::spawn_body(&mut world, &mut car, &mut tex, |bg, tint, rough, metal| {
         two(Material::new(bg).with_pbr(Vec4::new(tint[0], tint[1], tint[2], 1.0), rough, metal))
     });
-    if let Some(interior) = car.interior.take() {
-        spawn(&mut world, interior, mat([0.02, 0.02, 0.025], 0.9, 0.0), Transform::new(Vec3::ZERO));
-    }
     if let Some((wheel_mesh, surface)) = car.wheel.take() {
-        let wmat = scene::wheel_material(surface, &mut tex, |bg| {
-            two(Material::new(bg).with_pbr(Vec4::new(1.0, 1.0, 1.0, 1.0), 0.7, 0.2))
-        });
+        let wmat = scene::wheel_material(
+            surface,
+            &mut tex,
+            |bg| two(Material::new(bg).with_pbr(Vec4::new(1.0, 1.0, 1.0, 1.0), 0.7, 0.2)),
+            |look| mat(look.rgb, look.roughness, look.metallic),
+        );
         for mount in scene::wheel_mounts(cti.as_ref(), fit, car_center, ch) {
             let t = Transform::new(mount).with_rotation(scene::wheel_mirror(mount));
             spawn(&mut world, wheel_mesh.clone(), wmat.clone(), t);

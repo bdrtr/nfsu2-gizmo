@@ -166,23 +166,20 @@ fn setup_scene(world: &mut World, renderer: &gizmo::renderer::Renderer) -> Drive
     };
     // Resolve the wheel material first: it borrows the uploader, as `spawn_body` does.
     let wheel = car.wheel.take().map(|(mesh, surface)| {
-        let m = scene::wheel_material(surface, &mut tex, |bg| {
-            Material::new(bg).with_pbr(Vec4::new(1.0, 1.0, 1.0, 1.0), 0.7, 0.2).with_double_sided(true)
-        });
+        let m = scene::wheel_material(
+            surface,
+            &mut tex,
+            |bg| Material::new(bg).with_pbr(Vec4::new(1.0, 1.0, 1.0, 1.0), 0.7, 0.2).with_double_sided(true),
+            |look| mat(look.rgb, look.roughness, look.metallic),
+        );
         (mesh, m)
     });
     // Each body mesh is its own entity that rigidly follows the chassis.
-    let mut visual_ids = scene::spawn_body(world, &mut car, &mut tex, |bg, tint, rough, metal| {
+    let visual_ids = scene::spawn_body(world, &mut car, &mut tex, |bg, tint, rough, metal| {
         Material::new(bg)
             .with_pbr(Vec4::new(tint[0], tint[1], tint[2], 1.0), rough, metal)
             .with_double_sided(true)
     });
-    // Dark cabin filler so the glass-less windows don't read as see-through (only for cars
-    // without a modelled interior).
-    if let Some(interior) = car.interior.take() {
-        let m = mat([0.02, 0.02, 0.025], 0.9, 0.0);
-        visual_ids.push(scene::spawn_mesh(world, interior, m, Transform::new(Vec3::ZERO)));
-    }
     // ── Wheels: the single wheel mesh instanced at four fitted corners ──
     // Wheel centre near the bottom of the body so the lower half sticks out of the arch.
     let wheel_y = -height * 0.5 + radius * 0.95;

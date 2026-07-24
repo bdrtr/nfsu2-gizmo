@@ -59,11 +59,6 @@ pub struct CarVisuals {
     pub wheel: Option<(Mesh, WheelSurface)>,
     /// Wheel radius and corner offsets.
     pub wheel_fit: WheelFit,
-    /// A dark box filling the cabin so the camera can't see through the glass-less window
-    /// openings into a hollow body shell — `None` when the car models its own interior (that
-    /// geometry is textured instead), so a heuristic filler box doesn't poke out through the
-    /// roof. The caller gives it a near-black matte material.
-    pub interior: Option<Mesh>,
 }
 
 /// A merged mesh sharing one decoded texture, ready for the caller to upload and material-ise.
@@ -258,9 +253,7 @@ where
         }
     }
 
-    // No cabin filler: BASE now supplies the real interior geometry (routed per-shader) and the
-    // windscreen glass covers the openings, so the old hollow-shell box is obsolete.
-    let interior: Option<Mesh> = None;
-
-    CarVisuals { groups, textured, center, width, height, length, wheel, wheel_fit, interior }
+    // No cabin filler is emitted: BASE supplies the real interior geometry (routed per-shader)
+    // and the windscreen glass covers the openings, so the old hollow-shell box is obsolete.
+    CarVisuals { groups, textured, center, width, height, length, wheel, wheel_fit }
 }

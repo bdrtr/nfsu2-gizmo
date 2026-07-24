@@ -346,7 +346,7 @@ mod tests {
 
     #[test]
     fn a_truncated_header_is_an_error_not_a_panic() {
-        assert!(decompress(&[b'H', b'U', b'F', b'F']).is_err());
+        assert!(decompress(b"HUFF").is_err());
         assert!(parse_header(&[]).is_err());
     }
 }

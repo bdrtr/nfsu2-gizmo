@@ -89,17 +89,10 @@ fn main() {
             };
             // Resolve the wheel's material first: it borrows the uploader, as `spawn_body` does.
             let wheel = car.wheel.take().map(|(mesh, surface)| {
-                let m = scene::wheel_material(surface, &mut tex, |bg| textured(bg, [1.0; 3], 0.7, 0.2));
+                let m = scene::wheel_material(surface, &mut tex, |bg| textured(bg, [1.0; 3], 0.7, 0.2), make_material);
                 (mesh, m)
             });
             scene::spawn_body(scene.world, &mut car, &mut tex, textured);
-
-            // Dark cabin filler so the glass-less windows don't read as see-through (only for
-            // cars without a modelled interior).
-            if let Some(interior) = car.interior.take() {
-                let look = PbrLook { rgb: [0.02, 0.02, 0.025], roughness: 0.9, metallic: 0.0, alpha: 1.0 };
-                scene::spawn_mesh(scene.world, interior, make_material(look), Transform::default());
-            }
 
             // Four static wheels at the fitted corners (lower half tucked into the arch).
             if let Some((mesh, wmat)) = wheel {

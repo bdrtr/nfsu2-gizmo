@@ -109,9 +109,13 @@ pub fn wheel_mirror(mount: Vec3) -> Quat {
 
 /// Resolve the car's [`WheelSurface`] into one material shared by all four instances: the tyre
 /// texture when the car ships one, else the flat rubber the assembly already built.
-pub fn wheel_material<F>(surface: WheelSurface, tex: &mut Textures<'_>, textured: F) -> Material
+///
+/// `flat` builds that rubber look, and is also the fallback when the tyre texture will not
+/// upload — a white unlit wheel would be a worse failure than an untextured black one.
+pub fn wheel_material<F, G>(surface: WheelSurface, tex: &mut Textures<'_>, textured: F, flat: G) -> Material
 where
     F: Fn(Arc<wgpu::BindGroup>) -> Material,
+    G: Fn(crate::car::PbrLook) -> Material,
 {
     match surface {
         WheelSurface::Flat(m) => m,
@@ -119,7 +123,7 @@ where
             let key = format!("nfs_wheel_{:08X}", t.hash.0);
             match tex.upload(&key, &t.rgba, t.width, t.height) {
                 Some(bg) => textured(bg),
-                None => Material::new(tex.assets.create_white_texture(tex.device, tex.queue, tex.layout)),
+                None => flat(crate::car::wheel_look()),
             }
         }
     }
