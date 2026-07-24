@@ -1,4 +1,4 @@
-//! `nfs export` — a car (or one configuration of it) as OBJ + MTL + PNG.
+//! `ug2 export` — a car (or one configuration of it) as OBJ + MTL + PNG.
 
 use crate::obj::{self, Material};
 use crate::paths::{Car, Result};
@@ -55,16 +55,16 @@ pub fn run(car: &Path, out: &Path, config: CarConfig, all: bool, want_textures: 
     }
 
     let tris: usize = selected.iter().map(|p| p.triangle_count()).sum();
-    println!(
+    outln!(
         "{}: {} parts, {tris} triangles, {} materials, {written} textures",
         car.name,
         selected.len(),
         plan.materials.len()
     );
-    println!("  {}", out.join(&obj_name).display());
-    println!("  {}", out.join(&mtl_name).display());
+    outln!("  {}", out.join(&obj_name).display());
+    outln!("  {}", out.join(&mtl_name).display());
     if written > 0 {
-        println!("  {}/*.png", out.join("tex").display());
+        outln!("  {}/*.png", out.join("tex").display());
     }
     Ok(())
 }

@@ -20,8 +20,7 @@
 //!
 //! [`texture`] parses `TPK` (`TEXTURES.BIN`) into an RGBA8 pixel pool + per-texture
 //! descriptors; [`geometry`] parses `GEOMETRY.BIN`. World modules come later. Several of
-//! these byte layouts have no public spec and were locked empirically with the `nfs_dump`
-//! example against a legally-owned install.
+//! these byte layouts have no public spec and were locked empirically with the `ug2` tool against a legally-owned install.
 //!
 //! # Safety / robustness
 //! Input is always untrusted. Every read is bounds-checked and returns an [`NfsError`];

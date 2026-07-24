@@ -1,4 +1,4 @@
-//! `nfs textures` — the car's texture table, and which material run uses which image.
+//! `ug2 textures` — the car's texture table, and which material run uses which image.
 
 use crate::paths::{Car, Result};
 use std::path::Path;
@@ -10,7 +10,7 @@ pub fn run(car: &Path, filter: Option<&str>) -> Result<()> {
         return Err(format!("{}: no readable TEXTURES.BIN", car.dir.display()));
     };
 
-    println!("== {} textures ==", tpk.textures.len());
+    outln!("== {} textures ==", tpk.textures.len());
     let mut texs: Vec<_> = tpk.textures.values().collect();
     texs.sort_by(|a, b| a.name.cmp(&b.name));
     for t in &texs {
@@ -21,7 +21,7 @@ pub fn run(car: &Path, filter: Option<&str>) -> Result<()> {
         let opaque = t.rgba.chunks_exact(4).filter(|px| px[3] > 200).count() * 100 / texels;
         let lum: usize =
             t.rgba.chunks_exact(4).map(|px| (px[0] as usize + px[1] as usize + px[2] as usize) / 3).sum();
-        println!(
+        outln!(
             "  {:#010x}  {:>4}x{:<4}  {:?}  opaque={opaque:>3}%  lum={:>3}  {}",
             t.hash.0,
             t.width,
@@ -32,15 +32,15 @@ pub fn run(car: &Path, filter: Option<&str>) -> Result<()> {
         );
     }
 
-    println!("\n== material runs (shader | texture hash → resolved texture) ==");
+    outln!("\n== material runs (shader | texture hash → resolved texture) ==");
     for p in parts.iter().filter(|p| filter.is_none_or(|f| p.name.contains(f))) {
         if p.materials.is_empty() {
             continue;
         }
-        println!("• {} ({} runs)", p.name, p.materials.len());
+        outln!("• {} ({} runs)", p.name, p.materials.len());
         for m in &p.materials {
             let resolved = tpk.texture(m.hash).map(|t| t.name.as_str()).unwrap_or("—");
-            println!(
+            outln!(
                 "    shader={:#010x}  tex={:#010x} → {:<28}  tris={}",
                 m.shader.0,
                 m.hash.0,

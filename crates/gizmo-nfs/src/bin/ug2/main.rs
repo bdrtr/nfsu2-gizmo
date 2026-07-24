@@ -1,4 +1,4 @@
-//! `nfs` — read Need for Speed: Underground 2 car assets from the command line.
+//! `ug2` — read Need for Speed: Underground 2 car assets from the command line.
 //!
 //! One entry point over the whole parser: summarise a car, list the parts a configuration
 //! selects, print the raw chunk tree of any asset file, and export geometry + textures to
@@ -8,9 +8,23 @@
 //! game. Build it with `--features tools`:
 //!
 //! ```text
-//! cargo run -p gizmo-nfs --features tools --bin nfs -- info  "$NFSU2_ROOT/CARS/240SX"
-//! cargo run -p gizmo-nfs --features tools --bin nfs -- export "$NFSU2_ROOT/CARS/240SX" -o out/
+//! cargo run -p gizmo-nfs --features tools --bin ug2 -- info  "$NFSU2_ROOT/CARS/240SX"
+//! cargo run -p gizmo-nfs --features tools --bin ug2 -- export "$NFSU2_ROOT/CARS/240SX" -o out/
 //! ```
+
+/// Print a line to stdout, treating a closed pipe as "the reader has seen enough" rather than a
+/// panic. `ug2 parts CARS/240SX | head` is ordinary use, and Rust's `println!` panics on EPIPE.
+///
+/// Declared before the modules below so they all see it (macros are textually scoped).
+macro_rules! outln {
+    () => { outln!("") };
+    ($($arg:tt)*) => {{
+        use std::io::Write as _;
+        if writeln!(std::io::stdout(), $($arg)*).is_err() {
+            std::process::exit(0);
+        }
+    }};
+}
 
 mod dump;
 mod export;
@@ -26,9 +40,9 @@ use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-/// Read NFSU2 car assets: inspect them, or export them to OBJ/PNG.
+/// Read Need for Speed: Underground 2 car assets — inspect them, or export them to OBJ/PNG.
 #[derive(Parser)]
-#[command(name = "nfs", version, about, long_about = None)]
+#[command(name = "ug2", version, long_about = None)]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -151,7 +165,7 @@ fn main() -> ExitCode {
     match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
-            eprintln!("nfs: {e}");
+            eprintln!("ug2: {e}");
             ExitCode::FAILURE
         }
     }

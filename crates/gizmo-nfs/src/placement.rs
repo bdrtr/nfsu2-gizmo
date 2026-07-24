@@ -2,7 +2,7 @@
 //! vertices and to be left alone — and the maths to apply it.
 //!
 //! This is format semantics, not presentation: the same file carries both kinds of matrix and
-//! only the values tell them apart, so every consumer (the engine integration, the CLI exporter)
+//! only the values tell them apart, so every consumer (the engine integration, the `ug2` exporter)
 //! must make the same call or the same car comes out differently.
 
 use crate::types::{Mat4, NfsMeshPart};

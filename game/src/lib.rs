@@ -22,5 +22,5 @@ pub mod geom;
 pub mod scene;
 
 /// Part classification and configuration — pure policy that lives in the parser crate (so the
-/// `nfs` CLI selects exactly the same parts), re-exported here as this crate's own `parts`.
+/// `ug2` CLI selects exactly the same parts), re-exported here as this crate's own `parts`.
 pub use gizmo_nfs::parts;

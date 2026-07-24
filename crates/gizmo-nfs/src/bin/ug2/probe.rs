@@ -1,4 +1,4 @@
-//! `nfs probe` — the raw view of a car's solids, for locking down a format.
+//! `ug2 probe` — the raw view of a car's solids, for locking down a format.
 //!
 //! Two questions this answers that the parsed output cannot: what a solid *declares* (counts,
 //! buffer sizes, the mesh-header words) versus what the standard layout expects, and what its
@@ -22,7 +22,7 @@ pub fn run(car: &Path, filter: Option<&str>, matrices: bool) -> Result<()> {
     let bytes = crate::paths::read(&car.geometry)?;
     let roots = ChunkNode::parse(&bytes).map_err(|e| format!("{}: {e}", car.geometry.display()))?;
 
-    println!("{:<28} {:>6} {:>6} {:>8} {:>6}  mesh-header u32[0..16]", "solid", "verts", "tris", "vbuf", "bpv");
+    outln!("{:<28} {:>6} {:>6} {:>8} {:>6}  mesh-header u32[0..16]", "solid", "verts", "tris", "vbuf", "bpv");
     for top in &roots {
         for solid in top.find_all(SOLID) {
             let (Some(mesh), Some(vbuf)) = (solid.find(MESH_HEADER), solid.find(VERTEX_BUFFER)) else {
@@ -47,7 +47,7 @@ pub fn run(car: &Path, filter: Option<&str>, matrices: bool) -> Result<()> {
             if verts * VERTEX_STRIDE > vlen {
                 note.push_str("  <== verts*36 > vbuf (layout not decoded, solid skipped)");
             }
-            println!("{name:<28} {verts:>6} {tris:>6} {vlen:>8} {bpv:>6.1}  [{}]{note}", hdr.join(","));
+            outln!("{name:<28} {verts:>6} {tris:>6} {vlen:>8} {bpv:>6.1}  [{}]{note}", hdr.join(","));
         }
     }
 
@@ -60,7 +60,7 @@ pub fn run(car: &Path, filter: Option<&str>, matrices: bool) -> Result<()> {
 /// Classify each part's local matrix the way every consumer must: applied placement, baked
 /// pose, or a mirrored right-side part.
 fn print_matrices(car: &Car, filter: Option<&str>) -> Result<()> {
-    println!("\n{:<28} {:>7} {:>7}  local centroid          class", "part", "det", "|t|");
+    outln!("\n{:<28} {:>7} {:>7}  local centroid          class", "part", "det", "|t|");
     for p in car.parts()?.iter().filter(|p| filter.is_none_or(|f| p.name.contains(f))) {
         let m: &Mat4 = &p.transform;
         let cen = part_centroid(p);
@@ -73,7 +73,7 @@ fn print_matrices(car: &Car, filter: Option<&str>) -> Result<()> {
         } else {
             "baked pose (skipped)"
         };
-        println!(
+        outln!(
             "{:<28} {det:>+7.2} {t:>7.2}  [{:+.2},{:+.2},{:+.2}]  {class}",
             p.name, cen[0], cen[1], cen[2]
         );

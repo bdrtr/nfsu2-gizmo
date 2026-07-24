@@ -24,8 +24,8 @@ layer (a demo binary or an optional `gizmo-nfs-engine` crate), not this crate.
 | World / city (`STREAM*.BUN`, `L4RA.BUN`) | `world` | 🔴 research-frontier |
 
 Several NFSU2 sub-formats have **no clean public byte-level spec**; those modules are
-built defensively and their exact offsets are locked empirically using the `nfs` tool
-(`nfs dump` / `nfs probe`) against a legally-owned game install — never by assuming
+built defensively and their exact offsets are locked empirically using the `ug2` tool
+(`ug2 dump` / `ug2 probe`) against a legally-owned game install — never by assuming
 unconfirmed constants.
 
 ## Legal / asset hygiene
@@ -34,21 +34,21 @@ This crate ships **no copyrighted game data**. All tests use synthetic byte buff
 Reading real assets is done at runtime from a user-provided install path. You must own
 your copy of the game.
 
-## The `nfs` command-line tool
+## The `ug2` command-line tool
 
 ```bash
-cargo run -p gizmo-nfs --features tools --bin nfs -- <command>
+cargo run -p gizmo-nfs --features tools --bin ug2 -- <command>
 ```
 
 | command | what it answers |
 |---|---|
-| `nfs info CARS/240SX` | what this car is: parts, the variants it ships (`--kit`/`--hood`/`--light`/`--wide`), dimensions, and its `GLOBALB` wheel record |
-| `nfs parts CARS/240SX [--selected --kit 3]` | every part grouped by customization namespace, or just the ones a configuration selects |
-| `nfs export CARS/240SX -o out/ [--kit 3 --wide 1]` | the car as OBJ + MTL with its textures as PNG — importable anywhere |
-| `nfs textures CARS/240SX` | the texture table, and which material run resolves to which image |
-| `nfs dump FILE` | the chunk tree of any asset file (or a BIGF/VIV archive's contents) |
-| `nfs probe CARS/240SX [--matrices]` | the raw solid view: declared counts vs. buffer sizes, mesh-header words, matrix classification |
-| `nfs globalb GLOBALB.BUN` | wheel mounts, radius and mass per car |
+| `ug2 info CARS/240SX` | what this car is: parts, the variants it ships (`--kit`/`--hood`/`--light`/`--wide`), dimensions, and its `GLOBALB` wheel record |
+| `ug2 parts CARS/240SX [--selected --kit 3]` | every part grouped by customization namespace, or just the ones a configuration selects |
+| `ug2 export CARS/240SX -o out/ [--kit 3 --wide 1]` | the car as OBJ + MTL with its textures as PNG — importable anywhere |
+| `ug2 textures CARS/240SX` | the texture table, and which material run resolves to which image |
+| `ug2 dump FILE` | the chunk tree of any asset file (or a BIGF/VIV archive's contents) |
+| `ug2 probe CARS/240SX [--matrices]` | the raw solid view: declared counts vs. buffer sizes, mesh-header words, matrix classification |
+| `ug2 globalb GLOBALB.BUN` | wheel mounts, radius and mass per car |
 
 `dump` and `probe` are the reverse-engineering levers: every unconfirmed offset in this crate
 was locked with them against a legally-owned install, never by assuming a constant.

@@ -1,4 +1,4 @@
-//! `nfs parts` — what a car ships, and what a configuration of it selects.
+//! `ug2 parts` — what a car ships, and what a configuration of it selects.
 
 use crate::paths::{Car, Result};
 use gizmo_nfs::parts::{group_of, select_car, CarConfig};
@@ -23,12 +23,12 @@ fn list_by_namespace(parts: &[NfsMeshPart]) {
     for p in parts {
         by_ns.entry(namespace_label(&p.name)).or_default().push((&p.name, p.triangle_count()));
     }
-    println!("{} parts", parts.len());
+    outln!("{} parts", parts.len());
     for (ns, mut ps) in by_ns {
         ps.sort_unstable();
-        println!("\n== {ns}  ({} parts)", ps.len());
+        outln!("\n== {ns}  ({} parts)", ps.len());
         for (name, tris) in ps {
-            println!("   {name:<40} {tris:>6} tris");
+            outln!("   {name:<40} {tris:>6} tris");
         }
     }
 }
@@ -37,9 +37,9 @@ fn list_by_namespace(parts: &[NfsMeshPart]) {
 fn list_selected(parts: &[NfsMeshPart], config: CarConfig) {
     let mut sel = select_car(parts, &config);
     sel.sort_by(|a, b| a.name.cmp(&b.name));
-    println!("{} parts selected for {config:?}\n", sel.len());
+    outln!("{} parts selected for {config:?}\n", sel.len());
     for p in sel {
-        println!("   {:<40} {:>6} tris  {:?}", p.name, p.triangle_count(), group_of(&p.name));
+        outln!("   {:<40} {:>6} tris  {:?}", p.name, p.triangle_count(), group_of(&p.name));
     }
 }
 

@@ -35,7 +35,7 @@ pub fn write_obj(
     material_for: impl Fn(&NfsMeshPart, usize) -> String,
 ) -> String {
     let mut s = String::new();
-    let _ = writeln!(s, "# exported by `nfs export` — NFSU2 coordinates (x=length, y=width, z=height)");
+    let _ = writeln!(s, "# exported by `ug2 export` — NFSU2 coordinates (x=length, y=width, z=height)");
     let _ = writeln!(s, "mtllib {mtl_file}");
     // OBJ indices are 1-based and global to the file, so each part appends to the running count.
     let mut base = 1usize;
@@ -100,7 +100,7 @@ pub fn write_obj(
 
 /// Build the MTL text for a set of materials.
 pub fn write_mtl(materials: &[Material]) -> String {
-    let mut s = String::from("# exported by `nfs export`\n");
+    let mut s = String::from("# exported by `ug2 export`\n");
     for m in materials {
         let _ = writeln!(s, "\nnewmtl {}", m.name);
         let _ = writeln!(s, "Kd {:.3} {:.3} {:.3}", m.diffuse[0], m.diffuse[1], m.diffuse[2]);

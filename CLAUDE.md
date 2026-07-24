@@ -49,21 +49,21 @@ All of them read the car's configuration from the environment (`0`/absent = stoc
 unavailable part number silently falls back to stock):
 `NFS_KIT` (body kit `KIT##`: front + rear bumper + skirt), `NFS_STYLE_HOOD` (`STYLE##` hood),
 `NFS_STYLE_LIGHT` (`STYLE##` head/tail lights), `NFS_WIDE` (widebody `KITW##`: body + doors).
-Use `nfs info <car>` to see which numbers a given car actually ships.
+Use `ug2 info <car>` to see which numbers a given car actually ships.
 
-### The `nfs` CLI
+### The `ug2` CLI
 
 One tool over the whole parser — inspect a car, or export it. Read-only, ships no game data:
 
 ```bash
-N="cargo run -p gizmo-nfs --features tools --bin nfs --"
-$N info   "$NFSU2_ROOT/CARS/240SX"                 # parts, variants, dimensions, GLOBALB record
-$N parts  "$NFSU2_ROOT/CARS/240SX" --selected --kit 3
-$N export "$NFSU2_ROOT/CARS/240SX" -o out/ --kit 3 --wide 1   # OBJ + MTL + PNG
-$N dump   "$NFSU2_ROOT/CARS/240SX/GEOMETRY.BIN"    # chunk tree / VIV listing
-$N probe  "$NFSU2_ROOT/CARS/SENTRA" --matrices     # raw solids: counts, buffers, matrices
-$N textures "$NFSU2_ROOT/CARS/240SX"
-$N globalb  "$NFSU2_ROOT/CARS/240SX"
+UG2="cargo run -p gizmo-nfs --features tools --bin ug2 --"
+$UG2 info   "$NFSU2_ROOT/CARS/240SX"                 # parts, variants, dimensions, GLOBALB record
+$UG2 parts  "$NFSU2_ROOT/CARS/240SX" --selected --kit 3
+$UG2 export "$NFSU2_ROOT/CARS/240SX" -o out/ --kit 3 --wide 1   # OBJ + MTL + PNG
+$UG2 dump   "$NFSU2_ROOT/CARS/240SX/GEOMETRY.BIN"    # chunk tree / VIV listing
+$UG2 probe  "$NFSU2_ROOT/CARS/SENTRA" --matrices     # raw solids: counts, buffers, matrices
+$UG2 textures "$NFSU2_ROOT/CARS/240SX"
+$UG2 globalb  "$NFSU2_ROOT/CARS/240SX"
 ```
 
 `dump` and `probe` are the workhorses for locking an unconfirmed format (they replaced the
@@ -99,11 +99,11 @@ The top-level `decompress_file()` is one of the few functions that touch the fil
 ### Two hard invariants
 
 - **Panic-free parsing.** The crate is `#![forbid(unsafe_code)]`. Input is always untrusted: every read is bounds-checked and returns an `NfsError`; no parse path may panic, `unwrap`, or allocate from an unchecked size field. `tests/no_panic.rs` enforces this with proptest against arbitrary/adversarial bytes — **any new parser must uphold it.**
-- **Empirically-locked formats.** Several NFSU2 sub-formats have no public byte-level spec. Their exact offsets/constants are locked *empirically* using `nfs dump`/`nfs probe` against a legally-owned install, never by assuming unconfirmed constants. When touching format code, document offsets the way `geometry/mod.rs` does (chunk-ID map + stride/field-index constants) and validate against a real car. The objective correctness check for vertex layouts is `NfsMeshPart::indices_in_range()` (a correct layout yields all in-range indices).
+- **Empirically-locked formats.** Several NFSU2 sub-formats have no public byte-level spec. Their exact offsets/constants are locked *empirically* using `ug2 dump`/`ug2 probe` against a legally-owned install, never by assuming unconfirmed constants. When touching format code, document offsets the way `geometry/mod.rs` does (chunk-ID map + stride/field-index constants) and validate against a real car. The objective correctness check for vertex layouts is `NfsMeshPart::indices_in_range()` (a correct layout yields all in-range indices).
 
 ### Output contract (`types`)
 
-Pure-data structs, no `glam`/`wgpu`. Geometry is **indexed** and transforms are stored **as-in-file** (row-major, original handedness). Expanding indices to a flat vertex list and any coordinate-system fixups are deliberately the **integration layer's** job, not the parser's — e.g. the game's `geom::remap()` converts NFSU2's Z-up frame to Gizmo's (and `nfs export` deliberately does not, writing the file's own frame). `serde` derives on all output types are gated behind the optional `serde` feature.
+Pure-data structs, no `glam`/`wgpu`. Geometry is **indexed** and transforms are stored **as-in-file** (row-major, original handedness). Expanding indices to a flat vertex list and any coordinate-system fixups are deliberately the **integration layer's** job, not the parser's — e.g. the game's `geom::remap()` converts NFSU2's Z-up frame to Gizmo's (and `ug2 export` deliberately does not, writing the file's own frame). `serde` derives on all output types are gated behind the optional `serde` feature.
 
 ## Conventions
 

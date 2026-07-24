@@ -1,4 +1,4 @@
-//! `nfs info` — one screen that answers "what is this car, and what can I build from it?".
+//! `ug2 info` — one screen that answers "what is this car, and what can I build from it?".
 
 use crate::paths::{Car, Result};
 use gizmo_nfs::parts::{group_of, select_car, CarConfig, Grp};
@@ -13,13 +13,13 @@ pub fn run(car: &Path, config: CarConfig) -> Result<()> {
     let tpk = car.textures();
     let selected = select_car(&parts, &config);
 
-    println!("{} — {} parts, {} textures", car.name, parts.len(), tpk.as_ref().map_or(0, |t| t.textures.len()));
-    println!("  {}", car.geometry.display());
+    outln!("{} — {} parts, {} textures", car.name, parts.len(), tpk.as_ref().map_or(0, |t| t.textures.len()));
+    outln!("  {}", car.geometry.display());
 
     // ── The configuration this call selected ──
     let tris: usize = selected.iter().map(|p| p.triangle_count()).sum();
     let (lo, hi) = bounds(&selected);
-    println!(
+    outln!(
         "\nconfiguration {config:?}\n  {} parts, {tris} triangles, {:.2} x {:.2} x {:.2} m (length x width x height)",
         selected.len(),
         hi[0] - lo[0],
@@ -36,21 +36,21 @@ pub fn run(car: &Path, config: CarConfig) -> Result<()> {
     }
     by_group.sort_by_key(|(g, _)| format!("{g:?}"));
     let groups: Vec<String> = by_group.iter().map(|(g, n)| format!("{g:?}×{n}")).collect();
-    println!("  groups: {}", groups.join(", "));
+    outln!("  groups: {}", groups.join(", "));
 
     // ── What else the car ships ──
     let (kits, wides, hoods, lights) = variants(&parts);
-    println!("\nvariants this car ships");
-    println!("  body kits  --kit  : {}", fmt_set(&kits));
-    println!("  widebodies --wide : {}", fmt_set(&wides));
-    println!("  hoods      --hood : {}", fmt_set(&hoods));
-    println!("  lights     --light: {}", fmt_set(&lights));
+    outln!("\nvariants this car ships");
+    outln!("  body kits  --kit  : {}", fmt_set(&kits));
+    outln!("  widebodies --wide : {}", fmt_set(&wides));
+    outln!("  hoods      --hood : {}", fmt_set(&hoods));
+    outln!("  lights     --light: {}", fmt_set(&lights));
 
     // ── The game's own numbers for it, when the bundle is reachable ──
     match car.car_type_info() {
         Some(c) => {
             let (fl, rr) = (c.wheels[0], c.wheels[2]);
-            println!(
+            outln!(
                 "\nGLOBALB record\n  wheelbase {:.2} m, track {:.2} m, wheel radius {:.3} m, mass {:.0} kg",
                 (fl.fore_aft - rr.fore_aft).abs(),
                 fl.lateral.abs() * 2.0,
@@ -58,10 +58,10 @@ pub fn run(car: &Path, config: CarConfig) -> Result<()> {
                 c.mass_kg
             );
             for (label, w) in ["front-left", "front-right", "rear-left", "rear-right"].iter().zip(&c.wheels) {
-                println!("    {label:<12} fore/aft {:+.2}  lateral {:+.2}  ride height {:+.2}", w.fore_aft, w.lateral, w.ride_height);
+                outln!("    {label:<12} fore/aft {:+.2}  lateral {:+.2}  ride height {:+.2}", w.fore_aft, w.lateral, w.ride_height);
             }
         }
-        None => println!("\nGLOBALB record: not found (wheel mounts fall back to the fitted stance)"),
+        None => outln!("\nGLOBALB record: not found (wheel mounts fall back to the fitted stance)"),
     }
     Ok(())
 }
