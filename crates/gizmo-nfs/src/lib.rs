@@ -34,6 +34,7 @@ pub mod compression;
 pub mod error;
 pub mod fourcc;
 pub mod geometry;
+pub mod globalb;
 pub mod reader;
 pub mod texture;
 pub mod types;
@@ -41,6 +42,7 @@ pub mod viv;
 
 pub use error::{NfsError, NfsResult};
 pub use geometry::parse_geometry;
+pub use globalb::{parse_cartypeinfos, CarTypeInfo, WheelSpec};
 pub use texture::{Tpk, TpkEntry};
 pub use types::{
     AssetHash, LodLevel, Mat4, NfsCar, NfsMaterialRange, NfsMeshPart, NfsTexture, PartRole,
