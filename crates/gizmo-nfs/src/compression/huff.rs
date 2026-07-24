@@ -108,10 +108,15 @@ impl<'a> Bits<'a> {
 }
 
 /// EA `SQgetnum`: a variable-length signed integer, values down to −4.
-fn getnum(b: &mut Bits) -> i32 {
+///
+/// The length is a unary run of zeros, so a stream *of* zeros — the shape of truncated or
+/// garbage input, since the bit reader pads with zeros past the end — would scan forever. Stop
+/// at the longest run the format can encode and report a corrupt stream instead: this parser
+/// may not panic or hang on untrusted bytes, only fail.
+fn getnum(b: &mut Bits) -> NfsResult<i32> {
     if (b.bits as i32) < 0 {
         // Top bit set → tiny value in `-4..=3`.
-        return b.getbits(3) as i32 - 4;
+        return Ok(b.getbits(3) as i32 - 4);
     }
     let mut n: u32 = 2;
     if b.bits >> 16 != 0 {
@@ -133,16 +138,22 @@ fn getnum(b: &mut Bits) -> i32 {
             if b.getbits(1) != 0 {
                 break;
             }
+            if n as usize > MAX_LEN {
+                return Err(err("unterminated length run"));
+            }
         }
     }
     let bias = ((1i64 << n) - 4) as i32;
-    if n > 16 {
+    // Wrapping, not checked: `n` is bounded above, but a corrupt stream can still yield the
+    // full u32 range here, and the callers range-check what they get.
+    let raw = if n > 16 {
         let hi = b.getbits(n - 16);
         let lo = b.getbits(16);
-        (lo | (hi << 16)) as i32 + bias
+        (lo | (hi << 16)) as i32
     } else {
-        b.getbits(n) as i32 + bias
-    }
+        b.getbits(n) as i32
+    };
+    Ok(raw.wrapping_add(bias))
 }
 
 /// Decompress a HUFF stream into its original bytes.
@@ -197,7 +208,7 @@ pub fn decompress(buf: &[u8]) -> NfsResult<Vec<u8>> {
         }
         basecmp <<= 1;
         delta[numbits] = basecmp.wrapping_sub(numchars as u32);
-        let bn = getnum(&mut b);
+        let bn = getnum(&mut b)?;
         if !(0..=256).contains(&bn) {
             return Err(err("bad code-length count"));
         }
@@ -224,7 +235,7 @@ pub fn decompress(buf: &[u8]) -> NfsResult<Vec<u8>> {
     let mut used = [false; 256];
     let mut nextchar: u8 = 0xFF;
     for slot in codetbl.iter_mut().take(numchars) {
-        let mut leap = getnum(&mut b) + 1;
+        let mut leap = getnum(&mut b)?.saturating_add(1);
         if leap < 1 {
             return Err(err("bad symbol leap"));
         }
@@ -267,7 +278,7 @@ pub fn decompress(buf: &[u8]) -> NfsResult<Vec<u8>> {
             continue;
         }
         // Clue escape: run-length, raw literal, or end-of-stream.
-        let runlen = getnum(&mut b);
+        let runlen = getnum(&mut b)?;
         if runlen != 0 {
             if runlen < 0 {
                 return Err(err("negative run length"));
@@ -316,4 +327,26 @@ fn first_four(buf: &[u8]) -> [u8; 4] {
         *o = *b;
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_zero_filled_stream_fails_instead_of_spinning() {
+        // A valid magic + version and nothing else. The bit reader pads with zeros past the end,
+        // so `getnum`'s unary length run never terminates: it used to count until `n` overflowed
+        // (a panic in debug, a nonsense shift in release). Untrusted input may only fail.
+        let mut buf = vec![0u8; 16];
+        buf[..4].copy_from_slice(MAGIC);
+        buf[4] = 1;
+        assert!(matches!(decompress(&buf), Err(NfsError::Decompression { codec: "huff", .. })));
+    }
+
+    #[test]
+    fn a_truncated_header_is_an_error_not_a_panic() {
+        assert!(decompress(&[b'H', b'U', b'F', b'F']).is_err());
+        assert!(parse_header(&[]).is_err());
+    }
 }
