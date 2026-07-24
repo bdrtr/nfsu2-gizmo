@@ -13,6 +13,10 @@
 //! * [`compression`] — RefPack/QFS and JDLZ, detected by magic bytes.
 //! * [`viv`] — BIGF/VIV archive extraction.
 //! * [`types`] — the engine-agnostic output contract.
+//! * [`placement`] — what a solid's local matrix means (a placement to apply, or a pose already
+//!   baked into the vertices), which every consumer must decide the same way.
+//! * [`parts`] — which parts make up a given configuration of a car, and which material group
+//!   each belongs to. Pure name/triangle-count policy, shared by the engine layer and the CLI.
 //!
 //! [`texture`] parses `TPK` (`TEXTURES.BIN`) into an RGBA8 pixel pool + per-texture
 //! descriptors; [`geometry`] parses `GEOMETRY.BIN`. World modules come later. Several of
@@ -35,6 +39,8 @@ pub mod error;
 pub mod fourcc;
 pub mod geometry;
 pub mod globalb;
+pub mod parts;
+pub mod placement;
 pub mod reader;
 pub mod texture;
 pub mod types;
@@ -43,6 +49,7 @@ pub mod viv;
 pub use error::{NfsError, NfsResult};
 pub use geometry::parse_geometry;
 pub use globalb::{parse_cartypeinfos, CarTypeInfo, WheelSpec};
+pub use parts::{group_of, select_car, select_stock_car, CarConfig, Grp};
 pub use texture::{Tpk, TpkEntry};
 pub use types::{
     AssetHash, LodLevel, Mat4, NfsCar, NfsMaterialRange, NfsMeshPart, NfsTexture, PartRole,

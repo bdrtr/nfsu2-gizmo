@@ -1,6 +1,6 @@
 //! The NFSU2 → Gizmo coordinate frame, and bounds measured in it.
 
-use super::place::{part_centroid, place_point, should_place};
+use gizmo_nfs::placement::{part_centroid, place_point, should_place};
 use gizmo::prelude::*;
 use gizmo_nfs::NfsMeshPart;
 

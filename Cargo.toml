@@ -15,6 +15,9 @@ repository = "https://github.com/bdrtr/nfsu2-gizmo"
 
 [workspace.dependencies]
 proptest = "1"
+# `nfs` CLI (gizmo-nfs, `tools` feature): argument parsing and PNG texture export.
+clap = { version = "4", features = ["derive"] }
+png = "0.17"
 
 # Fiziksel demoların çalışma-zamanı performansı için: release'de tam optimizasyon.
 # (Debug build broad/narrow-phase'de ciddi CPU darboğazına girer — Gizmo ile aynı sebep.)

@@ -49,15 +49,27 @@ All of them read the car's configuration from the environment (`0`/absent = stoc
 unavailable part number silently falls back to stock):
 `NFS_KIT` (body kit `KIT##`: front + rear bumper + skirt), `NFS_STYLE_HOOD` (`STYLE##` hood),
 `NFS_STYLE_LIGHT` (`STYLE##` head/tail lights), `NFS_WIDE` (widebody `KITW##`: body + doors).
-Use the `nfs_parts` example to see which numbers a given car actually ships.
+Use `nfs info <car>` to see which numbers a given car actually ships.
 
-### Reverse-engineering tool (`nfs_dump`)
+### The `nfs` CLI
 
-The workhorse for locking unconfirmed formats — detects the codec, decompresses, and prints the chunk tree (or lists a BIGF/VIV archive):
+One tool over the whole parser — inspect a car, or export it. Read-only, ships no game data:
 
 ```bash
-cargo run -p gizmo-nfs --features tools --example nfs_dump -- /path/to/FILE
+N="cargo run -p gizmo-nfs --features tools --bin nfs --"
+$N info   "$NFSU2_ROOT/CARS/240SX"                 # parts, variants, dimensions, GLOBALB record
+$N parts  "$NFSU2_ROOT/CARS/240SX" --selected --kit 3
+$N export "$NFSU2_ROOT/CARS/240SX" -o out/ --kit 3 --wide 1   # OBJ + MTL + PNG
+$N dump   "$NFSU2_ROOT/CARS/240SX/GEOMETRY.BIN"    # chunk tree / VIV listing
+$N probe  "$NFSU2_ROOT/CARS/SENTRA" --matrices     # raw solids: counts, buffers, matrices
+$N textures "$NFSU2_ROOT/CARS/240SX"
+$N globalb  "$NFSU2_ROOT/CARS/240SX"
 ```
+
+`dump` and `probe` are the workhorses for locking an unconfirmed format (they replaced the
+old `nfs_dump`/`nfs_vfmt`/`nfs_survey` examples). `export` writes NFSU2's own coordinates
+(x = length, y = width, z = height, Z-up — Blender reads it natively) with each solid's
+placement applied.
 
 ### RAM-limited builds
 
@@ -78,18 +90,20 @@ Layered bottom-up; each layer is `&[u8]`-based and independently testable:
 5. **`viv`** — BIGF/VIV archive extraction.
 6. **`geometry`** — `parse_geometry()`: `GEOMETRY.BIN` → `Vec<NfsMeshPart>`. Solids without a mesh (mount/dummy points) are skipped.
 7. **`texture`** — `Tpk::parse()`: `TEXTURES.BIN` (TPK) → an RGBA8 pixel pool + per-texture descriptors. The pool is the file's **JDLZ-compressed RGBA8** blocks concatenated (it is *not* DXT), laid out in `PAGE_WIDTH` (512)-wide pages; each descriptor gives hash + `pool_offset` (→ x,y) + format code. **Per-texture width/height are not yet decoded** — the module deliberately exposes the pool and origins, not cropped `NfsTexture`s. See its module docs for the descriptor table.
-8. **`types`** — the engine-agnostic output contract (see below).
+8. **`placement`** — what a solid's local matrix *means*: a placement to apply, or a pose already baked into the vertices (`should_place`). Format semantics, so every consumer (engine layer, CLI exporter) decides it the same way.
+9. **`parts`** — **pure policy**: which material group a name is (`group_of`), what its `KIT##`/`KITW##`/`STYLE##` token says, and which parts make up a configuration (`select_car`). Lives here so the `nfs` CLI and the game select identically; the game re-exports it as `nfsu2::parts`.
+10. **`types`** — the engine-agnostic output contract (see below).
 
 The top-level `decompress_file()` is one of the few functions that touch the filesystem; everything downstream is pure `&[u8]`.
 
 ### Two hard invariants
 
 - **Panic-free parsing.** The crate is `#![forbid(unsafe_code)]`. Input is always untrusted: every read is bounds-checked and returns an `NfsError`; no parse path may panic, `unwrap`, or allocate from an unchecked size field. `tests/no_panic.rs` enforces this with proptest against arbitrary/adversarial bytes — **any new parser must uphold it.**
-- **Empirically-locked formats.** Several NFSU2 sub-formats have no public byte-level spec. Their exact offsets/constants are locked *empirically* using `nfs_dump` against a legally-owned install, never by assuming unconfirmed constants. When touching format code, document offsets the way `geometry/mod.rs` does (chunk-ID map + stride/field-index constants) and validate against a real car. The objective correctness check for vertex layouts is `NfsMeshPart::indices_in_range()` (a correct layout yields all in-range indices).
+- **Empirically-locked formats.** Several NFSU2 sub-formats have no public byte-level spec. Their exact offsets/constants are locked *empirically* using `nfs dump`/`nfs probe` against a legally-owned install, never by assuming unconfirmed constants. When touching format code, document offsets the way `geometry/mod.rs` does (chunk-ID map + stride/field-index constants) and validate against a real car. The objective correctness check for vertex layouts is `NfsMeshPart::indices_in_range()` (a correct layout yields all in-range indices).
 
 ### Output contract (`types`)
 
-Pure-data structs, no `glam`/`wgpu`. Geometry is **indexed** and transforms are stored **as-in-file** (row-major, original handedness). Expanding indices to a flat vertex list and any coordinate-system fixups are deliberately the **integration layer's** job, not the parser's — e.g. `nfs_drive.rs`'s `remap()` converts NFSU2's Z-up frame to Gizmo's. `serde` derives on all output types are gated behind the optional `serde` feature.
+Pure-data structs, no `glam`/`wgpu`. Geometry is **indexed** and transforms are stored **as-in-file** (row-major, original handedness). Expanding indices to a flat vertex list and any coordinate-system fixups are deliberately the **integration layer's** job, not the parser's — e.g. the game's `geom::remap()` converts NFSU2's Z-up frame to Gizmo's (and `nfs export` deliberately does not, writing the file's own frame). `serde` derives on all output types are gated behind the optional `serde` feature.
 
 ## Conventions
 

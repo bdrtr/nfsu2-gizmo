@@ -17,6 +17,10 @@ all-features = true
 # Optional: derive serde on the engine-agnostic output types (caching parsed cars,
 # RON/JSON dumps during reverse-engineering). Off by default to keep the crate lean.
 serde = { version = "1", features = ["derive"], optional = true }
+# Optional: the `nfs` command-line tool (reads and exports cars). Feature-gated so the library
+# itself stays dependency-free for downstream users.
+clap = { workspace = true, optional = true }
+png = { workspace = true, optional = true }
 
 [dev-dependencies]
 proptest = { workspace = true }
@@ -25,10 +29,11 @@ proptest = { workspace = true }
 default = []
 # Derive Serialize/Deserialize on all `types::*` output structs.
 serde = ["dep:serde"]
-# Compile the read-only `nfs_dump` reverse-engineering CLI example.
-tools = []
+# Compile the `nfs` command-line tool: reads NFSU2 cars (inspect, probe) and exports them
+# (OBJ/MTL + PNG). Off by default so the library pulls no dependencies.
+tools = ["dep:clap", "dep:png"]
 
-[[example]]
-name = "nfs_dump"
-path = "examples/nfs_dump.rs"
+[[bin]]
+name = "nfs"
+path = "src/bin/nfs/main.rs"
 required-features = ["tools"]

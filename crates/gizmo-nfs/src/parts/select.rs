@@ -4,7 +4,7 @@
 use super::config::CarConfig;
 use super::group::{group_of, Grp};
 use super::name::{component_key, namespace, slot_of, Ns, Slot};
-use gizmo_nfs::NfsMeshPart;
+use crate::types::NfsMeshPart;
 
 /// CARSKIN shader hash (`0x00134013`, a painted body run). Mirrors `car::shader::CARSKIN`;
 /// duplicated here so part selection can tell a paintable door skin from a glass-only door
@@ -153,27 +153,26 @@ pub fn select_stock_car(all: &[NfsMeshPart]) -> Vec<&NfsMeshPart> {
 mod tests {
     use super::*;
 
-    // NfsMeshPart / NfsMaterialRange are #[non_exhaustive], so build via Default + field set.
     fn body_lod(name: &str, tris: usize, door_verts: usize) -> NfsMeshPart {
         // bbox mid=0, ext=(4,2,2) → door zone: |x|<1.2, |y|>0.7, |z|<0.6.
         let mut positions = vec![[0.0, 0.0, 0.0]]; // one out-of-zone vertex
         positions.extend(std::iter::repeat_n([0.0, 0.9, 0.0], door_verts)); // in-zone
-        let mut p = NfsMeshPart::default();
-        p.name = name.to_string();
-        p.positions = positions;
-        p.indices = vec![0; tris * 3];
-        p.bbox_min = [-2.0, -1.0, -1.0];
-        p.bbox_max = [2.0, 1.0, 1.0];
-        p
+        NfsMeshPart {
+            name: name.to_string(),
+            positions,
+            indices: vec![0; tris * 3],
+            bbox_min: [-2.0, -1.0, -1.0],
+            bbox_max: [2.0, 1.0, 1.0],
+            ..Default::default()
+        }
     }
 
     fn door_skin(name: &str, shader: u32) -> NfsMeshPart {
-        let mut m = gizmo_nfs::types::NfsMaterialRange::default();
-        m.shader = gizmo_nfs::AssetHash(shader);
-        let mut p = NfsMeshPart::default();
-        p.name = name.to_string();
-        p.materials = vec![m];
-        p
+        let m = crate::types::NfsMaterialRange {
+            shader: crate::types::AssetHash(shader),
+            ..Default::default()
+        };
+        NfsMeshPart { name: name.to_string(), materials: vec![m], ..Default::default() }
     }
 
     #[test]
@@ -211,10 +210,11 @@ mod tests {
     /// A minimal named part with a triangle count — enough for selection, which only reads names
     /// and triangle counts (except for the body door-fill rule, which `body_lod` covers).
     fn part(name: &str, tris: usize) -> NfsMeshPart {
-        let mut p = NfsMeshPart::default();
-        p.name = name.to_string();
-        p.indices = vec![0; tris * 3];
-        p
+        NfsMeshPart {
+            name: name.to_string(),
+            indices: vec![0; tris * 3],
+            ..Default::default()
+        }
     }
 
     /// The 240SX's real slot layout, trimmed to one LOD per component.

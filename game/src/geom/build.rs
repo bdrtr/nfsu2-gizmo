@@ -2,7 +2,7 @@
 //! list, and the one world-placement helper every binary needs.
 
 use super::frame::remap;
-use super::place::{part_centroid, place_dir, place_point, should_place};
+use gizmo_nfs::placement::{part_centroid, place_dir, place_point, should_place};
 use gizmo::prelude::*;
 use gizmo::renderer::gpu_types::Vertex;
 use gizmo_nfs::NfsMeshPart;

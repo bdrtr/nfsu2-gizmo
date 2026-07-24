@@ -5,9 +5,9 @@
 //! binaries (`nfs_viewer`, `nfs_drive`, `nfs_race`, `nfs_shot`) are thin orchestrators over
 //! these modules, which are layered by what they are allowed to depend on:
 //!
-//! * [`parts`] — **pure, engine-free** classification: which material group a part is, what
-//!   its name says about the variant it belongs to, and which parts form a given
-//!   configuration of the car. No `gizmo`/`wgpu` types — keep it that way.
+//! * [`parts`] — **pure, engine-free** classification (which material group a part is, what its
+//!   name says about the variant, and which parts form a given configuration). It lives in
+//!   `gizmo-nfs` so the CLI shares it; re-exported here for the binaries.
 //! * [`geom`] — engine-coupled geometry: the NFSU2 → Gizmo coordinate remap, what a part's
 //!   file matrix means, and building GPU meshes.
 //! * [`car`] — the car as a whole: material looks, shader routing, texture resolution, wheel
@@ -19,5 +19,8 @@
 pub mod assets;
 pub mod car;
 pub mod geom;
-pub mod parts;
 pub mod scene;
+
+/// Part classification and configuration — pure policy that lives in the parser crate (so the
+/// `nfs` CLI selects exactly the same parts), re-exported here as this crate's own `parts`.
+pub use gizmo_nfs::parts;

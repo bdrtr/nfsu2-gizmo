@@ -1,12 +1,16 @@
-//! Deciding whether a part's file matrix is a placement to apply or a pose to leave alone,
-//! and applying it. Pure maths over the parser's row-major matrices — no engine types.
+//! What a solid's local matrix *means*: a placement to apply, or a pose already baked into the
+//! vertices and to be left alone — and the maths to apply it.
+//!
+//! This is format semantics, not presentation: the same file carries both kinds of matrix and
+//! only the values tell them apart, so every consumer (the engine integration, the CLI exporter)
+//! must make the same call or the same car comes out differently.
 
-use gizmo_nfs::{Mat4, NfsMeshPart};
+use crate::types::{Mat4, NfsMeshPart};
 
 /// Determinant of a 4x4's upper-left 3x3 — its sign tells a proper placement transform
 /// (rotation/scale, det > 0) from a reflection (det < 0).
 #[inline]
-pub(super) fn det3(m: &Mat4) -> f32 {
+pub fn det3(m: &Mat4) -> f32 {
     m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1])
         - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
         + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0])
@@ -15,7 +19,7 @@ pub(super) fn det3(m: &Mat4) -> f32 {
 /// Mean of a part's local-space vertex positions — how far the part is modelled from the car
 /// origin, which distinguishes a placement from an articulation pose (see [`should_place`]).
 #[inline]
-pub(super) fn part_centroid(p: &NfsMeshPart) -> [f32; 3] {
+pub fn part_centroid(p: &NfsMeshPart) -> [f32; 3] {
     let n = p.positions.len().max(1) as f32;
     let mut s = [0.0f32; 3];
     for v in &p.positions {
@@ -54,7 +58,7 @@ const MIN_PLACEMENT_TRANSLATION: f32 = 0.05;
 ///   origin does not move an origin-centred part, so applying it is what the clean cars already
 ///   relied on — keeping it here avoids regressing them.
 #[inline]
-pub(super) fn should_place(m: &Mat4, centroid: &[f32; 3]) -> bool {
+pub fn should_place(m: &Mat4, centroid: &[f32; 3]) -> bool {
     if det3(m) <= 1e-6 {
         return false;
     }
@@ -72,7 +76,7 @@ pub(super) fn should_place(m: &Mat4, centroid: &[f32; 3]) -> bool {
 /// row-major with the translation in the last **row** (row-vector convention, `v' = v · M`).
 /// `apply` is the per-part decision from [`should_place`].
 #[inline]
-pub(super) fn place_point(m: &Mat4, p: [f32; 3], apply: bool) -> [f32; 3] {
+pub fn place_point(m: &Mat4, p: [f32; 3], apply: bool) -> [f32; 3] {
     if !apply {
         return p;
     }
@@ -86,7 +90,7 @@ pub(super) fn place_point(m: &Mat4, p: [f32; 3], apply: bool) -> [f32; 3] {
 /// Rotate a part's local-space normal by its file transform's 3x3 (no translation), gated by the
 /// same per-part `apply` decision as [`place_point`].
 #[inline]
-pub(super) fn place_dir(m: &Mat4, n: [f32; 3], apply: bool) -> [f32; 3] {
+pub fn place_dir(m: &Mat4, n: [f32; 3], apply: bool) -> [f32; 3] {
     if !apply {
         return n;
     }
@@ -100,7 +104,7 @@ pub(super) fn place_dir(m: &Mat4, n: [f32; 3], apply: bool) -> [f32; 3] {
 #[cfg(test)]
 mod tests {
     use super::{det3, should_place};
-    use gizmo_nfs::Mat4;
+    use crate::types::Mat4;
 
     // Row-major 4x4 with translation in the last row (the file's `v · M` convention).
     fn m(rows: [[f32; 4]; 4]) -> Mat4 {
