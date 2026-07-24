@@ -11,7 +11,7 @@ use gizmo::renderer::components::LightRole;
 use gizmo::renderer::Renderer;
 use gizmo::wgpu;
 use gizmo_nfs::parse_geometry;
-use nfsu2::car::{build_car_visuals, env_color, load_tpk_beside, WheelSurface};
+use nfsu2::car::{build_car_visuals, env_color, load_cartypeinfo_beside, load_tpk_beside, wheel_mount, WheelSurface};
 
 fn main() {
     let path = std::env::args().nth(1).expect("usage: nfs_shot GEOMETRY.BIN OUT.raw [W H]");
@@ -117,6 +117,10 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
     });
     let (cw, ch, cl) = (car.width, car.height, car.length);
     let fit = car.wheel_fit;
+    let car_center = car.center;
+    // Exact wheel mounts (asymmetric wheelbase, per-car track & ride height) from GLOBALB's
+    // CarTypeInfo when the game bundle is reachable; else the symmetric fit_wheel corners.
+    let cti = load_cartypeinfo_beside(path);
 
     for gv in car.groups {
         spawn(&mut world, gv.mesh, gv.material, Transform::new(Vec3::ZERO));
@@ -170,12 +174,18 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
                 }
             }
         };
-        for (sx, sz) in [(-1.0, -1.0), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)] {
-            let pos = Vec3::new(sx * fit.half_track, wheel_y, sz * fit.half_wheelbase);
+        let mounts: Vec<Vec3> = match &cti {
+            Some(c) => c.wheels.iter().map(|w| wheel_mount(w, car_center)).collect(),
+            None => [(-1.0, -1.0), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)]
+                .iter()
+                .map(|(sx, sz)| Vec3::new(sx * fit.half_track, wheel_y, sz * fit.half_wheelbase))
+                .collect(),
+        };
+        for pos in mounts {
             // The wheel mesh is modelled for one side only; the other side must be turned to
             // face its rim outward, else it shows its flat inboard back as a black slab. A 180°
             // yaw (not a reflection — keeps winding/normals) mirrors it about the car centreline.
-            let t = if sx < 0.0 {
+            let t = if pos.x < 0.0 {
                 Transform::new(pos).with_rotation(Quat::from_rotation_y(std::f32::consts::PI))
             } else {
                 Transform::new(pos)

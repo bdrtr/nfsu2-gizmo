@@ -9,7 +9,7 @@
 use crate::mesh::{bbox, build_mesh, build_mesh_items};
 use crate::part_groups::{group_of, select_stock_car, Grp};
 use gizmo::prelude::*;
-use gizmo_nfs::{AssetHash, NfsMeshPart, NfsTexture, Tpk};
+use gizmo_nfs::{AssetHash, CarTypeInfo, NfsMeshPart, NfsTexture, Tpk, WheelSpec};
 use std::collections::HashMap;
 
 /// A physically-based surface look for one material group: base colour plus roughness and
@@ -101,6 +101,32 @@ pub fn load_tpk_beside(geometry_path: &str) -> Option<Tpk> {
     let dir = std::path::Path::new(geometry_path).parent()?;
     let bytes = std::fs::read(dir.join("TEXTURES.BIN")).ok()?;
     Tpk::parse(&bytes).ok()
+}
+
+/// Load this car's [`CarTypeInfo`] (exact wheel mounts, radius, mass) from the game's global
+/// bundle, resolved relative to a `CARS/<name>/GEOMETRY.BIN` path: up two directories to the
+/// game root, then `GLOBAL/GLOBALB.BUN`, looked up by the car's folder name. `None` if the
+/// bundle is missing or the car isn't listed.
+#[must_use]
+pub fn load_cartypeinfo_beside(geometry_path: &str) -> Option<CarTypeInfo> {
+    let geo = std::path::Path::new(geometry_path);
+    let car_dir = geo.parent()?; // CARS/<name>
+    let name = car_dir.file_name()?.to_str()?;
+    let root = car_dir.parent()?.parent()?; // up past CARS/
+    let raw = std::fs::read(root.join("GLOBAL").join("GLOBALB.BUN")).ok()?;
+    let bytes = match gizmo_nfs::compression::detect(&raw) {
+        gizmo_nfs::compression::Codec::None => raw,
+        _ => gizmo_nfs::compression::decompress(&raw).ok()?,
+    };
+    gizmo_nfs::globalb::find_car(&bytes, name)
+}
+
+/// Map a [`WheelSpec`] mount (NFSU2 car space: fore/aft, lateral, ride-height) into the Gizmo
+/// frame, recentered by the car `center` — the exact position to instance the wheel mesh at.
+/// Uses the same axis remap as the body mesh so wheels and body share one frame.
+#[must_use]
+pub fn wheel_mount(w: &WheelSpec, center: Vec3) -> Vec3 {
+    crate::mesh::remap([w.fore_aft, w.lateral, w.ride_height]) - center
 }
 
 /// Parse a `"r,g,b"` (each `0..1`) colour from an environment variable, else the default.
