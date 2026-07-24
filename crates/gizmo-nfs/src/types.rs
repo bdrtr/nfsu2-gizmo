@@ -133,11 +133,12 @@ pub struct NfsMeshPart {
 }
 
 /// The pixel layout of a decoded texture. Output is always `Rgba8`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[non_exhaustive]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum PixelFormat {
     /// 8 bits per channel, RGBA order.
+    #[default]
     Rgba8,
 }
 
@@ -158,8 +159,15 @@ pub enum TexFormat {
     Unknown(u32),
 }
 
+impl Default for TexFormat {
+    /// An unknown tag: a default-constructed texture has no on-disk format behind it.
+    fn default() -> Self {
+        Self::Unknown(0)
+    }
+}
+
 /// A decoded texture: always RGBA8, top mip only.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 #[non_exhaustive]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct NfsTexture {

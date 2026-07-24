@@ -233,13 +233,39 @@ pub fn composite_over_paint(overlay: &[u8], paint: [f32; 3]) -> Vec<u8> {
 /// material hash, so it is resolved by name here. Prefer the kit-body variant when a KIT00 body
 /// supplies the outer paint, else the base `_DOORLINE`.
 fn doorline_texture(tpk: &Tpk, has_kit_body: bool) -> Option<&NfsTexture> {
-    let pick = |suffix: &str| tpk.textures.values().find(|t| t.name.ends_with(suffix));
+    let pick = |suffix: &str| {
+        tpk.textures
+            .values()
+            .filter(|t| t.name.ends_with(suffix))
+            // TPK DebugNames are truncated to 23 characters, so on a long car name the `_MASK`
+            // companion loses its tail and ends with the same stem as the map itself
+            // (`LANCEREVO8_DOORLINE_KIT_MASK` → `LANCEREVO8_DOORLINE_KIT`). A mask is fully
+            // opaque and the map is mostly transparent, so pick the *most transparent* candidate
+            // — with the hash as a deterministic tie-break, since `textures` is a `HashMap` whose
+            // order varies per run (which made the Lancer and the Impreza render black at random).
+            .min_by_key(|t| (opaque_permille(t), t.hash.0))
+            // A full-coverage map is a mask or an undecoded format, not a detail overlay:
+            // compositing it paints the whole car its own (near-black) colour, as it did on the
+            // IS300, whose real `_DOORLINE` is opaque too. Better no detail than a black car.
+            .filter(|t| opaque_permille(t) < OVERLAY_MAX_OPAQUE_PERMILLE)
+    };
     if has_kit_body {
         pick("_DOORLINE_KIT").or_else(|| pick("_DOORLINE"))
     } else {
         pick("_DOORLINE")
     }
 }
+
+/// Opacity of a texture in ‰ of texels — how much of the paint an overlay would cover. Real
+/// doorline maps sit at 100–200‰ (thin panel gaps on a transparent field); masks are 1000‰.
+fn opaque_permille(t: &NfsTexture) -> u32 {
+    let texels = (t.rgba.len() / 4).max(1);
+    let opaque = t.rgba.chunks_exact(4).filter(|px| px[3] > 200).count();
+    (opaque * 1000 / texels) as u32
+}
+
+/// Above this coverage a "detail overlay" is really a mask (or an undecodable map) and is dropped.
+const OVERLAY_MAX_OPAQUE_PERMILLE: u32 = 900;
 
 /// NFSU2 shares one shader set across every car, so a material's shader hash (`0x00134013`)
 /// names its *type* — the reliable signal for how to render a run, independent of the
@@ -553,6 +579,56 @@ mod tests {
         assert_eq!(out.len(), overlay.len());
         assert_eq!(out[3], 255);
         assert_eq!(out[7], 255);
+    }
+
+    /// A texture of `texels` pixels, `opaque` of them opaque — enough for the overlay picker,
+    /// which only reads the alpha channel, the name and the hash.
+    fn tex(name: &str, hash: u32, texels: usize, opaque: usize) -> NfsTexture {
+        let mut rgba = Vec::with_capacity(texels * 4);
+        for i in 0..texels {
+            rgba.extend_from_slice(&[0, 0, 0, if i < opaque { 255 } else { 0 }]);
+        }
+        let mut t = NfsTexture::default();
+        t.name = name.to_string();
+        t.hash = AssetHash(hash);
+        t.width = texels as u32;
+        t.height = 1;
+        t.rgba = rgba;
+        t
+    }
+
+    fn tpk_of(textures: Vec<NfsTexture>) -> Tpk {
+        let mut tpk = Tpk::default();
+        tpk.textures = textures.into_iter().map(|t| (t.hash, t)).collect();
+        tpk
+    }
+
+    #[test]
+    fn overlay_pick_prefers_the_map_over_its_truncated_mask_twin() {
+        // TPK DebugNames are cut at 23 chars, so `LANCEREVO8_DOORLINE_KIT_MASK` arrives ending in
+        // the same stem as the map. The mask is fully opaque, the map mostly transparent — and
+        // `textures` is a HashMap, so picking by iteration order rendered the car black at random.
+        let tpk = tpk_of(vec![
+            tex("LANCEREVO8_DOORLINE_KIT", 0x1111_1111, 100, 100), // the truncated _MASK
+            tex("LANCEREVO8_DOORLINE_KIT", 0x2222_2222, 100, 19),  // the real map
+        ]);
+        let picked = doorline_texture(&tpk, true).expect("a doorline overlay");
+        assert_eq!(picked.hash.0, 0x2222_2222);
+    }
+
+    #[test]
+    fn a_full_coverage_overlay_is_refused() {
+        // The IS300's own `_DOORLINE` is opaque: composited it would paint the whole car its
+        // near-black colour. No overlay is better than a black car.
+        let tpk = tpk_of(vec![tex("IS300_DOORLINE", 0x3333_3333, 100, 100)]);
+        assert!(doorline_texture(&tpk, false).is_none());
+        // A kit body with only an opaque `_DOORLINE_KIT` falls back to `_DOORLINE` — and refuses
+        // that too when it is opaque as well.
+        let tpk = tpk_of(vec![
+            tex("IS300_DOORLINE_KIT", 0x4444_4444, 100, 100),
+            tex("IS300_DOORLINE", 0x5555_5555, 100, 100),
+        ]);
+        assert!(doorline_texture(&tpk, true).is_none());
     }
 
     #[test]
