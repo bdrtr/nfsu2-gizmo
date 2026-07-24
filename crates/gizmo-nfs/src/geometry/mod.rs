@@ -173,8 +173,12 @@ fn parse_vertices(
     Ok((positions, normals, uvs))
 }
 
-/// The indices occupy the last `tri_count * 3` u16s of the buffer. Every index is
-/// validated against the vertex count.
+/// The indices are `tri_count * 3` little-endian u16s that follow the buffer's leading `0x11`
+/// alignment filler (the game aligns the index stream to 0x10). They must be read **forward
+/// from just after that filler**, not from the tail: some solids (wheels, bumpers) carry a couple
+/// of trailing pad bytes, and a tail read would swallow the first real index and pull in the
+/// trailing pad — shifting every triangle by one vertex and shredding the mesh into shards. Every
+/// index is validated against the vertex count.
 fn parse_indices(ibuf: &[u8], tri_count: usize, vert_count: usize) -> NfsResult<Vec<u32>> {
     let index_count = tri_count
         .checked_mul(3)
@@ -182,10 +186,11 @@ fn parse_indices(ibuf: &[u8], tri_count: usize, vert_count: usize) -> NfsResult<
     let needed = index_count
         .checked_mul(2)
         .ok_or(NfsError::BufferSizeMismatch { detail: "index count overflow" })?;
-    if needed > ibuf.len() {
+    // Skip the leading 0x11 alignment filler, then take exactly `needed` bytes forward.
+    let start = ibuf.iter().take_while(|&&b| b == 0x11).count();
+    if start.checked_add(needed).is_none_or(|end| end > ibuf.len()) {
         return Err(NfsError::BufferSizeMismatch { detail: "index buffer smaller than tri_count*6" });
     }
-    let start = ibuf.len() - needed;
     let mut r = ByteReader::at(ibuf, start)?;
     let mut indices = Vec::with_capacity(index_count);
     for _ in 0..index_count {
@@ -440,6 +445,20 @@ mod tests {
         let mut bad = vec![0x11u8; 12];
         bad.extend(entry(100, 0, 0, 0));
         assert!(material_ranges(&bad, &ordered, &shaders, 9).is_empty());
+    }
+
+    #[test]
+    fn indices_read_forward_past_leading_filler_and_ignore_trailing_pad() {
+        // The real-world layout that a tail read gets wrong: [0x11 filler][indices][trailing pad].
+        // Reading from the tail would drop the first index and swallow the trailing pad, shifting
+        // every triangle by one vertex (this was the wheel/bumper "shard" bug). Read forward.
+        let mut ibuf = vec![0x11u8; 4]; // leading alignment filler
+        for i in [0u16, 1, 2, 2, 3, 0] {
+            ibuf.extend_from_slice(&i.to_le_bytes()); // two triangles: (0,1,2),(2,3,0)
+        }
+        ibuf.extend_from_slice(&[0x00, 0x00]); // trailing pad the tail read must not consume
+        let idx = parse_indices(&ibuf, 2, 4).unwrap();
+        assert_eq!(idx, vec![0, 1, 2, 2, 3, 0]);
     }
 
     #[test]
