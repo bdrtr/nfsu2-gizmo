@@ -1,10 +1,6 @@
 [workspace]
 resolver = "2"
-members = [
-    "crates/gizmo-nfs",
-    "crates/strukt",
-    "game",
-]
+members = ["game"]
 
 # Ortak paket metadatası — gizmo-nfs bunları `*.workspace = true` ile devralır.
 [workspace.package]
@@ -14,14 +10,14 @@ authors = ["Bedir"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/bdrtr/nfsu2-gizmo"
 
-[workspace.dependencies]
-proptest = "1"
-# `nfs` CLI (gizmo-nfs, `tools` feature): argument parsing and PNG texture export.
-clap = { version = "4", features = ["derive"] }
-png = "0.17"
+# Parser'ı yerel PryHUB checkout'undan al. Git bağımlılığı (game/Cargo.toml) tek başına da
+# çalışır; bu patch onu kardeş klasöre yönlendirir, böylece parser'daki bir değişiklik push
+# beklemeden oyuna geçer — motor bağımlılığında olduğu gibi iki repo yan yana checkout'lu olmalı.
+[patch."https://github.com/bdrtr/PryHUB.git"]
+gizmo-nfs = { path = "../PryHUB/crates/gizmo-nfs" }
 
-# STRUKT hata ayıklama derlemesinde de 7.6 MB'lık dosya açıyor: parser optimize, arayüz
-# ayıklanabilir kalsın. (Ayıklanmamış parser'da açılış saniyeler sürüyor ve araç bozuk hissettiriyor.)
+# Parser hata ayıklama derlemesinde de 7.6 MB'lık dosyalar açıyor: optimize kalsın, yoksa
+# araba yüklenmesi saniyeler sürüyor.
 [profile.dev.package.gizmo-nfs]
 opt-level = 2
 

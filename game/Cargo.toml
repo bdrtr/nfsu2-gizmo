@@ -12,8 +12,9 @@ default-run = "nfs_drive"
 # motoru kullanır (Collider::trimesh + gelecek narrowphase düzeltmeleri dahil), push
 # gerekmez. Portatif değildir: iki repo yan yana checkout'lu olmalı.
 gizmo = { package = "gizmo-engine", path = "../../Gizmo-engine/crates/gizmo", features = ["audio", "scripting", "scene", "editor", "render", "window", "ui"] }
-# Saf NFSU2 asset parser'ı (motordan bağımsız).
-gizmo-nfs = { path = "../crates/gizmo-nfs" }
+# Saf NFSU2 asset parser'ı (motordan bağımsız) — artık kendi reposunda: PryHUB varlık aracı.
+# Yerelde paralel geliştirme için kök Cargo.toml'daki `[patch]` bunu ../PryHUB'a yönlendirir.
+gizmo-nfs = { git = "https://github.com/bdrtr/PryHUB.git", branch = "main" }
 # Küçük async blok-on executor — yalnız headless screenshot binary (nfs_shot) için.
 pollster = "0.3"
 

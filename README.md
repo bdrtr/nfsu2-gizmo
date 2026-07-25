@@ -9,15 +9,18 @@ by reading the original game's own asset files. Delivered in phases, easy → ha
 ## Layout
 
 ```
-crates/gizmo-nfs/   Pure, engine-agnostic NFSU2 asset parser (no wgpu/glam/gizmo deps).
-                    BIGF/VIV archives, RefPack/QFS + JDLZ compression, chunked containers,
-                    GEOMETRY.BIN → indexed CPU meshes. Publishable standalone.
 game/               The playable layer — turns parsed CPU data into Gizmo meshes/materials
                     and drives it with the engine's raycast VehicleController.
   src/bin/nfs_viewer.rs   M1 — in-engine car viewer
   src/bin/nfs_drive.rs    M2 — drivable car (VehicleController, visual wheels, per-part colours)
   src/bin/nfs_race.rs     M3 — oval track + checkpoints + lap timing
 ```
+
+## Where the parser lives
+
+Reading NFSU2's files is a separate project: **[PryHUB](https://github.com/bdrtr/PryHUB)** — the
+`gizmo-nfs` parser crate, its `ug2` CLI, and a native inspector for the formats. This repo takes
+`gizmo-nfs` as a dependency and turns its output into meshes, materials and physics.
 
 ## The engine dependency (important)
 
