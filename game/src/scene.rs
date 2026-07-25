@@ -93,6 +93,17 @@ pub fn wheel_mounts(cti: Option<&CarTypeInfo>, fit: WheelFit, center: Vec3, body
     }
 }
 
+/// The wheel radius to use: the record's own, else the one guessed from the wheel part's bounds.
+///
+/// `WheelSpec::radius` was never read — `fit_wheel` derived a radius from the mesh's bounding box
+/// and clamped it to `0.18..0.55`, which is a guess with a guard on it where the file states the
+/// number. The four mounts can differ (a staggered fitment does), so this takes the front pair's,
+/// which is what sizes the visual and the suspension.
+#[must_use]
+pub fn wheel_radius(cti: Option<&CarTypeInfo>, fit: WheelFit) -> f32 {
+    cti.map_or(fit.radius, |c| c.wheels[0].radius)
+}
+
 /// The rotation that turns a wheel instance to face its rim outward.
 ///
 /// The wheel mesh is modelled for one side only; on the other flank it would show its flat

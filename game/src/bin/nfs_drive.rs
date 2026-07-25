@@ -158,7 +158,9 @@ fn setup_scene(world: &mut World, renderer: &gizmo::renderer::Renderer) -> Drive
             .with_double_sided(true)
     });
     let (width, height, length) = (car.width, car.height, car.length);
-    let WheelFit { radius, half_wheelbase, half_track } = car.wheel_fit;
+    let WheelFit { half_wheelbase, half_track, .. } = car.wheel_fit;
+    // The record states the radius; `fit_wheel`'s is a bbox guess with a clamp on it.
+    let radius = scene::wheel_radius(gb.info.as_ref(), car.wheel_fit);
 
     let mut car = car;
     let mut tex = Textures {
