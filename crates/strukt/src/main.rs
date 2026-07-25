@@ -9,6 +9,7 @@
 
 mod app;
 mod doc;
+mod export;
 mod gpu;
 mod i18n;
 mod panels;

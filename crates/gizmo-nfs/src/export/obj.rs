@@ -7,8 +7,8 @@
 //! One `o` group per part, one `usemtl` per material run, so a run that carries its own
 //! texture stays separable in the importer.
 
-use gizmo_nfs::placement::{part_centroid, place_dir, place_point, should_place};
-use gizmo_nfs::NfsMeshPart;
+use crate::placement::{part_centroid, place_dir, place_point, should_place};
+use crate::types::NfsMeshPart;
 use std::fmt::Write as _;
 
 /// A material the OBJ references: either a texture map or a flat colour.
@@ -29,13 +29,14 @@ pub struct Material {
 ///
 /// `material_for(part, run_index)` returns the `newmtl` name to reference; a part with no
 /// material list is emitted as a single run with index 0.
+#[must_use]
 pub fn write_obj(
     parts: &[&NfsMeshPart],
     mtl_file: &str,
     material_for: impl Fn(&NfsMeshPart, usize) -> String,
 ) -> String {
     let mut s = String::new();
-    let _ = writeln!(s, "# exported by `ug2 export` — NFSU2 coordinates (x=length, y=width, z=height)");
+    let _ = writeln!(s, "# exported by gizmo-nfs — NFSU2 coordinates (x=length, y=width, z=height)");
     let _ = writeln!(s, "mtllib {mtl_file}");
     // OBJ indices are 1-based and global to the file, so each part appends to the running count.
     let mut base = 1usize;
@@ -84,7 +85,8 @@ pub fn write_obj(
             }
         } else {
             for (run, m) in p.materials.iter().enumerate() {
-                let Some(slice) = p.indices.get(m.index_offset..m.index_offset + m.index_count) else {
+                let Some(slice) = p.indices.get(m.index_offset..m.index_offset + m.index_count)
+                else {
                     continue;
                 };
                 let _ = writeln!(s, "usemtl {}", material_for(p, run));
@@ -99,8 +101,9 @@ pub fn write_obj(
 }
 
 /// Build the MTL text for a set of materials.
+#[must_use]
 pub fn write_mtl(materials: &[Material]) -> String {
-    let mut s = String::from("# exported by `ug2 export`\n");
+    let mut s = String::from("# exported by gizmo-nfs\n");
     for m in materials {
         let _ = writeln!(s, "\nnewmtl {}", m.name);
         let _ = writeln!(s, "Kd {:.3} {:.3} {:.3}", m.diffuse[0], m.diffuse[1], m.diffuse[2]);
@@ -118,23 +121,20 @@ pub fn write_mtl(materials: &[Material]) -> String {
 }
 
 #[cfg(test)]
-// `NfsMeshPart`/`NfsMaterialRange` are `#[non_exhaustive]`, and this binary is a different
-// crate from the library that defines them — so a struct literal is not allowed here and the
-// fields have to be set after `Default::default()`.
-#[allow(clippy::field_reassign_with_default)]
 mod tests {
     use super::*;
-    use gizmo_nfs::types::NfsMaterialRange;
+    use crate::types::NfsMaterialRange;
 
     fn part(name: &str) -> NfsMeshPart {
-        let mut p = NfsMeshPart::default();
-        p.name = name.to_string();
-        p.positions = vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]];
-        p.normals = vec![[0.0, 0.0, 1.0]; 3];
-        p.uvs = vec![[0.25, 0.75]; 3];
-        p.indices = vec![0, 1, 2];
-        p.transform = gizmo_nfs::types::IDENTITY;
-        p
+        NfsMeshPart {
+            name: name.to_string(),
+            positions: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            normals: vec![[0.0, 0.0, 1.0]; 3],
+            uvs: vec![[0.25, 0.75]; 3],
+            indices: vec![0, 1, 2],
+            transform: crate::types::IDENTITY,
+            ..NfsMeshPart::default()
+        }
     }
 
     #[test]
@@ -150,11 +150,10 @@ mod tests {
     fn each_material_run_gets_its_own_usemtl() {
         let mut p = part("A");
         p.indices = vec![0, 1, 2, 0, 1, 2];
-        let run = |offset, count| {
-            let mut m = NfsMaterialRange::default();
-            m.index_offset = offset;
-            m.index_count = count;
-            m
+        let run = |offset, count| NfsMaterialRange {
+            index_offset: offset,
+            index_count: count,
+            ..NfsMaterialRange::default()
         };
         p.materials = vec![run(0, 3), run(3, 3)];
         let obj = write_obj(&[&p], "car.mtl", |_, run| format!("m{run}"));
@@ -171,8 +170,18 @@ mod tests {
     #[test]
     fn mtl_references_its_map_when_there_is_one() {
         let mtl = write_mtl(&[
-            Material { name: "tex".into(), map: Some("tex/1.png".into()), map_is_cutout: false, diffuse: [1.0; 3] },
-            Material { name: "flat".into(), map: None, map_is_cutout: false, diffuse: [0.1, 0.2, 0.3] },
+            Material {
+                name: "tex".into(),
+                map: Some("tex/1.png".into()),
+                map_is_cutout: false,
+                diffuse: [1.0; 3],
+            },
+            Material {
+                name: "flat".into(),
+                map: None,
+                map_is_cutout: false,
+                diffuse: [0.1, 0.2, 0.3],
+            },
         ]);
         assert!(mtl.contains("newmtl tex") && mtl.contains("map_Kd tex/1.png"));
         assert!(mtl.contains("newmtl flat") && mtl.contains("Kd 0.100 0.200 0.300"));

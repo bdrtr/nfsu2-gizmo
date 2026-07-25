@@ -31,7 +31,6 @@ mod export;
 mod fields;
 mod globalb;
 mod info;
-mod obj;
 mod parts;
 mod paths;
 mod probe;

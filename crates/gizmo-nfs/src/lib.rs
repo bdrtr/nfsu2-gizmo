@@ -41,6 +41,7 @@
 pub mod chunk;
 pub mod compression;
 pub mod error;
+pub mod export;
 pub mod fourcc;
 pub mod geometry;
 pub mod globalb;

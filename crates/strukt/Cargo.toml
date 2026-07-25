@@ -11,7 +11,9 @@ description = "STRUKT — a Need for Speed: Underground 2 asset inspector: brows
 # The parser. STRUKT deliberately depends on nothing else of the project: not the game
 # crate, not the Gizmo engine — the engine owns its own window and loop, so embedding egui
 # inside it would be backwards, and the tool must build without the engine checkout.
-gizmo-nfs = { path = "../gizmo-nfs" }
+# `png`: the export writes images through the library's encoder, so STRUKT and `ug2` cannot
+# disagree about what a texture file should contain.
+gizmo-nfs = { path = "../gizmo-nfs", features = ["png"] }
 # egui 0.34.3 is what the workspace already locks; eframe 0.34.3 asks for exactly that
 # (plus winit 0.30 / wgpu 29), so no duplicate toolkit tree is pulled in.
 eframe = { version = "0.34.3", default-features = false, features = [

@@ -29,9 +29,12 @@ proptest = { workspace = true }
 default = []
 # Derive Serialize/Deserialize on all `types::*` output structs.
 serde = ["dep:serde"]
+# `export::png_bytes`: encode a decoded texture as PNG. The OBJ/MTL writers next to it need no
+# dependency, so only the image encoder is gated.
+png = ["dep:png"]
 # Compile the `ug2` command-line tool: reads NFSU2 cars (inspect, probe) and exports them
 # (OBJ/MTL + PNG). Off by default so the library pulls no dependencies.
-tools = ["dep:clap", "dep:png"]
+tools = ["dep:clap", "png"]
 
 [[bin]]
 name = "ug2"

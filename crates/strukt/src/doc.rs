@@ -258,6 +258,15 @@ impl Doc {
         self.textures.as_ref().and_then(Option::as_ref)
     }
 
+    /// The textures, but only if [`Doc::textures`] has already decoded them.
+    ///
+    /// The immutable half of the pair: an export needs the textures *and* the parts at the same
+    /// time, which a `&mut self` accessor cannot hand out.
+    #[must_use]
+    pub fn decoded_textures(&self) -> Option<&gizmo_nfs::Tpk> {
+        self.textures.as_ref().and_then(Option::as_ref)
+    }
+
     /// The `0x80134010` solid a chunk belongs to, if any. A vertex buffer's stride can only be
     /// read together with the vertex count from its sibling mesh header, so the inspector needs
     /// the owning solid, not just the chunk.

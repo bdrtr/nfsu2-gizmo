@@ -63,6 +63,12 @@ depth attachment, and a solid drawn without one shows its far side through its n
 keeps the file's frame — Z-up, 1 unit = 1 m — and shows the selected solid, or the showroom car
 when the selection is not inside one.
 
+`Dışa Aktar` writes **what is on screen**, under `strukt-export/<car>_<file>/` in the working
+directory (there is no file dialog on purpose — see `crates/strukt/Cargo.toml`), and the log says
+the path: the texture tab gives every decoded PNG, any other tab gives the shown model as
+OBJ + MTL + the textures it references. The preview pane's `PNG` button writes just that one
+image. The writers themselves are `gizmo_nfs::export`, so STRUKT and `ug2 export` cannot drift.
+
 The texture tab is a contact sheet over the car's TPK: the open file when it is itself a
 `TEXTURES.BIN`, else the `TEXTURES.BIN` beside it, decoded on first use because `Tpk::parse`
 expands all 57–76 images to RGBA8 at once. Thumbnails are downscaled on the CPU and only the
@@ -117,12 +123,13 @@ Layered bottom-up; each layer is `&[u8]`-based and independently testable:
 4. **`compression`** — `detect()` picks the codec **by magic bytes, never by extension** (a `.LZC` may be either). RefPack/QFS (magic `10 FB`) and JDLZ (magic `"JDLZ"`).
 5. **`viv`** — BIGF/VIV archive extraction.
 6. **`geometry`** — `parse_geometry()`: `GEOMETRY.BIN` → `Vec<NfsMeshPart>`. Solids without a mesh (mount/dummy points) are skipped.
-7. **`texture`** — `Tpk::parse()`: `TEXTURES.BIN` (TPK) → an RGBA8 pixel pool + per-texture descriptors. The pool is the file's **JDLZ-compressed RGBA8** blocks concatenated (it is *not* DXT), laid out in `PAGE_WIDTH` (512)-wide pages; each descriptor gives hash + `pool_offset` (→ x,y) + format code. **Per-texture width/height are not yet decoded** — the module deliberately exposes the pool and origins, not cropped `NfsTexture`s. See its module docs for the descriptor table.
+7. **`texture`** — `Tpk::parse()`: `TEXTURES.BIN` (TPK) → per-texture RGBA8 images. Each texture is independent: its 24-byte descriptor (`0x33310003`) gives hash + **whole-file** offset + compressed/decompressed size; the blob is decompressed by magic (JDLZ) and an embedded `OldTextureInfo` header near its tail gives width/height/format, which `dxt` then decodes (DXT1/3/5) or unpacks (RGBA). HUFF-compressed textures are listed in `entries` but absent from `textures` — **counted, never silently dropped**. See its module docs for the byte-level table.
 8. **`placement`** — what a solid's local matrix *means*: a placement to apply, or a pose already baked into the vertices (`should_place`). Format semantics, so every consumer (engine layer, CLI exporter) decides it the same way.
 9. **`parts`** — **pure policy**: which material group a name is (`group_of`), what its `KIT##`/`KITW##`/`STYLE##` token says, and which parts make up a configuration (`select_car`). Lives here so the `nfs` CLI and the game select identically; the game re-exports it as `nfsu2::parts`.
 10. **`inspect`** — a chunk's bytes read back as labelled fields, each with the offset it came from (`model`). What an inspector pane draws; it reads through `geometry::format` so a viewer cannot drift from the parser about what a file says.
 11. **`validate`** — the checks a person would run by hand: stride, bbox, normals, index range, chunk bounds. Every rule records **what it examined**, so "no findings" is never confused with "nobody looked".
-12. **`types`** — the engine-agnostic output contract (see below).
+12. **`export`** — parsed data back out as files other tools read: `obj` (OBJ + MTL text), `material` (`MaterialPlan`: which `newmtl` a run resolves to, and the textures that implies), `png_name`/`png_bytes` (the encoder behind the optional `png` feature). Pure — it returns text and bytes and never touches the filesystem, so `ug2` and STRUKT write the same car from the same code.
+13. **`types`** — the engine-agnostic output contract (see below).
 
 The top-level `decompress_file()` is one of the few functions that touch the filesystem; everything downstream is pure `&[u8]`.
 
@@ -139,4 +146,4 @@ Pure-data structs, no `glam`/`wgpu`. Geometry is **indexed** and transforms are 
 
 - Code comments and Cargo.toml notes are frequently in **Turkish** — match the surrounding language when editing a file.
 - **Part names are truncated** to a fixed-length field in `GEOMETRY.BIN`. Long names lose their tail: `..._HEADLIGHT_LEFT_LOD_A` arrives as `..._HEADLIGHT_LEFT_` (LOD letter gone, so two LODs share a name — disambiguate by triangle count) and `..._SIDE_MIRROR` as `..._MIRRO`/`..._MIRR`. Match shortened stems (`MIRR`), never assume the full word survives. Cars also carry `STYLE00..STYLE14` purchasable part variants and `KIT01+` body kits alongside the default `BASE`/`KIT00`; render only the default set or variants overlap.
-- Status is milestone-phased (M1–M3 done). The open blocker for visually-faithful cars is the **TPK texture format** (data at the descriptor offset is not raw DXT; no public spec). See `crates/gizmo-nfs/README.md` for the per-format status table.
+- Status is milestone-phased (M1–M3 done). The TPK texture format is decoded (per-texture DXT1/3/5 + RGBA); what is left there is **HUFF-compressed** textures, which are listed but not decoded. See `crates/gizmo-nfs/README.md` for the per-format status table.

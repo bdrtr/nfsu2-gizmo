@@ -45,6 +45,7 @@ pub fn show(app: &mut Strukt, ui: &mut egui::Ui) {
     }
     let selected = app.texture_selection.filter(|h| tpk.texture(*h).is_some());
     let mut pick = None;
+    let mut save_one = None;
 
     egui::Panel::right("texture_preview")
         .resizable(true)
@@ -78,6 +79,12 @@ pub fn show(app: &mut Strukt, ui: &mut egui::Ui) {
                     ui.label(RichText::new(k).size(11.0).color(theme::muted(60)));
                     ui.label(RichText::new(v).font(theme::font::mono(11.5)));
                 });
+            }
+            ui.add_space(theme::token::SPACE_2);
+            // Just this one image. The toolbar's export writes the whole pack; someone who came
+            // for a single texture should not have to take 73.
+            if ui.button("PNG").on_hover_text(t.export_hint).clicked() {
+                save_one = Some(tex.hash);
             }
         });
 
@@ -123,6 +130,10 @@ pub fn show(app: &mut Strukt, ui: &mut egui::Ui) {
 
     if let Some(hash) = pick {
         app.texture_selection = Some(hash);
+    }
+    if let Some(hash) = save_one {
+        let result = crate::export::one_texture(app, hash);
+        app.report_export(result);
     }
 }
 

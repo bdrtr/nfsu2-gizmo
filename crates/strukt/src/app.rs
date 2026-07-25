@@ -5,7 +5,7 @@
 //! travels as a chunk *offset* — unique per node, and the same key the tree, the hex view and the
 //! inspector all look up — so keeping the three in sync is a comparison, not a message.
 
-use crate::doc::{Doc, Level};
+use crate::doc::{Doc, Level, Note};
 use crate::i18n::Lang;
 use crate::theme::{self, token, Density};
 use crate::screens;
@@ -264,6 +264,9 @@ impl Strukt {
     /// Brand · screen nav · open/export · language · density.
     fn top_bar(&mut self, ui: &mut egui::Ui) {
         let t = self.lang.strings();
+        // Reported by the button, acted on after the bar is drawn — the export needs the whole
+        // app, and the bar is holding it while it draws.
+        let mut exported = false;
         egui::Panel::top("topbar")
             .exact_size(44.0)
             .frame(egui::Frame::new().fill(token::SURFACE).inner_margin(egui::Margin::symmetric(12, 0)))
@@ -305,9 +308,55 @@ impl Strukt {
                         if ui.button(t.m_open).clicked() {
                             self.screen = Screen::Welcome;
                         }
+                        // Enabled only with a file open: a button that can do nothing is worse
+                        // than one that is visibly not for now.
+                        let can = self.doc.is_some();
+                        if ui
+                            .add_enabled(can, egui::Button::new(t.m_export))
+                            .on_hover_text(t.export_hint)
+                            .clicked()
+                        {
+                            exported = true;
+                        }
                     });
                 });
             });
+        if exported {
+            let result = crate::export::run(self);
+            self.report_export(result);
+        }
+    }
+
+    /// Put an export's result in the log — the design's place for "işlem çıktıları", and the only
+    /// place the written paths are stated. A failure is a log line too, not a modal: the file is
+    /// still open and the user has lost nothing.
+    pub fn report_export(&mut self, result: Result<crate::export::Written, String>) {
+        let t = self.lang.strings();
+        let note = match result {
+            Ok(w) => {
+                let where_to = w
+                    .files
+                    .first()
+                    .and_then(|p| p.parent())
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_default();
+                Note {
+                    level: Level::Info,
+                    chunk: None,
+                    chunk_id: String::new(),
+                    message: format!("{} — {} → {where_to}", t.exported, w.summary),
+                }
+            }
+            Err(e) => Note {
+                level: Level::Error,
+                chunk: None,
+                chunk_id: String::new(),
+                message: format!("{}: {e}", t.export_failed),
+            },
+        };
+        if let Some(doc) = &mut self.doc {
+            doc.notes.push(note);
+        }
     }
 
     /// File · size · chunk count · selection · codec · scale.
