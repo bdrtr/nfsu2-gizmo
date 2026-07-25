@@ -42,7 +42,10 @@ pub mod token {
     pub const NEUTRAL_900: Color32 = hex(0x2d2b2b);
 
     pub const ACCENT_100: Color32 = hex(0xfff2ef);
+    pub const ACCENT_200: Color32 = hex(0xffe0d9);
+    pub const ACCENT_300: Color32 = hex(0xffc4b8);
     pub const ACCENT_400: Color32 = hex(0xff9783);
+    pub const ACCENT_500: Color32 = hex(0xff563c);
     pub const ACCENT_600: Color32 = hex(0xdd2b0f);
     pub const ACCENT_700: Color32 = hex(0xae1800);
     pub const ACCENT_800: Color32 = hex(0x7c1405);

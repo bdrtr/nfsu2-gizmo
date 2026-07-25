@@ -117,7 +117,7 @@ pub fn show(app: &Strukt, ui: &mut egui::Ui) -> Option<usize> {
                 // A zero byte is dimmed: in a multi-megabyte file the padding is most of what you
                 // scroll past, and dimming it is what makes the real data findable.
                 let colour = if class == Class::Header {
-                    token::ACCENT_800
+                    token::NEUTRAL_100 // on the strong wash, light type
                 } else if *b == 0 {
                     theme::muted(28)
                 } else {
@@ -154,12 +154,14 @@ pub fn show(app: &Strukt, ui: &mut egui::Ui) -> Option<usize> {
     clicked
 }
 
-/// The wash behind a highlighted byte.
+/// The wash behind a highlighted byte — the design's own two swatches: `accent-200` marks the
+/// chunk's region, `accent-500` the bytes that carry its counters. `accent-100` reads as white
+/// against the page and made the region invisible.
 fn wash(class: Class) -> Color32 {
     match class {
         Class::Outside => Color32::TRANSPARENT,
-        Class::Region => token::ACCENT_100,
-        Class::Header => token::ACCENT_400.gamma_multiply(0.55),
+        Class::Region => token::ACCENT_200,
+        Class::Header => token::ACCENT_500,
     }
 }
 
