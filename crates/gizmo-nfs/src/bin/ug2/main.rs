@@ -142,7 +142,7 @@ enum Command {
         #[arg(long)]
         matrices: bool,
     },
-    /// Export a car to OBJ + MTL, with its textures as PNG.
+    /// Export a car to glTF (`.glb`) and OBJ + MTL, with its textures as PNG.
     Export {
         /// A car directory or its `GEOMETRY.BIN`.
         car: PathBuf,
@@ -157,6 +157,9 @@ enum Command {
         /// Skip textures (geometry only).
         #[arg(long)]
         no_textures: bool,
+        /// Write only one of the two formats.
+        #[arg(long, value_name = "FMT", value_parser = ["glb", "obj", "both"], default_value = "both")]
+        format: String,
     },
 }
 
@@ -170,8 +173,8 @@ fn main() -> ExitCode {
         Command::Textures { car, filter } => textures::run(&car, filter.as_deref()),
         Command::Globalb { path, filter } => globalb::run(&path, filter.as_deref()),
         Command::Probe { car, filter, matrices } => probe::run(&car, filter.as_deref(), matrices),
-        Command::Export { car, out, config, all, no_textures } => {
-            export::run(&car, &out, config.into(), all, !no_textures)
+        Command::Export { car, out, config, all, no_textures, format } => {
+            export::run(&car, &out, config.into(), all, !no_textures, &format)
         }
     };
     match result {

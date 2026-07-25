@@ -109,11 +109,16 @@ fn model(doc: &Doc, selection: Option<usize>, out: &Path, t: &Strings) -> Result
     let mtl_text = export::write_mtl(&plan.materials);
 
     create_dir(out)?;
+    // The `.glb` first: it is the one file someone can drag into a viewer and see the car, images
+    // and all. The OBJ beside it is for the older tools around this game.
+    let glb_path = out.join(format!("{stem}.glb"));
+    let glb = export::write_glb(&parts, tpk).map_err(|e| format!("{}: {e}", glb_path.display()))?;
+    write(&glb_path, &glb)?;
     let obj_path = out.join(format!("{stem}.obj"));
     let mtl_path = out.join(&mtl_name);
     write(&obj_path, obj_text.as_bytes())?;
     write(&mtl_path, mtl_text.as_bytes())?;
-    let mut files = vec![obj_path, mtl_path];
+    let mut files = vec![glb_path, obj_path, mtl_path];
 
     if let Some(tpk) = tpk {
         let dir = out.join("tex");
@@ -131,12 +136,12 @@ fn model(doc: &Doc, selection: Option<usize>, out: &Path, t: &Strings) -> Result
     let tris: usize = parts.iter().map(|p| p.triangle_count()).sum();
     Ok(Written {
         summary: format!(
-            "{} {} · {tris} ▲ · {} {} · {} PNG",
+            "GLB + OBJ · {} {} · {tris} ▲ · {} {} · {} PNG",
             parts.len(),
             t.ex_parts,
             plan.materials.len(),
             t.ex_materials,
-            files.len().saturating_sub(2)
+            files.len().saturating_sub(3)
         ),
         files,
     })

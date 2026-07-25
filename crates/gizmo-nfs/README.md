@@ -20,7 +20,7 @@ layer (a demo binary or an optional `gizmo-nfs-engine` crate), not this crate.
 | Output data contract | `types` | ✅ defined |
 | `GEOMETRY.BIN` car models | `geometry` | ✅ done — stride-36 vertices (pos/normal/uv) + u16 indices, validated on real cars |
 | TPK textures → RGBA8 images | `texture` | 🟡 mostly done — each 24-byte descriptor decoded to its own image: whole-file offset → JDLZ blob → embedded `OldTextureInfo` (width/height/format) → DXT1/3/5 or raw RGBA. **HUFF-compressed** textures are listed in `entries` but not decoded. |
-| OBJ + MTL + PNG output | `export` | ✅ done — pure text/bytes, no filesystem; shared by `ug2 export` and STRUKT |
+| glTF (`.glb`) + OBJ/MTL + PNG output | `export` | ✅ done — pure text/bytes, no filesystem; shared by `ug2 export` and STRUKT |
 | `GLOBALB.LZC` global data | `global` | 🔜 later |
 | World / city (`STREAM*.BUN`, `L4RA.BUN`) | `world` | 🔴 research-frontier |
 
@@ -45,7 +45,7 @@ cargo run -p gizmo-nfs --features tools --bin ug2 -- <command>
 |---|---|
 | `ug2 info CARS/240SX` | what this car is: parts, the variants it ships (`--kit`/`--hood`/`--light`/`--wide`), dimensions, and its `GLOBALB` wheel record |
 | `ug2 parts CARS/240SX [--selected --kit 3]` | every part grouped by customization namespace, or just the ones a configuration selects |
-| `ug2 export CARS/240SX -o out/ [--kit 3 --wide 1]` | the car as OBJ + MTL with its textures as PNG — importable anywhere |
+| `ug2 export CARS/240SX -o out/ [--kit 3 --wide 1] [--format glb\|obj\|both]` | the car as a self-contained `.glb` and/or OBJ + MTL + PNG — importable anywhere |
 | `ug2 textures CARS/240SX` | the texture table, and which material run resolves to which image |
 | `ug2 dump FILE` | the chunk tree of any asset file (or a BIGF/VIV archive's contents) |
 | `ug2 probe CARS/240SX [--matrices]` | the raw solid view: declared counts vs. buffer sizes, mesh-header words, matrix classification |

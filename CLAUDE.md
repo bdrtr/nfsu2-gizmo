@@ -65,9 +65,9 @@ when the selection is not inside one.
 
 `Dışa Aktar` writes **what is on screen**, under `strukt-export/<car>_<file>/` in the working
 directory (there is no file dialog on purpose — see `crates/strukt/Cargo.toml`), and the log says
-the path: the texture tab gives every decoded PNG, any other tab gives the shown model as
-OBJ + MTL + the textures it references. The preview pane's `PNG` button writes just that one
-image. The writers themselves are `gizmo_nfs::export`, so STRUKT and `ug2 export` cannot drift.
+the path: the texture tab gives every decoded PNG, any other tab gives the shown model as a
+self-contained `.glb` plus OBJ + MTL + the textures it references. The preview pane's `PNG`
+button writes just that one image. The writers themselves are `gizmo_nfs::export`, so STRUKT and `ug2 export` cannot drift.
 
 The texture tab is a contact sheet over the car's TPK: the open file when it is itself a
 `TEXTURES.BIN`, else the `TEXTURES.BIN` beside it, decoded on first use because `Tpk::parse`
@@ -93,7 +93,8 @@ One tool over the whole parser — inspect a car, or export it. Read-only, ships
 UG2="cargo run -p gizmo-nfs --features tools --bin ug2 --"
 $UG2 info   "$NFSU2_ROOT/CARS/240SX"                 # parts, variants, dimensions, GLOBALB record
 $UG2 parts  "$NFSU2_ROOT/CARS/240SX" --selected --kit 3
-$UG2 export "$NFSU2_ROOT/CARS/240SX" -o out/ --kit 3 --wide 1   # OBJ + MTL + PNG
+$UG2 export "$NFSU2_ROOT/CARS/240SX" -o out/ --kit 3 --wide 1   # GLB + OBJ/MTL + PNG
+$UG2 export "$NFSU2_ROOT/CARS/240SX" -o out/ --format glb        # just the one self-contained file
 $UG2 dump   "$NFSU2_ROOT/CARS/240SX/GEOMETRY.BIN"    # chunk tree / VIV listing
 $UG2 probe  "$NFSU2_ROOT/CARS/SENTRA" --matrices     # raw solids: counts, buffers, matrices
 $UG2 textures "$NFSU2_ROOT/CARS/240SX"
@@ -101,9 +102,10 @@ $UG2 globalb  "$NFSU2_ROOT/CARS/240SX"
 ```
 
 `dump` and `probe` are the workhorses for locking an unconfirmed format (they replaced the
-old `nfs_dump`/`nfs_vfmt`/`nfs_survey` examples). `export` writes NFSU2's own coordinates
-(x = length, y = width, z = height, Z-up — Blender reads it natively) with each solid's
-placement applied.
+old `nfs_dump`/`nfs_vfmt`/`nfs_survey` examples). `export`'s **OBJ** writes NFSU2's own
+coordinates (x = length, y = width, z = height, Z-up — Blender reads it natively) with each
+solid's placement applied; its **`.glb`** rotates into glTF's mandated Y-up frame, because that
+one the format dictates.
 
 ### RAM-limited builds
 
@@ -128,7 +130,7 @@ Layered bottom-up; each layer is `&[u8]`-based and independently testable:
 9. **`parts`** — **pure policy**: which material group a name is (`group_of`), what its `KIT##`/`KITW##`/`STYLE##` token says, and which parts make up a configuration (`select_car`). Lives here so the `nfs` CLI and the game select identically; the game re-exports it as `nfsu2::parts`.
 10. **`inspect`** — a chunk's bytes read back as labelled fields, each with the offset it came from (`model`). What an inspector pane draws; it reads through `geometry::format` so a viewer cannot drift from the parser about what a file says.
 11. **`validate`** — the checks a person would run by hand: stride, bbox, normals, index range, chunk bounds. Every rule records **what it examined**, so "no findings" is never confused with "nobody looked".
-12. **`export`** — parsed data back out as files other tools read: `obj` (OBJ + MTL text), `material` (`MaterialPlan`: which `newmtl` a run resolves to, and the textures that implies), `png_name`/`png_bytes` (the encoder behind the optional `png` feature). Pure — it returns text and bytes and never touches the filesystem, so `ug2` and STRUKT write the same car from the same code.
+12. **`export`** — parsed data back out as files other tools read: `obj` (OBJ + MTL text), `gltf` (a self-contained `.glb`, images embedded — behind the `png` feature), `material` (`MaterialPlan`: which `newmtl`/glTF material a run resolves to, and the textures that implies), `png_name`/`png_bytes`. Pure — it returns text and bytes and never touches the filesystem, so `ug2` and STRUKT write the same car from the same code. **glTF is the one place a frame is converted**: the format *defines* +Y up / −Z forward, so `gltf` rotates `(x,y,z) → (−y,z,−x)` (a rotation, not a mirror) and leaves UVs alone, since glTF's UV origin is DirectX's. OBJ keeps the file's own frame and flips V.
 13. **`types`** — the engine-agnostic output contract (see below).
 
 The top-level `decompress_file()` is one of the few functions that touch the filesystem; everything downstream is pure `&[u8]`.

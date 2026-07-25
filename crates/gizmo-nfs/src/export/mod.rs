@@ -7,9 +7,15 @@
 //! gives it no name. Keeping that in the library is what stops `ug2` and STRUKT from drifting into
 //! two different answers for the same car.
 
+/// Binary glTF. Behind the `png` feature because a `.glb` embeds its images, and an exporter that
+/// silently dropped them would produce an untextured car rather than a smaller file.
+#[cfg(feature = "png")]
+pub mod gltf;
 pub mod material;
 pub mod obj;
 
+#[cfg(feature = "png")]
+pub use gltf::write_glb;
 pub use material::MaterialPlan;
 pub use obj::{write_mtl, write_obj, Material};
 
