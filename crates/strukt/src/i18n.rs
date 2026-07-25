@@ -89,6 +89,11 @@ pub struct Strings {
     pub open_failed: &'static str,
     pub nothing_selected: &'static str,
     pub val_no_findings: &'static str,
+    /// How many chunks a rule read, and how many findings it produced.
+    pub val_examined: &'static str,
+    pub val_findings: &'static str,
+    /// Shown for a rule that had nothing to read — deliberately not phrased as a pass.
+    pub val_unread: &'static str,
 }
 
 static TR: Strings = Strings {
@@ -130,6 +135,9 @@ static TR: Strings = Strings {
     open_failed: "Dosya açılamadı",
     nothing_selected: "Ağaçtan bir chunk seç",
     val_no_findings: "Bulgu yok — dosya temiz görünüyor",
+    val_examined: "chunk okundu",
+    val_findings: "bulgu",
+    val_unread: "bu dosyada okunacak bir şey yoktu — geçti demek değil",
 };
 
 static EN: Strings = Strings {
@@ -171,6 +179,9 @@ static EN: Strings = Strings {
     open_failed: "Could not open the file",
     nothing_selected: "Select a chunk in the tree",
     val_no_findings: "No findings — the file looks clean",
+    val_examined: "chunks read",
+    val_findings: "findings",
+    val_unread: "nothing here for this rule to read — which is not a pass",
 };
 
 #[cfg(test)]

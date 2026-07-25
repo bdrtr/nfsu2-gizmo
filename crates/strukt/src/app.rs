@@ -103,7 +103,7 @@ struct Shot {
 impl Strukt {
     /// Build the app, optionally opening a file and/or saving a screenshot.
     #[must_use]
-    pub fn new(open: Option<String>, shot: Option<String>) -> Self {
+    pub fn new(open: Option<String>, shot: Option<String>, screen: Option<String>) -> Self {
         let mut app = Self {
             screen: Screen::Welcome,
             tab: Tab::default(),
@@ -123,6 +123,18 @@ impl Strukt {
         };
         if let Some(path) = open {
             app.open(std::path::Path::new(&path));
+        }
+        // `--screen validation` opens straight there; without it a screenshot could only ever
+        // capture the workspace.
+        if let Some(name) = screen {
+            app.screen = match name.as_str() {
+                "welcome" => Screen::Welcome,
+                "validation" => Screen::Validation,
+                "discovery" => Screen::Discovery,
+                "diff" => Screen::Diff,
+                "dictionary" => Screen::Dictionary,
+                _ => Screen::Workspace,
+            };
         }
         app
     }
@@ -201,7 +213,14 @@ impl eframe::App for Strukt {
         match self.screen {
             Screen::Welcome => screens::welcome::show(self, ui),
             Screen::Workspace => screens::workspace::show(self, ui),
-            Screen::Validation => screens::validation::show(self, ui),
+            Screen::Validation => {
+                // A finding names a chunk; clicking it goes there, which is the point of a
+                // validation screen that sits beside a browser.
+                if let Some(offset) = screens::validation::show(self, ui) {
+                    self.select(offset);
+                    self.screen = Screen::Workspace;
+                }
+            }
             Screen::Discovery | Screen::Diff | Screen::Dictionary => self.placeholder(ui),
         }
         // A file dropped on the window opens it — the welcome screen's drop target, everywhere.
@@ -434,7 +453,7 @@ mod tests {
 
     #[test]
     fn selecting_asks_the_hex_view_to_follow() {
-        let mut app = Strukt::new(None, None);
+        let mut app = Strukt::new(None, None, None);
         app.select(0x1B8);
         assert_eq!(app.selection, Some(0x1B8));
         assert_eq!(app.scroll_hex_to, Some(0x1B8), "a tree click must pull the hex view along");
@@ -442,7 +461,7 @@ mod tests {
 
     #[test]
     fn a_failed_open_reports_rather_than_clearing_the_current_file() {
-        let mut app = Strukt::new(None, None);
+        let mut app = Strukt::new(None, None, None);
         app.open(std::path::Path::new("/nonexistent/GEOMETRY.BIN"));
         assert!(app.error.is_some());
         assert!(app.doc.is_none());

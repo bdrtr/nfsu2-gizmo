@@ -20,6 +20,9 @@
 //! * [`inspect`] — a chunk's bytes read back as labelled fields, for anything that shows a file's
 //!   structure. It reads through the same offset map the parser does, so a viewer cannot drift
 //!   from the reader about what a file says.
+//! * [`validate`] — the checks a person would run by hand after decoding something: stride,
+//!   bounding box, normals, index range, chunk bounds. Each records what it examined, so "clean"
+//!   is never confused with "unread".
 //!
 //! [`texture`] parses `TPK` (`TEXTURES.BIN`) into an RGBA8 pixel pool + per-texture
 //! descriptors; [`geometry`] parses `GEOMETRY.BIN`. World modules come later. Several of
@@ -47,6 +50,7 @@ pub mod placement;
 pub mod reader;
 pub mod texture;
 pub mod types;
+pub mod validate;
 pub mod viv;
 
 pub use error::{NfsError, NfsResult};

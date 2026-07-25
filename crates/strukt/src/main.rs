@@ -34,8 +34,9 @@ fn main() -> eframe::Result {
             // as a PNG and exits, which is how the interface gets checked on this machine.
             let args: Vec<String> = std::env::args().skip(1).collect();
             let shot = args.iter().position(|a| a == "--shot").and_then(|i| args.get(i + 1)).cloned();
+            let screen = args.iter().position(|a| a == "--screen").and_then(|i| args.get(i + 1)).cloned();
             let file = args.first().filter(|a| !a.starts_with("--")).cloned();
-            Ok(Box::new(app::Strukt::new(file, shot)))
+            Ok(Box::new(app::Strukt::new(file, shot, screen)))
         }),
     )
 }

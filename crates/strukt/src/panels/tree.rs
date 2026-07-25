@@ -10,6 +10,7 @@
 use crate::app::Strukt;
 use crate::theme::{self, token};
 use egui::{Color32, RichText, Sense};
+use gizmo_nfs::validate::ChunkStatus;
 
 /// Draw the tree; returns the offset the user clicked, if any.
 pub fn show(app: &Strukt, ui: &mut egui::Ui) -> Option<usize> {
@@ -62,13 +63,20 @@ pub fn show(app: &Strukt, ui: &mut egui::Ui) -> Option<usize> {
                     theme::muted(55),
                 );
             }
-            // Status dot — the design's at-a-glance "is there something wrong here". A solid that
-            // yielded no part is the one thing the tree can already flag.
-            p.circle_filled(
-                egui::pos2(rect.left() + indent + 4.0, mid),
-                2.5,
-                if doc.skipped.contains_key(&row.offset) { token::ACCENT } else { dot_colour(row.container) },
-            );
+            // Status dot — the design's at-a-glance "is there something wrong here". An unchecked
+            // chunk deliberately gets the neutral dot rather than a tick: a green mark on
+            // something no rule read would be the tool vouching for what it does not know.
+            let status = doc.report.status_of(row.offset);
+            p.circle_filled(egui::pos2(rect.left() + indent + 4.0, mid), 2.5, dot_colour(status, row.container));
+            if matches!(status, ChunkStatus::Warn | ChunkStatus::Error) {
+                p.text(
+                    egui::pos2(rect.left() + indent - 3.0, mid),
+                    egui::Align2::RIGHT_CENTER,
+                    "⚠",
+                    theme::font::mono(app.density.body_size() - 2.5),
+                    if status == ChunkStatus::Error { token::ACCENT } else { token::ACCENT_2 },
+                );
+            }
             let label = crate::panels::inspector::chunk_label(row.id);
             let x = rect.left() + indent + 13.0;
             let w = p.text(
@@ -132,13 +140,15 @@ fn elide(ui: &egui::Ui, text: &str, font: &egui::FontId, room: f32) -> String {
     String::new()
 }
 
-/// Containers and leaves read differently at a glance; a validation status will colour this dot
-/// once the findings pass lands.
-fn dot_colour(container: bool) -> Color32 {
-    if container {
-        token::NEUTRAL_500
-    } else {
-        token::NEUTRAL_300
+/// The row's status dot: what the checks concluded, falling back to a neutral shade that only
+/// says container-or-leaf when nothing examined this chunk.
+fn dot_colour(status: ChunkStatus, container: bool) -> Color32 {
+    match status {
+        ChunkStatus::Error => token::ACCENT,
+        ChunkStatus::Warn => token::ACCENT_2,
+        ChunkStatus::Ok => token::NEUTRAL_600,
+        ChunkStatus::Unchecked | _ if container => token::NEUTRAL_500,
+        _ => token::NEUTRAL_300,
     }
 }
 

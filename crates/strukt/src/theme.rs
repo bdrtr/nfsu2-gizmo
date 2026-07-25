@@ -160,6 +160,40 @@ pub mod font {
     }
 }
 
+/// Status marks, drawn rather than typed.
+///
+/// `⚠` exists in the bundled fallbacks but `✓`/`✕` do not, and a missing glyph renders as a tofu
+/// box — on a validation screen, the one mark that must be unmistakable. Two line segments are
+/// cheaper than shipping another font.
+pub mod mark {
+    use super::token;
+    use egui::{Color32, Painter, Pos2, Stroke, Vec2};
+
+    /// A tick centred on `at`, `size` across.
+    pub fn ok(p: &Painter, at: Pos2, size: f32, colour: Color32) {
+        let s = size * 0.5;
+        let stroke = Stroke::new((size * 0.16).max(1.2), colour);
+        let a = at + Vec2::new(-s, 0.0);
+        let b = at + Vec2::new(-s * 0.25, s * 0.7);
+        let c = at + Vec2::new(s, -s * 0.75);
+        p.line_segment([a, b], stroke);
+        p.line_segment([b, c], stroke);
+    }
+
+    /// A cross centred on `at`.
+    pub fn error(p: &Painter, at: Pos2, size: f32, colour: Color32) {
+        let s = size * 0.42;
+        let stroke = Stroke::new((size * 0.16).max(1.2), colour);
+        p.line_segment([at + Vec2::new(-s, -s), at + Vec2::new(s, s)], stroke);
+        p.line_segment([at + Vec2::new(-s, s), at + Vec2::new(s, -s)], stroke);
+    }
+
+    /// A hollow ring — "nothing read here", which is not a pass.
+    pub fn unchecked(p: &Painter, at: Pos2, size: f32) {
+        p.circle_stroke(at, size * 0.34, Stroke::new(1.0_f32, token::NEUTRAL_400));
+    }
+}
+
 /// Install Archivo (bundled, SIL OFL) as the proportional and heading families.
 ///
 /// The fonts are compiled into the binary so the tool looks the same on a machine that has never

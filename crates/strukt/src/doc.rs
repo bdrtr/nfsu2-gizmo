@@ -74,8 +74,9 @@ pub struct Doc {
     /// The parts, when the file is a `GEOMETRY.BIN` that parses.
     #[allow(dead_code)]
     pub parts: Vec<NfsMeshPart>,
-    /// Solids that yielded no part, by offset — the tree marks them and the log says why.
-    pub skipped: std::collections::HashMap<usize, gizmo_nfs::SkipReason>,
+    /// What the checks concluded. Computed once at open; the tree, the log and the validation
+    /// screen are three views of this one report.
+    pub report: gizmo_nfs::validate::Report,
     /// Anything worth telling the user about the open.
     pub notes: Vec<Note>,
 }
@@ -133,7 +134,6 @@ impl Doc {
         }
 
         // The geometry pass is separate and allowed to fail: the tree above is still useful.
-        let mut skipped = std::collections::HashMap::new();
         let parts = match gizmo_nfs::parse_geometry_reporting(&bytes) {
             Ok((parts, dropped)) => {
                 // A solid that yields no part used to vanish without a word. Each one is now a log
@@ -149,7 +149,6 @@ impl Doc {
                             describe(s.reason)
                         ),
                     });
-                    skipped.insert(s.offset, s.reason);
                 }
                 parts
             }
@@ -164,6 +163,21 @@ impl Doc {
             }
         };
 
+        // The checks run once, here — never per frame.
+        let report = gizmo_nfs::validate::validate(&roots, &bytes);
+        for f in report.findings() {
+            notes.push(Note {
+                level: match f.severity {
+                    gizmo_nfs::validate::Severity::Error => Level::Error,
+                    gizmo_nfs::validate::Severity::Warn => Level::Warn,
+                    _ => Level::Info,
+                },
+                chunk: Some(f.chunk_offset),
+                chunk_id: format!("{:#010x}", f.chunk_id),
+                message: format!("{}: {}", f.subject, f.message),
+            });
+        }
+
         notes.push(Note {
             level: Level::Info,
             chunk: None,
@@ -171,7 +185,7 @@ impl Doc {
             message: format!("{} chunk · {} parça", rows.len(), parts.len()),
         });
 
-        Ok(Self { path: path.to_path_buf(), bytes, codec, roots, rows, parts, skipped, notes })
+        Ok(Self { path: path.to_path_buf(), bytes, codec, roots, rows, parts, report, notes })
     }
 
     /// The node whose header sits at `offset`.

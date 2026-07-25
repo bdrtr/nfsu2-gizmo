@@ -45,6 +45,21 @@ cargo run --release -p nfsu2 --bin nfs_race
 
 Binaries: `nfs_viewer` (M1, in-engine car viewer), `nfs_drive` (M2, drivable car, default binary), `nfs_race` (M3, oval track + lap timing).
 
+### STRUKT (`crates/strukt`) — the asset inspector
+
+The adopted design (`claude.ai/design`, project `8ac61419-…`) as a native egui app: chunk tree ·
+hex · inspector · log · validation, over one open file. Depends only on `gizmo-nfs` + eframe —
+**not** on the engine, so it builds without the sibling checkout.
+
+```bash
+cargo run -p strukt -- "$NFSU2_ROOT/CARS/240SX/GEOMETRY.BIN"
+cargo run -p strukt -- "$NFSU2_ROOT/CARS/3000GT/GEOMETRY.BIN" --screen validation --shot out.png
+```
+
+`--shot <png>` draws a few frames, writes the window and exits — this machine's compositor will
+not hand out a screen grab, so it is the only way to check the interface. `--screen <name>` opens
+on a screen other than the workspace.
+
 All of them read the car's configuration from the environment (`0`/absent = stock, an
 unavailable part number silently falls back to stock):
 `NFS_KIT` (body kit `KIT##`: front + rear bumper + skirt), `NFS_STYLE_HOOD` (`STYLE##` hood),
@@ -92,7 +107,9 @@ Layered bottom-up; each layer is `&[u8]`-based and independently testable:
 7. **`texture`** — `Tpk::parse()`: `TEXTURES.BIN` (TPK) → an RGBA8 pixel pool + per-texture descriptors. The pool is the file's **JDLZ-compressed RGBA8** blocks concatenated (it is *not* DXT), laid out in `PAGE_WIDTH` (512)-wide pages; each descriptor gives hash + `pool_offset` (→ x,y) + format code. **Per-texture width/height are not yet decoded** — the module deliberately exposes the pool and origins, not cropped `NfsTexture`s. See its module docs for the descriptor table.
 8. **`placement`** — what a solid's local matrix *means*: a placement to apply, or a pose already baked into the vertices (`should_place`). Format semantics, so every consumer (engine layer, CLI exporter) decides it the same way.
 9. **`parts`** — **pure policy**: which material group a name is (`group_of`), what its `KIT##`/`KITW##`/`STYLE##` token says, and which parts make up a configuration (`select_car`). Lives here so the `nfs` CLI and the game select identically; the game re-exports it as `nfsu2::parts`.
-10. **`types`** — the engine-agnostic output contract (see below).
+10. **`inspect`** — a chunk's bytes read back as labelled fields, each with the offset it came from (`model`). What an inspector pane draws; it reads through `geometry::format` so a viewer cannot drift from the parser about what a file says.
+11. **`validate`** — the checks a person would run by hand: stride, bbox, normals, index range, chunk bounds. Every rule records **what it examined**, so "no findings" is never confused with "nobody looked".
+12. **`types`** — the engine-agnostic output contract (see below).
 
 The top-level `decompress_file()` is one of the few functions that touch the filesystem; everything downstream is pure `&[u8]`.
 
