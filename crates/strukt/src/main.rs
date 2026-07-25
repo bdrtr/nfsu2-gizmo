@@ -12,6 +12,7 @@ mod doc;
 mod export;
 mod gpu;
 mod i18n;
+mod names;
 mod panels;
 mod screens;
 mod theme;

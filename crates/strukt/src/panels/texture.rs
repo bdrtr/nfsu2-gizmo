@@ -68,7 +68,10 @@ pub fn show(app: &mut Strukt, ui: &mut egui::Ui) {
             let fitted = natural * (side / natural.x.max(natural.y));
             ui.add(egui::Image::new(&handle).fit_to_exact_size(fitted));
             ui.add_space(theme::token::SPACE_2);
-            ui.label(RichText::new(label_of(tex)).font(theme::font::mono(12.0)));
+            // A name from the dictionary wins over the file's own: the file's is truncated, and
+            // the dictionary's has been checked against the hash.
+            let shown = app.names.get(tex.hash.0).map(str::to_string).unwrap_or_else(|| label_of(tex));
+            ui.label(RichText::new(shown).font(theme::font::mono(12.0)));
             for (k, v) in [
                 ("hash", format!("{:#010x}", tex.hash.0)),
                 ("size", format!("{} × {}", tex.width, tex.height)),
@@ -112,7 +115,9 @@ pub fn show(app: &mut Strukt, ui: &mut egui::Ui) {
                 ui.horizontal_wrapped(|ui| {
                     for (hash, tex) in &entries {
                         let handle = upload(ui.ctx(), &mut app.texture_cache, tex, Some(THUMB));
-                        let resp = cell(ui, &handle, &label_of(tex), selected == Some(**hash));
+                        let label = app.names.get(hash.0).map(str::to_string);
+                        let label = label.unwrap_or_else(|| label_of(tex));
+                        let resp = cell(ui, &handle, &label, selected == Some(**hash));
                         if resp.clicked() {
                             pick = Some(**hash);
                         }

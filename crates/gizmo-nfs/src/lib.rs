@@ -47,6 +47,7 @@ pub mod export;
 pub mod fourcc;
 pub mod geometry;
 pub mod globalb;
+pub mod hash;
 pub mod inspect;
 pub mod parts;
 pub mod placement;

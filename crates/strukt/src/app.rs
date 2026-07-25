@@ -20,7 +20,6 @@ pub enum Screen {
     Validation,
     Discovery,
     Diff,
-    /// Designed, not yet built — the top bar shows it so the shape of the tool is honest.
     Dictionary,
 }
 
@@ -89,6 +88,10 @@ pub struct Strukt {
     pub preview: Option<crate::gpu::preview::Preview>,
     /// Where the preview camera is looking from.
     pub camera: crate::panels::viewport3d::Camera,
+    /// Names the user has given to asset hashes, loaded from disk at startup.
+    pub names: crate::names::Names,
+    /// The dictionary screen's filter and in-progress edits.
+    pub dict: crate::screens::dictionary::State,
     /// The compare screen's other file, and what comparing it said.
     pub diff: crate::screens::diff::State,
     /// The discovery screen's schema, and the chunk it was made for.
@@ -136,6 +139,8 @@ impl Strukt {
             render_state: None,
             preview: None,
             camera: crate::panels::viewport3d::Camera::default(),
+            names: crate::names::Names::load(),
+            dict: crate::screens::dictionary::State::default(),
             diff: crate::screens::diff::State::default(),
             discover: crate::screens::discovery::State::default(),
             texture_selection: None,
@@ -268,7 +273,7 @@ impl eframe::App for Strukt {
                     self.screen = Screen::Workspace;
                 }
             }
-            Screen::Dictionary => self.placeholder(ui),
+            Screen::Dictionary => screens::dictionary::show(self, ui),
         }
         // A file dropped on the window opens it — the welcome screen's drop target, everywhere.
         // On the compare screen it loads the other side instead, which is what dropping a second
@@ -420,25 +425,6 @@ impl Strukt {
             });
     }
 
-    /// A screen that exists in the design but not yet in the app. Better an honest note than a
-    /// nav button that does nothing.
-    fn placeholder(&mut self, ui: &mut egui::Ui) {
-        let t = self.lang.strings();
-        let (title, body) = match self.screen {
-            Screen::Discovery => (t.nav_discovery, t.w_card_discovery),
-            Screen::Diff => (t.nav_diff, t.w_card_diff),
-            _ => (t.nav_dict, t.w_card_dict),
-        };
-        egui::CentralPanel::default().show_inside(ui, |ui| {
-            ui.vertical_centered(|ui| {
-                ui.add_space(80.0);
-                ui.label(RichText::new(title).font(theme::font::heading(25.0)));
-                ui.label(RichText::new(body).color(theme::muted(70)));
-                ui.add_space(theme::token::SPACE_3);
-                ui.label(RichText::new(t.soon).size(11.0).color(token::ACCENT));
-            });
-        });
-    }
 }
 
 impl Strukt {

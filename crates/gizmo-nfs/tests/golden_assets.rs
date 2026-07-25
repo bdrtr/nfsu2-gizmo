@@ -162,3 +162,46 @@ fn discovery_proposes_the_real_vertex_layout() {
     let floats = schema.columns.iter().filter(|k| **k == gizmo_nfs::discover::Kind::F32).count();
     assert!(floats >= 6, "only {floats} float lanes in {:?}", schema.columns);
 }
+
+/// The asset-name hash, against every name a real TPK carries.
+///
+/// The TPK's name field truncates at 23 characters, and a truncated name cannot hash to the value
+/// computed from the full one — so the assertion is: every name that *fits* must hash correctly,
+/// and every failure must be a name of exactly the field width. That is what locks the function
+/// rather than merely agreeing with it.
+#[test]
+fn the_name_hash_reproduces_every_untruncated_tpk_name() {
+    let Some(root) = root() else {
+        eprintln!("NFSU2_ROOT unset — skipping golden hash test");
+        return;
+    };
+    let (mut verified, mut examined) = (0usize, 0usize);
+    for car in ["240SX", "RX7", "SUPRA", "TIBURON"] {
+        let path = root.join("CARS").join(car).join("TEXTURES.BIN");
+        let Ok(bytes) = std::fs::read(&path) else { continue };
+        let tpk = gizmo_nfs::Tpk::parse(&bytes).expect("tpk parses");
+        for entry in tpk.textures.values() {
+            let name = entry.name.trim_end_matches('\0');
+            if name.is_empty() {
+                continue;
+            }
+            examined += 1;
+            if gizmo_nfs::hash::string_hash(name) == entry.hash.0 {
+                verified += 1;
+            } else {
+                assert_eq!(
+                    name.len(),
+                    23,
+                    "{car}: {name:?} hashes to {:#010x}, file says {:#010x} — and it is not a \
+                     truncated name, so the hash function is wrong",
+                    gizmo_nfs::hash::string_hash(name),
+                    entry.hash.0
+                );
+            }
+        }
+    }
+    // Most names in a TPK are truncated, so the verified share is a minority by construction;
+    // these bounds only assert that the test really read four cars' worth of names.
+    assert!(examined > 200, "only {examined} names examined — the test read nothing");
+    assert!(verified > 40, "only {verified} of {examined} names verified");
+}
