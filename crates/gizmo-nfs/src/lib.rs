@@ -40,6 +40,7 @@
 
 pub mod chunk;
 pub mod compression;
+pub mod discover;
 pub mod error;
 pub mod export;
 pub mod fourcc;

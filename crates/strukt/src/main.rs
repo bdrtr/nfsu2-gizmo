@@ -38,6 +38,16 @@ fn main() -> eframe::Result {
             let shot = args.iter().position(|a| a == "--shot").and_then(|i| args.get(i + 1)).cloned();
             let screen = args.iter().position(|a| a == "--screen").and_then(|i| args.get(i + 1)).cloned();
             let tab = args.iter().position(|a| a == "--tab").and_then(|i| args.get(i + 1)).cloned();
+            // `--select <offset>` (hex or decimal) preselects a chunk, so a screenshot can show a
+            // screen reading something other than the root.
+            let select = args
+                .iter()
+                .position(|a| a == "--select")
+                .and_then(|i| args.get(i + 1))
+                .and_then(|v| match v.strip_prefix("0x") {
+                    Some(hex) => usize::from_str_radix(hex, 16).ok(),
+                    None => v.parse().ok(),
+                });
             let file = args.first().filter(|a| !a.starts_with("--")).cloned();
             let mut app = app::Strukt::new(file, shot, screen);
             if let Some(tab) = tab {
@@ -46,6 +56,9 @@ fn main() -> eframe::Result {
                     "tex" | "texture" | "doku" => app::Tab::Texture,
                     _ => app::Tab::Hex,
                 };
+            }
+            if let Some(offset) = select {
+                app.select(offset);
             }
             app.render_state = cc.wgpu_render_state.clone();
             Ok(Box::new(app))

@@ -75,9 +75,16 @@ expands all 57–76 images to RGBA8 at once. Thumbnails are downscaled on the CP
 selected image is uploaded full-size (nearest-filtered, so a preview shows texels rather than a
 smear). Entries the parser could not decode are **counted out loud** next to the total.
 
+The discovery screen (`--screen discovery`) is the other half of the inspector: pick a chunk, and
+it proposes a reading — filler skipped, the best-scoring stride, the lanes typed — then lets you
+drag the header, click a candidate stride, or cycle a column's type and watch the table change.
+The numbers that say a guess is wrong are on screen: bytes left over, and bytes of each record no
+column claims. All of the judgement lives in `gizmo_nfs::discover`; the screen is the table.
+
 `--shot <png>` draws a few frames, writes the window and exits — this machine's compositor will
 not hand out a screen grab, so it is the only way to check the interface. `--screen <name>` opens
-on a screen other than the workspace.
+on a screen other than the workspace, and `--select <offset>` (hex or decimal) preselects a chunk,
+which is how a screenshot shows a screen reading something other than the root.
 
 All of them read the car's configuration from the environment (`0`/absent = stock, an
 unavailable part number silently falls back to stock):
@@ -136,8 +143,9 @@ Layered bottom-up; each layer is `&[u8]`-based and independently testable:
 9. **`parts`** — **pure policy**: which material group a name is (`group_of`), what its `KIT##`/`KITW##`/`STYLE##` token says, and which parts make up a configuration (`select_car`). Lives here so the `nfs` CLI and the game select identically; the game re-exports it as `nfsu2::parts`.
 10. **`inspect`** — a chunk's bytes read back as labelled fields, each with the offset it came from (`model`). What an inspector pane draws; it reads through `geometry::format` so a viewer cannot drift from the parser about what a file says.
 11. **`validate`** — the checks a person would run by hand: stride, bbox, normals, index range, chunk bounds. Every rule records **what it examined**, so "no findings" is never confused with "nobody looked".
-12. **`export`** — parsed data back out as files other tools read: `obj` (OBJ + MTL text), `gltf` (a self-contained `.glb`, images embedded — behind the `png` feature), `material` (`MaterialPlan`: which `newmtl`/glTF material a run resolves to, and the textures that implies), `png_name`/`png_bytes`. Pure — it returns text and bytes and never touches the filesystem, so `ug2` and STRUKT write the same car from the same code. **glTF is the one place a frame is converted**: the format *defines* +Y up / −Z forward, so `gltf` rotates `(x,y,z) → (−y,z,−x)` (a rotation, not a mirror) and leaves UVs alone, since glTF's UV origin is DirectX's. OBJ keeps the file's own frame and flips V.
-13. **`types`** — the engine-agnostic output contract (see below).
+12. **`discover`** — the inverse of `inspect`: read an *undecoded* chunk through a `Schema` (header + stride + column kinds) a person typed. It carries no per-chunk knowledge, only the arithmetic that cracks layouts in this format: `leading_filler` (the `0x11` run that is not part of the records), `stride_candidates`/`ranked_candidates` (strides that divide exactly, scored by whether their *lanes* hold a consistent kind of value — a divisor of the true stride mixes fields between lanes and scores badly, a multiple ties, so the answer is the best-scoring **shortest** stride), `stride_for` (`size / n`), and `guess_columns`. A golden test asserts `propose()` re-derives a real car's stride-36 vertex layout from bytes alone.
+13. **`export`** — parsed data back out as files other tools read: `obj` (OBJ + MTL text), `gltf` (a self-contained `.glb`, images embedded — behind the `png` feature), `material` (`MaterialPlan`: which `newmtl`/glTF material a run resolves to, and the textures that implies), `png_name`/`png_bytes`. Pure — it returns text and bytes and never touches the filesystem, so `ug2` and STRUKT write the same car from the same code. **glTF is the one place a frame is converted**: the format *defines* +Y up / −Z forward, so `gltf` rotates `(x,y,z) → (−y,z,−x)` (a rotation, not a mirror) and leaves UVs alone, since glTF's UV origin is DirectX's. OBJ keeps the file's own frame and flips V.
+14. **`types`** — the engine-agnostic output contract (see below).
 
 The top-level `decompress_file()` is one of the few functions that touch the filesystem; everything downstream is pure `&[u8]`.
 

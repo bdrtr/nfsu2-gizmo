@@ -20,6 +20,7 @@ layer (a demo binary or an optional `gizmo-nfs-engine` crate), not this crate.
 | Output data contract | `types` | ✅ defined |
 | `GEOMETRY.BIN` car models | `geometry` | ✅ done — stride-36 vertices (pos/normal/uv) + u16 indices, validated on real cars |
 | TPK textures → RGBA8 images | `texture` | 🟡 mostly done — each 24-byte descriptor decoded to its own image: whole-file offset → JDLZ blob → embedded `OldTextureInfo` (width/height/format) → DXT1/3/5 or raw RGBA. **HUFF-compressed** textures are listed in `entries` but not decoded. |
+| Schema discovery (unknown chunks) | `discover` | ✅ done — user-typed stride/columns, exact-divisor candidates ranked by lane consistency, `0x11` filler skipped; re-derives the real vertex layout in a golden test |
 | glTF (`.glb`) + OBJ/MTL + PNG output | `export` | ✅ done — pure text/bytes, no filesystem; shared by `ug2 export` and STRUKT |
 | `GLOBALB.LZC` global data | `global` | 🔜 later |
 | World / city (`STREAM*.BUN`, `L4RA.BUN`) | `world` | 🔴 research-frontier |

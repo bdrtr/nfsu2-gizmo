@@ -133,3 +133,32 @@ fn tpk_parser_decodes_textures() {
     assert!(names.iter().any(|n| n.starts_with("240SX_KIT00_HEADLIGHT")), "headlight texture named");
     assert!(names.iter().any(|n| n.starts_with("240SX_KIT00_BRAKELIGHT")), "brakelight texture named");
 }
+
+/// The discovery proposal, on a buffer whose layout is already known.
+///
+/// A car's `0x00134B01` vertex buffer is stride 36 (position, normal, colour, uv) behind a run of
+/// `0x11` alignment filler. If [`gizmo_nfs::discover::propose`] cannot arrive at that from the
+/// bytes alone, the screen built on it is guiding people to the wrong answer — which is worse than
+/// leaving them to work it out.
+#[test]
+fn discovery_proposes_the_real_vertex_layout() {
+    let Some(root) = root() else {
+        eprintln!("NFSU2_ROOT unset — skipping golden discovery test");
+        return;
+    };
+    let bytes = std::fs::read(root.join("CARS/240SX/GEOMETRY.BIN")).expect("read GEOMETRY.BIN");
+    let tree = gizmo_nfs::chunk::ChunkNode::parse(&bytes).expect("chunk tree");
+    let vb = tree.iter().find_map(|n| n.find(0x0013_4B01)).expect("a vertex buffer");
+    let data = vb.data(&bytes);
+
+    let schema = gizmo_nfs::discover::propose(data);
+    let shape = gizmo_nfs::discover::shape(data.len(), &schema);
+    assert_eq!(schema.stride, 36, "proposed {schema:?} for a stride-36 buffer");
+    assert_eq!(shape.remainder, 0, "a correct stride leaves nothing over");
+    // The header it found is the alignment filler, and nothing but.
+    assert!(schema.header > 0 && data[..schema.header].iter().all(|b| *b == 0x11), "header is filler");
+
+    // Position and normal are three floats each, and the guess must see them as floats.
+    let floats = schema.columns.iter().filter(|k| **k == gizmo_nfs::discover::Kind::F32).count();
+    assert!(floats >= 6, "only {floats} float lanes in {:?}", schema.columns);
+}

@@ -18,8 +18,8 @@ pub enum Screen {
     Welcome,
     Workspace,
     Validation,
-    /// Designed, not yet built — the top bar shows it so the shape of the tool is honest.
     Discovery,
+    /// Designed, not yet built — the top bar shows it so the shape of the tool is honest.
     Diff,
     Dictionary,
 }
@@ -89,6 +89,8 @@ pub struct Strukt {
     pub preview: Option<crate::gpu::preview::Preview>,
     /// Where the preview camera is looking from.
     pub camera: crate::panels::viewport3d::Camera,
+    /// The discovery screen's schema, and the chunk it was made for.
+    pub discover: crate::screens::discovery::State,
     /// The texture the texture tab is showing.
     pub texture_selection: Option<gizmo_nfs::AssetHash>,
     /// Uploaded texture handles, keyed by hash and by thumbnail-or-full-image.
@@ -132,6 +134,7 @@ impl Strukt {
             render_state: None,
             preview: None,
             camera: crate::panels::viewport3d::Camera::default(),
+            discover: crate::screens::discovery::State::default(),
             texture_selection: None,
             texture_cache: std::collections::HashMap::new(),
             restyle: false,
@@ -249,7 +252,13 @@ impl eframe::App for Strukt {
                     self.screen = Screen::Workspace;
                 }
             }
-            Screen::Discovery | Screen::Diff | Screen::Dictionary => self.placeholder(ui),
+            Screen::Discovery => {
+                // The tree is on this screen too, so a chunk can be chosen without leaving it.
+                if let Some(offset) = screens::discovery::show(self, ui) {
+                    self.select(offset);
+                }
+            }
+            Screen::Diff | Screen::Dictionary => self.placeholder(ui),
         }
         // A file dropped on the window opens it — the welcome screen's drop target, everywhere.
         let dropped = ui.ctx().input(|i| i.raw.dropped_files.clone());
