@@ -40,12 +40,17 @@ pub(crate) fn doorline_texture(tpk: &Tpk, has_kit_body: bool) -> Option<&NfsText
         tpk.textures
             .values()
             .filter(|t| t.name.ends_with(suffix))
-            // TPK DebugNames are truncated to 23 characters, so on a long car name the `_MASK`
-            // companion loses its tail and ends with the same stem as the map itself
-            // (`LANCEREVO8_DOORLINE_KIT_MASK` → `LANCEREVO8_DOORLINE_KIT`). A mask is fully
-            // opaque and the map is mostly transparent, so pick the *most transparent* candidate
-            // — with the hash as a deterministic tie-break, since `textures` is a `HashMap` whose
-            // order varies per run (which made the Lancer and the Impreza render black at random).
+            // The `_MASK` companion is what turned cars black: TPK DebugNames are cut at 23
+            // characters, so on a long car name it arrives under the map's own name
+            // (`LANCEREVO8_DOORLINE_KIT_MASK` → `LANCEREVO8_DOORLINE_KIT`), fully opaque. The hash
+            // is of the *whole* name, so `is_mask()` settles it outright — no longer a guess from
+            // how transparent the image happens to be.
+            .filter(|t| !t.is_mask())
+            // What is left may still be a mask this cannot prove (a tail nobody can recover) or a
+            // format the decoder does not yet read, whose alpha is meaningless. Both are caught by
+            // preferring the most transparent candidate, with the hash as a deterministic
+            // tie-break — `textures` is a `HashMap` whose order varies per run, which is why the
+            // Lancer and the Impreza used to render black at random rather than always.
             .min_by_key(|t| (opaque_permille(t), t.hash.0))
             // A full-coverage map is a mask or an undecoded format, not a detail overlay:
             // compositing it paints the whole car its own (near-black) colour, as it did on the
@@ -92,7 +97,9 @@ pub(crate) fn texture_for_name<'a>(part_name: &str, tpk: &'a Tpk) -> Option<&'a 
         // image (the detailed diffuse over its lower-res companion), then the lowest hash so the
         // pick is fully stable across runs.
         .max_by_key(|(cpl, t)| {
-            (*cpl, !t.name.ends_with("_MASK"), t.width * t.height, std::cmp::Reverse(t.hash.0))
+            // `is_mask()` rather than a suffix test: the same truncation hides `_MASK` here too,
+            // and a mask bound as a diffuse map is a black panel.
+            (*cpl, !t.is_mask(), t.width * t.height, std::cmp::Reverse(t.hash.0))
         })
         .map(|(_, t)| t)
 }
@@ -117,6 +124,13 @@ mod tests {
 
     /// A texture of `texels` pixels, `opaque` of them opaque — enough for the overlay picker,
     /// which only reads the alpha channel, the name and the hash.
+    /// The same, but with the hash of `real_name` — a name the 23-character field truncated.
+    fn tex_named(stored: &str, real_name: &str, texels: usize, opaque: usize) -> NfsTexture {
+        let mut t = tex(stored, 0, texels, opaque);
+        t.hash = gizmo_nfs::hash::asset_hash(real_name);
+        t
+    }
+
     fn tex(name: &str, hash: u32, texels: usize, opaque: usize) -> NfsTexture {
         let mut rgba = Vec::with_capacity(texels * 4);
         for i in 0..texels {
@@ -172,6 +186,20 @@ mod tests {
         ]);
         let picked = doorline_texture(&tpk, true).expect("a doorline overlay");
         assert_eq!(picked.hash.0, 0x2222_2222);
+    }
+
+#[test]
+    fn a_proven_mask_loses_even_when_it_is_the_more_transparent_image() {
+        // The hash settles what the name cannot. Here the mask is *more* transparent than the map,
+        // so the old "pick the most transparent" rule would have chosen it; being able to prove it
+        // is a `_MASK` is what makes the choice right rather than lucky.
+        let tpk = tpk_of(vec![
+            tex_named("LANCEREVO8_DOORLINE_KIT", "LANCEREVO8_DOORLINE_KIT_MASK", 100, 1),
+            tex_named("LANCEREVO8_DOORLINE_KIT", "LANCEREVO8_DOORLINE_KIT", 100, 50),
+        ]);
+        let picked = doorline_texture(&tpk, true).expect("a doorline overlay");
+        assert_eq!(picked.hash, gizmo_nfs::hash::asset_hash("LANCEREVO8_DOORLINE_KIT"));
+        assert!(!picked.is_mask());
     }
 
 #[test]

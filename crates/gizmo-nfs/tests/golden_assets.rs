@@ -205,3 +205,49 @@ fn the_name_hash_reproduces_every_untruncated_tpk_name() {
     assert!(examined > 200, "only {examined} names examined — the test read nothing");
     assert!(verified > 40, "only {verified} of {examined} names verified");
 }
+
+/// Masks that the name field hid, found by hash.
+///
+/// A `_MASK` companion whose name was cut arrives under the name of the map it belongs to, and is
+/// fully opaque — bound as a diffuse map it is a black panel, composited over paint it is a black
+/// car. One install hides 56 of them across 29 cars, so this is not a corner case; the assertions
+/// below are a floor, plus the two cases this project has actually been bitten by.
+#[test]
+fn truncation_hides_masks_that_the_hash_finds() {
+    let Some(root) = root() else {
+        eprintln!("NFSU2_ROOT unset — skipping golden mask test");
+        return;
+    };
+    let mut hidden = 0usize;
+    let mut named = 0usize;
+    for dir in std::fs::read_dir(root.join("CARS")).expect("CARS/").flatten() {
+        let Ok(bytes) = std::fs::read(dir.path().join("TEXTURES.BIN")) else { continue };
+        let Ok(tpk) = gizmo_nfs::Tpk::parse(&bytes) else { continue };
+        for tex in tpk.textures.values() {
+            if tex.name.ends_with("_MASK") {
+                named += 1;
+            } else if tex.is_mask() {
+                hidden += 1;
+                // Every one of these is a full-coverage image; that is why mistaking one matters.
+                let texels = (tex.rgba.len() / 4).max(1);
+                let opaque = tex.rgba.chunks_exact(4).filter(|p| p[3] > 200).count();
+                assert!(opaque * 10 >= texels * 9, "{}: a mask should be opaque", tex.name);
+            }
+        }
+    }
+    assert!(named > 20, "only {named} textures name themselves _MASK — read nothing?");
+    assert!(hidden > 20, "only {hidden} hidden masks found — the hash is not seeing through the cut");
+
+    // The two specific twins: on IMPREZAWRX the mask and its map arrive under one name, and on
+    // 240SX the widebody doorline does the same.
+    let impreza = std::fs::read(root.join("CARS/IMPREZAWRX/TEXTURES.BIN")).expect("IMPREZAWRX");
+    let tpk = gizmo_nfs::Tpk::parse(&impreza).expect("tpk");
+    let twins: Vec<_> =
+        tpk.textures.values().filter(|t| t.name == "IMPREZAWRX_DOORLINE_KIT").collect();
+    assert_eq!(twins.len(), 2, "the car ships the map and its mask under one truncated name");
+    assert_eq!(
+        twins.iter().filter(|t| t.is_mask()).count(),
+        1,
+        "exactly one of the twins is the mask"
+    );
+}

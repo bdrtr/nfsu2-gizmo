@@ -187,6 +187,45 @@ pub struct NfsTexture {
     pub format: PixelFormat,
 }
 
+/// The suffix NFSU2 gives a texture's alpha companion.
+const MASK_SUFFIX: &str = "_MASK";
+
+impl NfsTexture {
+    /// Whether the name stored in the file is the whole name.
+    ///
+    /// The TPK's name field truncates at 23 characters, but the hash was computed from the full
+    /// name — so a name that hashes back to its own key survived intact, and one that does not was
+    /// cut. Nothing else in the file says which happened.
+    #[must_use]
+    pub fn name_is_whole(&self) -> bool {
+        !self.name.is_empty() && crate::hash::string_hash(&self.name) == self.hash.0
+    }
+
+    /// Whether this texture is another one's `_MASK` companion — **seeing through truncation**.
+    ///
+    /// On a long car name the mask loses its tail and arrives under the same name as the map it
+    /// belongs to (`LANCEREVO8_DOORLINE_KIT_MASK` → `LANCEREVO8_DOORLINE_KIT`), which is how a
+    /// fully-opaque mask ends up composited over the paint and turns a car black. Appending the
+    /// suffix to the stored name and hashing settles it, including when the cut landed *inside*
+    /// the suffix (`..._MAS` needs only its `K` back).
+    ///
+    /// A `false` here means "not proven to be a mask", not "proven to be a map": a name whose tail
+    /// was something else entirely cannot be recovered by guessing this one suffix.
+    #[must_use]
+    pub fn is_mask(&self) -> bool {
+        if self.name.ends_with(MASK_SUFFIX) {
+            return true;
+        }
+        if self.name_is_whole() {
+            return false; // the name is complete and does not end in the suffix
+        }
+        (0..MASK_SUFFIX.len()).any(|kept| {
+            let (had, needs) = MASK_SUFFIX.split_at(kept);
+            self.name.ends_with(had) && crate::hash::names(&format!("{}{needs}", self.name), self.hash)
+        })
+    }
+}
+
 /// A parsed car: its renderable parts plus a hash-keyed texture table for material
 /// resolution.
 #[derive(Debug, Clone, Default)]
@@ -232,6 +271,47 @@ mod tests {
 
         let bad = NfsMeshPart { positions: vec![[0.0; 3]], indices: vec![0, 1, 2], ..Default::default() };
         assert!(!bad.indices_in_range());
+    }
+
+    /// A texture whose stored name is `name` but whose hash is that of `real_name` — which is what
+    /// the 23-character name field produces for anything longer.
+    fn truncated(name: &str, real_name: &str) -> NfsTexture {
+        NfsTexture {
+            name: name.to_string(),
+            hash: crate::hash::asset_hash(real_name),
+            ..NfsTexture::default()
+        }
+    }
+
+    #[test]
+    fn a_mask_is_recognised_through_a_truncated_name() {
+        // The case that turned cars black: the mask arrives under the map's name.
+        let mask = truncated("LANCEREVO8_DOORLINE_KIT", "LANCEREVO8_DOORLINE_KIT_MASK");
+        assert!(mask.is_mask(), "the _MASK tail is recoverable from the hash");
+        assert!(!mask.name_is_whole());
+
+        // The map itself, with the very same stored name, must not be mistaken for it.
+        let map = truncated("LANCEREVO8_DOORLINE_KIT", "LANCEREVO8_DOORLINE_KIT");
+        assert!(map.name_is_whole() && !map.is_mask());
+    }
+
+    #[test]
+    fn a_cut_landing_inside_the_suffix_is_still_recovered() {
+        for stored in ["CAR_DOORLINE_KIT_", "CAR_DOORLINE_KIT_M", "CAR_DOORLINE_KIT_MAS"] {
+            let t = truncated(stored, "CAR_DOORLINE_KIT_MASK");
+            assert!(t.is_mask(), "{stored:?} should complete to _MASK");
+        }
+    }
+
+    #[test]
+    fn an_unrecoverable_tail_is_not_claimed_either_way() {
+        // The real name ended in something else, so nothing here can prove what it was — and the
+        // answer must be "not proven a mask" rather than a guess.
+        let t = truncated("CAR_KIT00_HEADLIGHT_", "CAR_KIT00_HEADLIGHT_GLASS");
+        assert!(!t.is_mask() && !t.name_is_whole());
+        // A name that says `_MASK` outright needs no hash at all.
+        let plain = NfsTexture { name: "CAR_DOORLINE_MASK".into(), ..NfsTexture::default() };
+        assert!(plain.is_mask());
     }
 
     #[test]
