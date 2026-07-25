@@ -19,8 +19,8 @@ pub enum Screen {
     Workspace,
     Validation,
     Discovery,
-    /// Designed, not yet built — the top bar shows it so the shape of the tool is honest.
     Diff,
+    /// Designed, not yet built — the top bar shows it so the shape of the tool is honest.
     Dictionary,
 }
 
@@ -89,6 +89,8 @@ pub struct Strukt {
     pub preview: Option<crate::gpu::preview::Preview>,
     /// Where the preview camera is looking from.
     pub camera: crate::panels::viewport3d::Camera,
+    /// The compare screen's other file, and what comparing it said.
+    pub diff: crate::screens::diff::State,
     /// The discovery screen's schema, and the chunk it was made for.
     pub discover: crate::screens::discovery::State,
     /// The texture the texture tab is showing.
@@ -134,6 +136,7 @@ impl Strukt {
             render_state: None,
             preview: None,
             camera: crate::panels::viewport3d::Camera::default(),
+            diff: crate::screens::diff::State::default(),
             discover: crate::screens::discovery::State::default(),
             texture_selection: None,
             texture_cache: std::collections::HashMap::new(),
@@ -258,12 +261,25 @@ impl eframe::App for Strukt {
                     self.select(offset);
                 }
             }
-            Screen::Diff | Screen::Dictionary => self.placeholder(ui),
+            Screen::Diff => {
+                // A row names a chunk in the *left* file; clicking it goes there.
+                if let Some(offset) = screens::diff::show(self, ui) {
+                    self.select(offset);
+                    self.screen = Screen::Workspace;
+                }
+            }
+            Screen::Dictionary => self.placeholder(ui),
         }
         // A file dropped on the window opens it — the welcome screen's drop target, everywhere.
+        // On the compare screen it loads the other side instead, which is what dropping a second
+        // file onto a comparison plainly means.
         let dropped = ui.ctx().input(|i| i.raw.dropped_files.clone());
         if let Some(path) = dropped.into_iter().find_map(|f| f.path) {
-            self.open(&path);
+            if screens::diff::accepts_drop(self) {
+                self.diff.open_right(&path);
+            } else {
+                self.open(&path);
+            }
         }
         self.screenshot(ui.ctx());
     }

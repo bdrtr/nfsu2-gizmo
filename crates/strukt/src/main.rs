@@ -48,6 +48,13 @@ fn main() -> eframe::Result {
                     Some(hex) => usize::from_str_radix(hex, 16).ok(),
                     None => v.parse().ok(),
                 });
+            // `--compare <file>` loads the compare screen's other side, which is also the only way
+            // to put it in a screenshot on this machine.
+            let compare = args
+                .iter()
+                .position(|a| a == "--compare")
+                .and_then(|i| args.get(i + 1))
+                .cloned();
             let file = args.first().filter(|a| !a.starts_with("--")).cloned();
             let mut app = app::Strukt::new(file, shot, screen);
             if let Some(tab) = tab {
@@ -59,6 +66,9 @@ fn main() -> eframe::Result {
             }
             if let Some(offset) = select {
                 app.select(offset);
+            }
+            if let Some(other) = compare {
+                app.diff.open_right(std::path::Path::new(&other));
             }
             app.render_state = cc.wgpu_render_state.clone();
             Ok(Box::new(app))

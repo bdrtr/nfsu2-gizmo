@@ -26,6 +26,7 @@ macro_rules! outln {
     }};
 }
 
+mod diff;
 mod dump;
 mod export;
 mod fields;
@@ -142,6 +143,19 @@ enum Command {
         #[arg(long)]
         matrices: bool,
     },
+    /// Compare two asset files chunk by chunk.
+    Diff {
+        /// The file to read as the "before".
+        left: PathBuf,
+        /// The file to read as the "after".
+        right: PathBuf,
+        /// Also list the chunks that are the same.
+        #[arg(long)]
+        all: bool,
+        /// Stop after this many lines.
+        #[arg(long, value_name = "N", default_value_t = 200)]
+        max: usize,
+    },
     /// Export a car to glTF (`.glb`) and OBJ + MTL, with its textures as PNG.
     Export {
         /// A car directory or its `GEOMETRY.BIN`.
@@ -173,6 +187,7 @@ fn main() -> ExitCode {
         Command::Textures { car, filter } => textures::run(&car, filter.as_deref()),
         Command::Globalb { path, filter } => globalb::run(&path, filter.as_deref()),
         Command::Probe { car, filter, matrices } => probe::run(&car, filter.as_deref(), matrices),
+        Command::Diff { left, right, all, max } => diff::run(&left, &right, all, max),
         Command::Export { car, out, config, all, no_textures, format } => {
             export::run(&car, &out, config.into(), all, !no_textures, &format)
         }

@@ -20,6 +20,7 @@ layer (a demo binary or an optional `gizmo-nfs-engine` crate), not this crate.
 | Output data contract | `types` | ✅ defined |
 | `GEOMETRY.BIN` car models | `geometry` | ✅ done — stride-36 vertices (pos/normal/uv) + u16 indices, validated on real cars |
 | TPK textures → RGBA8 images | `texture` | 🟡 mostly done — each 24-byte descriptor decoded to its own image: whole-file offset → JDLZ blob → embedded `OldTextureInfo` (width/height/format) → DXT1/3/5 or raw RGBA. **HUFF-compressed** textures are listed in `entries` but not decoded. |
+| Chunk-tree comparison | `diff` | ✅ done — paired by position among same-id siblings; changed / resized / one-sided, with the first differing byte |
 | Schema discovery (unknown chunks) | `discover` | ✅ done — user-typed stride/columns, exact-divisor candidates ranked by lane consistency, `0x11` filler skipped; re-derives the real vertex layout in a golden test |
 | glTF (`.glb`) + OBJ/MTL + PNG output | `export` | ✅ done — pure text/bytes, no filesystem; shared by `ug2 export` and STRUKT |
 | `GLOBALB.LZC` global data | `global` | 🔜 later |
@@ -50,6 +51,7 @@ cargo run -p gizmo-nfs --features tools --bin ug2 -- <command>
 | `ug2 export CARS/ -o out/` | the same for every car in the folder, one subdirectory each |
 | `ug2 textures CARS/240SX` | the texture table, and which material run resolves to which image |
 | `ug2 dump FILE` | the chunk tree of any asset file (or a BIGF/VIV archive's contents) |
+| `ug2 diff A B [--all --max N]` | what differs between two asset files, chunk by chunk |
 | `ug2 probe CARS/240SX [--matrices]` | the raw solid view: declared counts vs. buffer sizes, mesh-header words, matrix classification |
 | `ug2 globalb GLOBALB.BUN` | wheel mounts, radius and mass per car |
 
