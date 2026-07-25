@@ -51,25 +51,17 @@ pub(crate) fn doorline_texture(tpk: &Tpk, has_kit_body: bool) -> Option<&NfsText
             // preferring the most transparent candidate, with the hash as a deterministic
             // tie-break — `textures` is a `HashMap` whose order varies per run, which is why the
             // Lancer and the Impreza used to render black at random rather than always.
-            .min_by_key(|t| (opaque_permille(t), t.hash.0))
+            .min_by_key(|t| (t.opaque_permille(), t.hash.0))
             // A full-coverage map is a mask or an undecoded format, not a detail overlay:
             // compositing it paints the whole car its own (near-black) colour, as it did on the
             // IS300, whose real `_DOORLINE` is opaque too. Better no detail than a black car.
-            .filter(|t| opaque_permille(t) < OVERLAY_MAX_OPAQUE_PERMILLE)
+            .filter(|t| t.opaque_permille() < OVERLAY_MAX_OPAQUE_PERMILLE)
     };
     if has_kit_body {
         pick("_DOORLINE_KIT").or_else(|| pick("_DOORLINE"))
     } else {
         pick("_DOORLINE")
     }
-}
-
-/// Opacity of a texture in ‰ of texels — how much of the paint an overlay would cover. Real
-/// doorline maps sit at 100–200‰ (thin panel gaps on a transparent field); masks are 1000‰.
-fn opaque_permille(t: &NfsTexture) -> u32 {
-    let texels = (t.rgba.len() / 4).max(1);
-    let opaque = t.rgba.chunks_exact(4).filter(|px| px[3] > 200).count();
-    (opaque * 1000 / texels) as u32
 }
 
 /// Above this coverage a "detail overlay" is really a mask (or an undecodable map) and is dropped.
@@ -122,15 +114,15 @@ pub(crate) fn resolve_whole(p: &NfsMeshPart, grp: Grp, tpk: &Tpk) -> Option<Asse
 mod tests {
     use super::*;
 
-    /// A texture of `texels` pixels, `opaque` of them opaque — enough for the overlay picker,
-    /// which only reads the alpha channel, the name and the hash.
-    /// The same, but with the hash of `real_name` — a name the 23-character field truncated.
+    /// The same as [`tex`], but with the hash of `real_name` — a name the 23-character field cut.
     fn tex_named(stored: &str, real_name: &str, texels: usize, opaque: usize) -> NfsTexture {
         let mut t = tex(stored, 0, texels, opaque);
         t.hash = gizmo_nfs::hash::asset_hash(real_name);
         t
     }
 
+    /// A texture of `texels` pixels, `opaque` of them opaque — enough for the overlay picker,
+    /// which only reads the alpha channel, the name and the hash.
     fn tex(name: &str, hash: u32, texels: usize, opaque: usize) -> NfsTexture {
         let mut rgba = Vec::with_capacity(texels * 4);
         for i in 0..texels {
