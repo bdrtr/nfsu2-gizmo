@@ -3,6 +3,11 @@
 //! Both formats by default: the `.glb` is one self-contained file with its textures inside it,
 //! the OBJ is what the older tools around this game read. Neither is a conversion of the other —
 //! they are two renderings of the same [`MaterialPlan`].
+//!
+//! Point it at a `CARS/` folder and it exports every car in it, each into its own subdirectory.
+//! A car that fails is reported and the batch carries on — one unreadable model out of forty is
+//! not a reason to have exported nothing — but the command still exits non-zero, so a script is
+//! never told a partial run succeeded.
 
 use crate::paths::{Car, Result};
 use gizmo_nfs::export::{self, MaterialPlan};
@@ -11,21 +16,54 @@ use gizmo_nfs::{NfsMeshPart, NfsTexture};
 use std::path::Path;
 
 pub fn run(
-    car: &Path,
+    path: &Path,
     out: &Path,
     config: CarConfig,
     all: bool,
     want_textures: bool,
     format: &str,
 ) -> Result<()> {
-    let car = Car::resolve(car)?;
+    let cars = Car::resolve_all(path)?;
+    // One car keeps the old shape: its files go straight into `out`, not into `out/<NAME>/`.
+    if let [only] = &cars[..] {
+        return one(only, out, &config, all, want_textures, format);
+    };
+
+    // ── A folder of cars: each into its own subdirectory, named after the car ──
+    let mut failed: Vec<String> = Vec::new();
+    for car in &cars {
+        match one(car, &out.join(&car.name), &config, all, want_textures, format) {
+            Ok(()) => {}
+            Err(e) => {
+                eprintln!("ug2: {e}");
+                failed.push(car.name.clone());
+            }
+        }
+    }
+    outln!("{}/{} cars written into {}", cars.len() - failed.len(), cars.len(), out.display());
+    if !failed.is_empty() {
+        outln!("  failed: {}", failed.join(", "));
+        return Err(format!("{} of {} cars failed", failed.len(), cars.len()));
+    }
+    Ok(())
+}
+
+/// One car into one directory.
+fn one(
+    car: &Car,
+    out: &Path,
+    config: &CarConfig,
+    all: bool,
+    want_textures: bool,
+    format: &str,
+) -> Result<()> {
     let parts = car.parts()?;
     let selected: Vec<&NfsMeshPart> = if all {
         parts.iter().collect()
     } else {
         // Skip the parts that are never drawn (engine bay, underbody, livery decals): they
         // would import as geometry buried inside the body.
-        select_car(&parts, &config).into_iter().filter(|p| group_of(&p.name) != Grp::Skip).collect()
+        select_car(&parts, config).into_iter().filter(|p| group_of(&p.name) != Grp::Skip).collect()
     };
     if selected.is_empty() {
         let siblings = car.siblings();

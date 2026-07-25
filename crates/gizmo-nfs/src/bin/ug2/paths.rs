@@ -40,6 +40,69 @@ impl Car {
         Ok(Self { dir, geometry, name })
     }
 
+    /// Every car `path` names: the one it points at, or all of them when it is a `CARS/` folder.
+    ///
+    /// The distinction is made by what is on disk, not by a flag — a directory either has a
+    /// `GEOMETRY.BIN` of its own or it holds directories that do. Cars come back in name order so
+    /// a batch is reproducible.
+    pub fn resolve_all(path: &Path) -> Result<Vec<Self>> {
+        if let Ok(one) = Self::resolve(path) {
+            return Ok(vec![one]);
+        }
+        if !path.is_dir() {
+            // Report the original failure: "no GEOMETRY.BIN at ..." says more than "not a set".
+            return Self::resolve(path).map(|c| vec![c]);
+        }
+        let mut dirs: Vec<PathBuf> = std::fs::read_dir(path)
+            .map_err(|e| format!("{}: {e}", path.display()))?
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.join("GEOMETRY.BIN").is_file())
+            .collect();
+        dirs.sort();
+        if dirs.is_empty() {
+            return Err(format!(
+                "{}: neither a car nor a folder of cars — no GEOMETRY.BIN here or one level down",
+                path.display()
+            ));
+        }
+        let mut cars = Vec::new();
+        for dir in &dirs {
+            // A set directory's own `GEOMETRY.BIN` is a stub; its models are the siblings. Taking
+            // the members *instead of* the stub is what makes `CARS/` come out complete rather
+            // than complete-except-the-wheels.
+            let members = Self::set_members(dir);
+            if members.is_empty() {
+                cars.push(Self::resolve(dir)?);
+            } else {
+                cars.extend(members);
+            }
+        }
+        Ok(cars)
+    }
+
+    /// The models of a *set* directory — `WHEELS/GEOMETRY_BBS.BIN` and its kin — as one car each,
+    /// named `WHEELS_BBS`. Empty for an ordinary car, which is how the two are told apart.
+    fn set_members(dir: &Path) -> Vec<Self> {
+        let stem = dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let mut cars: Vec<Self> = std::fs::read_dir(dir)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter_map(|e| {
+                let file = e.file_name().to_string_lossy().into_owned();
+                let brand = file.strip_prefix("GEOMETRY_")?.strip_suffix(".BIN")?;
+                Some(Self {
+                    dir: dir.to_path_buf(),
+                    geometry: e.path(),
+                    name: format!("{stem}_{brand}"),
+                })
+            })
+            .collect();
+        cars.sort_by(|a, b| a.name.cmp(&b.name));
+        cars
+    }
+
     /// Sibling `GEOMETRY_<NAME>.BIN` files, if this directory holds a *set* of models rather
     /// than one car. `CARS/WHEELS` is the case that matters: its `GEOMETRY.BIN` is a 64-byte
     /// stub and the actual rims are one file per brand, so an empty result there is data, not

@@ -95,11 +95,17 @@ $UG2 info   "$NFSU2_ROOT/CARS/240SX"                 # parts, variants, dimensio
 $UG2 parts  "$NFSU2_ROOT/CARS/240SX" --selected --kit 3
 $UG2 export "$NFSU2_ROOT/CARS/240SX" -o out/ --kit 3 --wide 1   # GLB + OBJ/MTL + PNG
 $UG2 export "$NFSU2_ROOT/CARS/240SX" -o out/ --format glb        # just the one self-contained file
+$UG2 export "$NFSU2_ROOT/CARS" -o out/ --format glb              # every car, each into out/<CAR>/
 $UG2 dump   "$NFSU2_ROOT/CARS/240SX/GEOMETRY.BIN"    # chunk tree / VIV listing
 $UG2 probe  "$NFSU2_ROOT/CARS/SENTRA" --matrices     # raw solids: counts, buffers, matrices
 $UG2 textures "$NFSU2_ROOT/CARS/240SX"
 $UG2 globalb  "$NFSU2_ROOT/CARS/240SX"
 ```
+
+Pointed at a `CARS/` folder, `export` does the lot: one subdirectory per car, a failed car
+reported and skipped rather than aborting the run (but the command still exits non-zero), and
+`WHEELS/` expanded into its `GEOMETRY_<BRAND>.BIN` members as `WHEELS_BBS` and kin — the whole
+install is 80 models.
 
 `dump` and `probe` are the workhorses for locking an unconfirmed format (they replaced the
 old `nfs_dump`/`nfs_vfmt`/`nfs_survey` examples). `export`'s **OBJ** writes NFSU2's own

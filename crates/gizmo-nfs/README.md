@@ -46,6 +46,7 @@ cargo run -p gizmo-nfs --features tools --bin ug2 -- <command>
 | `ug2 info CARS/240SX` | what this car is: parts, the variants it ships (`--kit`/`--hood`/`--light`/`--wide`), dimensions, and its `GLOBALB` wheel record |
 | `ug2 parts CARS/240SX [--selected --kit 3]` | every part grouped by customization namespace, or just the ones a configuration selects |
 | `ug2 export CARS/240SX -o out/ [--kit 3 --wide 1] [--format glb\|obj\|both]` | the car as a self-contained `.glb` and/or OBJ + MTL + PNG — importable anywhere |
+| `ug2 export CARS/ -o out/` | the same for every car in the folder, one subdirectory each |
 | `ug2 textures CARS/240SX` | the texture table, and which material run resolves to which image |
 | `ug2 dump FILE` | the chunk tree of any asset file (or a BIGF/VIV archive's contents) |
 | `ug2 probe CARS/240SX [--matrices]` | the raw solid view: declared counts vs. buffer sizes, mesh-header words, matrix classification |
