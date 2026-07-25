@@ -57,7 +57,8 @@ pub fn show(app: &mut Strukt, ui: &mut egui::Ui) {
                     select_byte = Some(byte);
                 }
             }
-            Tab::ThreeD | Tab::Texture => soon(app, ui),
+            Tab::ThreeD => panels::viewport3d::show(app, ui),
+            Tab::Texture => soon(app, ui),
         }
     });
 
@@ -82,7 +83,7 @@ fn tabs(app: &mut Strukt, ui: &mut egui::Ui) {
     let t = app.lang.strings();
     ui.horizontal(|ui| {
         for (tab, label, ready) in [
-            (Tab::ThreeD, t.tab_3d, false),
+            (Tab::ThreeD, t.tab_3d, true),
             (Tab::Hex, t.tab_hex, true),
             (Tab::Texture, t.tab_tex, false),
         ] {

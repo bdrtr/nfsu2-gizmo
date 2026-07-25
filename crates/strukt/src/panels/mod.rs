@@ -5,3 +5,4 @@ pub mod hex;
 pub mod inspector;
 pub mod log;
 pub mod tree;
+pub mod viewport3d;

@@ -21,6 +21,10 @@ eframe = { version = "0.34.3", default-features = false, features = [
     "default_fonts",
 ] }
 egui = "0.34.3"
+# The 3D tab renders through eframe's own wgpu device; `bytemuck` is how vertex and uniform
+# structs reach it without unsafe.
+wgpu = "29"
+bytemuck = { version = "1", features = ["derive"] }
 
 # No file-dialog crate: on Linux `rfd` drags in either GTK dev libraries or the xdg-portal +
 # tokio stack, which is a heavy price for one button. A file arrives by drag-and-drop, by the

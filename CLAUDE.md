@@ -54,7 +54,13 @@ hex · inspector · log · validation, over one open file. Depends only on `gizm
 ```bash
 cargo run -p strukt -- "$NFSU2_ROOT/CARS/240SX/GEOMETRY.BIN"
 cargo run -p strukt -- "$NFSU2_ROOT/CARS/3000GT/GEOMETRY.BIN" --screen validation --shot out.png
+cargo run -p strukt -- "$NFSU2_ROOT/CARS/RX7/GEOMETRY.BIN" --tab 3d
 ```
+
+The 3D tab renders through eframe's own wgpu device into an offscreen target (egui's pass has no
+depth attachment, and a solid drawn without one shows its far side through its near side). It
+keeps the file's frame — Z-up, 1 unit = 1 m — and shows the selected solid, or the showroom car
+when the selection is not inside one.
 
 `--shot <png>` draws a few frames, writes the window and exits — this machine's compositor will
 not hand out a screen grab, so it is the only way to check the interface. `--screen <name>` opens

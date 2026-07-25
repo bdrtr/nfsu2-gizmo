@@ -9,6 +9,7 @@
 
 mod app;
 mod doc;
+mod gpu;
 mod i18n;
 mod panels;
 mod screens;
@@ -35,8 +36,18 @@ fn main() -> eframe::Result {
             let args: Vec<String> = std::env::args().skip(1).collect();
             let shot = args.iter().position(|a| a == "--shot").and_then(|i| args.get(i + 1)).cloned();
             let screen = args.iter().position(|a| a == "--screen").and_then(|i| args.get(i + 1)).cloned();
+            let tab = args.iter().position(|a| a == "--tab").and_then(|i| args.get(i + 1)).cloned();
             let file = args.first().filter(|a| !a.starts_with("--")).cloned();
-            Ok(Box::new(app::Strukt::new(file, shot, screen)))
+            let mut app = app::Strukt::new(file, shot, screen);
+            if let Some(tab) = tab {
+                app.tab = match tab.as_str() {
+                    "3d" => app::Tab::ThreeD,
+                    "tex" => app::Tab::Texture,
+                    _ => app::Tab::Hex,
+                };
+            }
+            app.render_state = cc.wgpu_render_state.clone();
+            Ok(Box::new(app))
         }),
     )
 }

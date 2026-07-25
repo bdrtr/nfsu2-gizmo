@@ -82,6 +82,13 @@ pub struct Strukt {
     pub path_input: String,
     /// The selected chunk's parsed model, keyed by its offset so it is rebuilt only on a change.
     model: Option<(usize, gizmo_nfs::inspect::ChunkModel)>,
+    /// eframe's wgpu device, for the 3D tab. `None` when the backend is not wgpu, in which case
+    /// the tab says so instead of the app refusing to run.
+    pub render_state: Option<eframe::egui_wgpu::RenderState>,
+    /// The preview renderer, built lazily the first time the tab is opened.
+    pub preview: Option<crate::gpu::preview::Preview>,
+    /// Where the preview camera is looking from.
+    pub camera: crate::panels::viewport3d::Camera,
     /// Set when the density or language changed and the style must be rebuilt.
     restyle: bool,
     /// `--shot <path>`: draw a few frames, save the window as a PNG, and exit. The tool renders
@@ -118,6 +125,9 @@ impl Strukt {
             recents: Vec::new(),
             path_input: String::new(),
             model: None,
+            render_state: None,
+            preview: None,
+            camera: crate::panels::viewport3d::Camera::default(),
             restyle: false,
             shot: shot.map(|p| Shot { path: p.into(), warmup: 4, asked: false }),
         };
@@ -175,6 +185,16 @@ impl Strukt {
     #[must_use]
     pub fn selected_node(&self) -> Option<&gizmo_nfs::chunk::ChunkNode> {
         self.doc.as_ref()?.node_at(self.selection?)
+    }
+
+    /// The name of the solid the selection sits in, when it has one.
+    #[must_use]
+    pub fn selected_solid_name(&self) -> Option<String> {
+        let doc = self.doc.as_ref()?;
+        let solid = doc.solid_of(self.selection?)?;
+        let header = solid.find(gizmo_nfs::geometry::format::SOLID_HEADER)?;
+        let name = gizmo_nfs::geometry::part_name(header.data(&doc.bytes));
+        (!name.is_empty()).then_some(name)
     }
 
     /// The parsed model of the selected chunk, built once per selection rather than per frame.
