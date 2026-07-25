@@ -18,7 +18,7 @@ use gizmo::egui;
 use gizmo::physics::world::PhysicsWorld;
 use gizmo::prelude::*;
 use gizmo_nfs::parse_geometry;
-use nfsu2::assets::{env_color, load_tpk_beside};
+use nfsu2::assets::load_tpk_beside;
 use nfsu2::car::{build_car_visuals, WheelFit};
 use nfsu2::scene::{self, Textures};
 use nfsu2::geom::add_transform;
@@ -143,7 +143,10 @@ fn setup_scene(world: &mut World, renderer: &gizmo::renderer::Renderer) -> Drive
     let bytes = std::fs::read(&path).unwrap_or_else(|e| panic!("cannot read {path}: {e}"));
     let all = parse_geometry(&bytes).expect("parse GEOMETRY.BIN");
     let tpk = load_tpk_beside(&path); // TEXTURES.BIN next to the model, if present
-    let paint = env_color("NFS_COLOR", [0.10, 0.28, 0.72]); // override "r,g,b" in 0..1
+    // One read of GLOBALB.BUN answers all three: where the wheels go, how the car drives, and which
+    // colours it may be painted. Absent, everything below falls back to what it did before.
+    let gb = nfsu2::assets::load_globalb_beside(&path);
+    let paint = nfsu2::assets::paint_from_palette(&gb.palette, [0.10, 0.28, 0.72]);
     let cfg = nfsu2::parts::CarConfig::from_env();
     let car = build_car_visuals(&renderer.device, &all, tpk.as_ref(), paint, &cfg, |look| {
         Material::new(tex.clone())
@@ -200,7 +203,28 @@ fn setup_scene(world: &mut World, renderer: &gizmo::renderer::Renderer) -> Drive
     let chassis = world.spawn();
     add_transform(world, chassis, Transform::new(spawn));
 
-    let mut rb = RigidBody::new(1200.0, true);
+    // The car's own record, where there is one: mass, rpm limits, the gearbox, the final drive, the
+    // torque curve's peak and the drivetrain. Without it the engine's defaults stand, which is what
+    // every car in this game used to drive on.
+    let tune = gb.info.as_ref().zip(gb.handling.as_ref()).map(|(info, h)| {
+        nfsu2::car::tune::tune_from_record(
+            info,
+            h,
+            nfsu2::car::tune::GearboxLevel::default(),
+            half_wheelbase * 2.0,
+            half_track * 2.0,
+        )
+    });
+    if let Some(t) = &tune {
+        println!(
+            "handling: {:.0} kg · {} gears · final drive {:.3} · {:.0} N·m peak · {:?} · red line {:.0}",
+            t.mass_kg, t.gears, t.tuning.final_drive_ratio, t.tuning.max_engine_torque,
+            t.drivetrain, t.tuning.upshift_rpm,
+        );
+    }
+    // The record's own mass. 1200 kg was a stand-in for every car in the game.
+    let mass = tune.as_ref().map_or(1200.0, |t| t.mass_kg);
+    let mut rb = RigidBody::new(mass, true);
     rb.linear_damping = 0.1;
     rb.angular_damping = 1.8;
     rb.calculate_box_inertia(width, height, length);
@@ -225,10 +249,15 @@ fn setup_scene(world: &mut World, renderer: &gizmo::renderer::Renderer) -> Drive
             ..Default::default()
         });
     }
-    vehicle.tuning.wheelbase = half_wheelbase * 2.0;
-    vehicle.tuning.track_width = half_track * 2.0;
-    vehicle.tuning.max_engine_torque = 520.0;
-    vehicle.max_steering_angle = 0.44;
+    match &tune {
+        Some(t) => vehicle.tuning = t.tuning.clone(),
+        None => {
+            vehicle.tuning.wheelbase = half_wheelbase * 2.0;
+            vehicle.tuning.track_width = half_track * 2.0;
+            vehicle.tuning.max_engine_torque = 520.0;
+        }
+    }
+    vehicle.max_steering_angle = nfsu2::car::tune::steering_lock();
 
     let collider = Collider::offset_box(
         Vec3::new(0.0, height * 0.12, 0.0),

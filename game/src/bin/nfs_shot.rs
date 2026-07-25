@@ -10,7 +10,7 @@ use gizmo::prelude::*;
 use gizmo::renderer::Renderer;
 use gizmo::wgpu;
 use gizmo_nfs::parse_geometry;
-use nfsu2::assets::{env_color, load_cartypeinfo_beside, load_tpk_beside};
+use nfsu2::assets::{env_color, load_tpk_beside};
 use nfsu2::car::build_car_visuals;
 use nfsu2::scene::{self, Textures};
 
@@ -119,7 +119,8 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
         }
     }
     let tpk = load_tpk_beside(path);
-    let paint = env_color("NFS_COLOR", [0.10, 0.28, 0.72]);
+    let gb = nfsu2::assets::load_globalb_beside(path);
+    let paint = nfsu2::assets::paint_from_palette(&gb.palette, [0.10, 0.28, 0.72]);
     let cfg = nfsu2::parts::CarConfig::from_env();
     let car = build_car_visuals(&renderer.device, &all, tpk.as_ref(), paint, &cfg, |look| {
         two(Material::new(white.clone()).with_pbr(
@@ -133,7 +134,7 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
     let car_center = car.center;
     // Exact wheel mounts (asymmetric wheelbase, per-car track & ride height) from GLOBALB's
     // CarTypeInfo when the game bundle is reachable; else the symmetric fit_wheel corners.
-    let cti = load_cartypeinfo_beside(path);
+    let cti = gb.info.clone();
 
     let mut car = car;
     let mut tex = Textures {

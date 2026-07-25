@@ -11,6 +11,7 @@
 
 mod look;
 mod shader;
+pub mod tune;
 mod skin;
 mod wheel;
 

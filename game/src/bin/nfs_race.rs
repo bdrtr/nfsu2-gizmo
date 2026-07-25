@@ -16,7 +16,7 @@ use gizmo::physics::world::PhysicsWorld;
 use gizmo::prelude::*;
 use gizmo::renderer::gpu_types::Vertex;
 use gizmo_nfs::parse_geometry;
-use nfsu2::assets::{env_color, load_tpk_beside};
+use nfsu2::assets::load_tpk_beside;
 use nfsu2::car::{build_car_visuals, WheelFit};
 use nfsu2::scene::{self, Textures};
 use nfsu2::geom::add_transform;
@@ -234,7 +234,11 @@ fn setup_scene(world: &mut World, renderer: &gizmo::renderer::Renderer) -> RaceS
     let bytes = std::fs::read(&path).unwrap_or_else(|e| panic!("cannot read {path}: {e}"));
     let all = parse_geometry(&bytes).expect("parse GEOMETRY.BIN");
     let tpk = load_tpk_beside(&path); // TEXTURES.BIN next to the model, if present
-    let paint = env_color("NFS_COLOR", [0.10, 0.28, 0.72]); // override "r,g,b" in 0..1
+    // One read of GLOBALB.BUN: where the wheels go, how the car drives, and the 123 colours it may
+    // be painted. NFSU2 does not texture a body, it paints it, and this bundle is the only place
+    // those colours are written down.
+    let gb = nfsu2::assets::load_globalb_beside(&path);
+    let paint = nfsu2::assets::paint_from_palette(&gb.palette, [0.10, 0.28, 0.72]);
     let cfg = nfsu2::parts::CarConfig::from_env();
     let car = build_car_visuals(&renderer.device, &all, tpk.as_ref(), paint, &cfg, |look| {
         Material::new(tex.clone())

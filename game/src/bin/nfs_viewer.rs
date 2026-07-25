@@ -15,7 +15,7 @@
 use gizmo::prelude::*;
 use gizmo::simple::{SimpleAppExt, SimpleSceneState};
 use gizmo_nfs::parse_geometry;
-use nfsu2::assets::{env_color, load_tpk_beside};
+use nfsu2::assets::load_tpk_beside;
 use nfsu2::car::{build_car_visuals, PbrLook};
 use nfsu2::scene::{self, Textures};
 
@@ -28,7 +28,11 @@ fn main() {
     let bytes = std::fs::read(&path).unwrap_or_else(|e| panic!("cannot read {path}: {e}"));
     let all = parse_geometry(&bytes).expect("failed to parse GEOMETRY.BIN");
     let tpk = load_tpk_beside(&path); // TEXTURES.BIN next to the model, if present
-    let paint = env_color("NFS_COLOR", [0.10, 0.28, 0.72]); // override "r,g,b" in 0..1
+    // One read of GLOBALB.BUN: where the wheels go, how the car drives, and the 123 colours it may
+    // be painted. NFSU2 does not texture a body, it paints it, and this bundle is the only place
+    // those colours are written down.
+    let gb = nfsu2::assets::load_globalb_beside(&path);
+    let paint = nfsu2::assets::paint_from_palette(&gb.palette, [0.10, 0.28, 0.72]);
     let cfg = nfsu2::parts::CarConfig::from_env();
 
     App::<SimpleSceneState>::new("Gizmo — NFSU2 240SX Viewer", 1400, 820)
@@ -96,7 +100,7 @@ fn main() {
 
             // Four static wheels at the fitted corners (lower half tucked into the arch).
             if let Some((mesh, wmat)) = wheel {
-                for mount in scene::wheel_mounts(None, car.wheel_fit, car.center, car.height) {
+                for mount in scene::wheel_mounts(gb.info.as_ref(), car.wheel_fit, car.center, car.height) {
                     let t = Transform::new(mount).with_rotation(scene::wheel_mirror(mount));
                     scene::spawn_mesh(scene.world, mesh.clone(), wmat.clone(), t);
                 }
