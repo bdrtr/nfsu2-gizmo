@@ -58,7 +58,7 @@ pub fn show(app: &mut Strukt, ui: &mut egui::Ui) {
                 }
             }
             Tab::ThreeD => panels::viewport3d::show(app, ui),
-            Tab::Texture => soon(app, ui),
+            Tab::Texture => panels::texture::show(app, ui),
         }
     });
 
@@ -82,19 +82,11 @@ pub fn show(app: &mut Strukt, ui: &mut egui::Ui) {
 fn tabs(app: &mut Strukt, ui: &mut egui::Ui) {
     let t = app.lang.strings();
     ui.horizontal(|ui| {
-        for (tab, label, ready) in [
-            (Tab::ThreeD, t.tab_3d, true),
-            (Tab::Hex, t.tab_hex, true),
-            (Tab::Texture, t.tab_tex, false),
-        ] {
+        for (tab, label) in
+            [(Tab::ThreeD, t.tab_3d), (Tab::Hex, t.tab_hex), (Tab::Texture, t.tab_tex)]
+        {
             let on = app.tab == tab;
-            let colour = if on {
-                token::ACCENT
-            } else if ready {
-                theme::muted(65)
-            } else {
-                theme::muted(35)
-            };
+            let colour = if on { token::ACCENT } else { theme::muted(65) };
             let text = RichText::new(label).font(theme::font::heading(11.0)).color(colour);
             let resp = ui.add(egui::Button::new(text).frame(false));
             if on {
@@ -124,13 +116,6 @@ fn tabs(app: &mut Strukt, ui: &mut egui::Ui) {
     });
 }
 
-/// A tab that exists in the design but not yet in the app.
-fn soon(app: &Strukt, ui: &mut egui::Ui) {
-    ui.vertical_centered(|ui| {
-        ui.add_space(60.0);
-        ui.label(RichText::new(app.lang.strings().soon).color(theme::muted(45)));
-    });
-}
 
 fn panel_frame() -> egui::Frame {
     egui::Frame::new().fill(token::BG).inner_margin(egui::Margin::symmetric(6, 4))

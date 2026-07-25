@@ -42,7 +42,7 @@ fn main() -> eframe::Result {
             if let Some(tab) = tab {
                 app.tab = match tab.as_str() {
                     "3d" => app::Tab::ThreeD,
-                    "tex" => app::Tab::Texture,
+                    "tex" | "texture" | "doku" => app::Tab::Texture,
                     _ => app::Tab::Hex,
                 };
             }

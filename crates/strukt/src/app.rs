@@ -89,6 +89,10 @@ pub struct Strukt {
     pub preview: Option<crate::gpu::preview::Preview>,
     /// Where the preview camera is looking from.
     pub camera: crate::panels::viewport3d::Camera,
+    /// The texture the texture tab is showing.
+    pub texture_selection: Option<gizmo_nfs::AssetHash>,
+    /// Uploaded texture handles, keyed by hash and by thumbnail-or-full-image.
+    pub texture_cache: std::collections::HashMap<(u32, bool), egui::TextureHandle>,
     /// Set when the density or language changed and the style must be rebuilt.
     restyle: bool,
     /// `--shot <path>`: draw a few frames, save the window as a PNG, and exit. The tool renders
@@ -128,6 +132,8 @@ impl Strukt {
             render_state: None,
             preview: None,
             camera: crate::panels::viewport3d::Camera::default(),
+            texture_selection: None,
+            texture_cache: std::collections::HashMap::new(),
             restyle: false,
             shot: shot.map(|p| Shot { path: p.into(), warmup: 4, asked: false }),
         };
@@ -162,6 +168,8 @@ impl Strukt {
                 self.recents.truncate(6);
                 self.doc = Some(doc);
                 self.model = None;
+                self.texture_selection = None;
+                self.texture_cache.clear();
                 self.screen = Screen::Workspace;
             }
             Err(e) => self.error = Some(e),

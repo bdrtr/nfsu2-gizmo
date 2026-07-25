@@ -4,5 +4,6 @@
 pub mod hex;
 pub mod inspector;
 pub mod log;
+pub mod texture;
 pub mod tree;
 pub mod viewport3d;

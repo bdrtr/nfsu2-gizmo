@@ -48,19 +48,26 @@ Binaries: `nfs_viewer` (M1, in-engine car viewer), `nfs_drive` (M2, drivable car
 ### STRUKT (`crates/strukt`) — the asset inspector
 
 The adopted design (`claude.ai/design`, project `8ac61419-…`) as a native egui app: chunk tree ·
-hex · inspector · log · validation, over one open file. Depends only on `gizmo-nfs` + eframe —
-**not** on the engine, so it builds without the sibling checkout.
+hex · 3D · texture · inspector · log · validation, over one open file. Depends only on
+`gizmo-nfs` + eframe — **not** on the engine, so it builds without the sibling checkout.
 
 ```bash
 cargo run -p strukt -- "$NFSU2_ROOT/CARS/240SX/GEOMETRY.BIN"
 cargo run -p strukt -- "$NFSU2_ROOT/CARS/3000GT/GEOMETRY.BIN" --screen validation --shot out.png
 cargo run -p strukt -- "$NFSU2_ROOT/CARS/RX7/GEOMETRY.BIN" --tab 3d
+cargo run -p strukt -- "$NFSU2_ROOT/CARS/240SX/TEXTURES.BIN" --tab texture
 ```
 
 The 3D tab renders through eframe's own wgpu device into an offscreen target (egui's pass has no
 depth attachment, and a solid drawn without one shows its far side through its near side). It
 keeps the file's frame — Z-up, 1 unit = 1 m — and shows the selected solid, or the showroom car
 when the selection is not inside one.
+
+The texture tab is a contact sheet over the car's TPK: the open file when it is itself a
+`TEXTURES.BIN`, else the `TEXTURES.BIN` beside it, decoded on first use because `Tpk::parse`
+expands all 57–76 images to RGBA8 at once. Thumbnails are downscaled on the CPU and only the
+selected image is uploaded full-size (nearest-filtered, so a preview shows texels rather than a
+smear). Entries the parser could not decode are **counted out loud** next to the total.
 
 `--shot <png>` draws a few frames, writes the window and exits — this machine's compositor will
 not hand out a screen grab, so it is the only way to check the interface. `--screen <name>` opens
