@@ -11,25 +11,59 @@ use crate::error::NfsResult;
 use crate::reader::ByteReader;
 use crate::types::{AssetHash, NfsMeshPart};
 
-/// Parse one solid, or `None` when it carries no renderable mesh (a mount/dummy point) or uses
-/// a vertex layout this crate does not decode.
-pub(super) fn parse_solid(solid: &ChunkNode, root: &[u8]) -> NfsResult<Option<NfsMeshPart>> {
+/// Why a solid yielded no part. A skipped solid used to vanish without a word, which is how a
+/// car can quietly lose a panel: `CARS/3000GT` carries 579 solids and returns 578 parts, and
+/// nothing said so. Every `None` now names its reason.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum SkipReason {
+    /// No mesh header / vertex buffer / index buffer — a mount or dummy point, not a mesh.
+    NotAMesh,
+    /// The mesh header declares no triangles or no vertices.
+    EmptyMesh,
+    /// `vert_count * 36` overruns the vertex buffer: a packed layout this crate does not decode.
+    /// Skipping beats mis-reading it as stride 36 and emitting shredded geometry.
+    PackedVertexLayout {
+        /// Vertices the header declares.
+        vert_count: usize,
+        /// Bytes actually present in the buffer.
+        vbuf_len: usize,
+    },
+}
+
+/// A solid that produced no part, and why.
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub struct Skipped {
+    /// Offset of the solid's `0x80134010` header — the key a viewer selects it by.
+    pub offset: usize,
+    /// The solid's name, when its header carries one.
+    pub name: String,
+    pub reason: SkipReason,
+}
+
+/// Parse one solid, or say why it yields no part.
+pub(super) fn parse_solid(
+    solid: &ChunkNode,
+    root: &[u8],
+) -> NfsResult<Result<NfsMeshPart, SkipReason>> {
     let (Some(mesh), Some(vbuf), Some(ibuf)) = (
         solid.find(MESH_HEADER),
         solid.find(VERTEX_BUFFER),
         solid.find(INDEX_BUFFER),
     ) else {
-        return Ok(None); // not a renderable solid (e.g. a mount point)
+        return Ok(Err(SkipReason::NotAMesh));
     };
 
     let mesh_data = skip_leading_filler(mesh.data(root));
     let tri_count = mesh_field(mesh_data, MESH_TRI_COUNT_FIELD)? as usize;
     let vert_count = mesh_field(mesh_data, MESH_VERT_COUNT_FIELD)? as usize;
     if vert_count == 0 || tri_count == 0 {
-        return Ok(None);
+        return Ok(Err(SkipReason::EmptyMesh));
     }
-    if !vertex::standard_vertex_layout(vert_count, vbuf.data(root).len()) {
-        return Ok(None);
+    let vbuf_len = vbuf.data(root).len();
+    if !vertex::standard_vertex_layout(vert_count, vbuf_len) {
+        return Ok(Err(SkipReason::PackedVertexLayout { vert_count, vbuf_len }));
     }
 
     let (positions, normals, uvs) = vertex::parse_vertices(vbuf.data(root), vert_count)?;
@@ -58,7 +92,7 @@ pub(super) fn parse_solid(solid: &ChunkNode, root: &[u8]) -> NfsResult<Option<Nf
         .map(|m| material::material_ranges(m.data(root), &ordered, &shaders, indices.len()))
         .unwrap_or_default();
 
-    Ok(Some(NfsMeshPart {
+    Ok(Ok(NfsMeshPart {
         name: part,
         hash: AssetHash(0),
         positions,
@@ -84,7 +118,7 @@ pub(super) fn parse_solid(solid: &ChunkNode, root: &[u8]) -> NfsResult<Option<Nf
 /// `SENTRA_KIT00_BODY` (the Sentra then rendered with no body shell at all, a hole straight into the
 /// cabin) and the highest LOD of many other cars' bodies, doors and headlights. The same filler
 /// already prefixes the index buffer and the material-range table.
-fn skip_leading_filler(data: &[u8]) -> &[u8] {
+pub fn skip_leading_filler(data: &[u8]) -> &[u8] {
     let mut off = 0;
     while data.len() >= off + 4 && data[off..off + 4] == [FILLER_BYTE; 4] {
         off += 4;
@@ -92,8 +126,9 @@ fn skip_leading_filler(data: &[u8]) -> &[u8] {
     &data[off..]
 }
 
-/// Read u32 field `n` (0-based) from a mesh header, bounds-checked.
-fn mesh_field(data: &[u8], n: usize) -> NfsResult<u32> {
+/// Read u32 field `n` (0-based) from a chunk payload, bounds-checked. Public because every
+/// reader of a `0x00134900`-style counter block needs exactly this, filler already skipped.
+pub fn mesh_field(data: &[u8], n: usize) -> NfsResult<u32> {
     let mut r = ByteReader::at(data, n * 4)?;
     r.u32_le()
 }

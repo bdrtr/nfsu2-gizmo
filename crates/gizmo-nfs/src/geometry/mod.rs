@@ -26,7 +26,7 @@
 //! assembles one part, and [`vertex`], [`index`], [`material`] and [`name`] decode the buffers
 //! and tables it pulls together.
 
-mod format;
+pub mod format;
 mod index;
 mod material;
 mod name;
@@ -34,6 +34,9 @@ mod solid;
 mod vertex;
 
 pub use format::VERTEX_STRIDE;
+pub use name::{part_name, read_matrix};
+pub use solid::{mesh_field, skip_leading_filler, SkipReason, Skipped};
+pub use vertex::standard_vertex_layout;
 
 use crate::chunk::ChunkNode;
 use crate::error::NfsResult;
@@ -44,14 +47,34 @@ use crate::types::NfsMeshPart;
 /// Solids that carry no mesh (mount/dummy points) are skipped. Returns an error only on
 /// malformed data (index out of range, buffers too small for the declared counts).
 pub fn parse_geometry(bytes: &[u8]) -> NfsResult<Vec<NfsMeshPart>> {
+    Ok(parse_geometry_reporting(bytes)?.0)
+}
+
+/// Like [`parse_geometry`], but also returns every solid that yielded no part and why.
+///
+/// A silently dropped solid is a panel a car loses without anyone noticing — the reason it exists
+/// as a return value rather than a log line is that the caller (a viewer, a validator) is the one
+/// that can say whether it matters.
+pub fn parse_geometry_reporting(
+    bytes: &[u8],
+) -> NfsResult<(Vec<NfsMeshPart>, Vec<solid::Skipped>)> {
     let roots = ChunkNode::parse(bytes)?;
     let mut parts = Vec::new();
+    let mut skipped = Vec::new();
     for top in &roots {
         for node in top.find_all(format::SOLID) {
-            if let Some(part) = solid::parse_solid(node, bytes)? {
-                parts.push(part);
+            match solid::parse_solid(node, bytes)? {
+                Ok(part) => parts.push(part),
+                Err(reason) => skipped.push(solid::Skipped {
+                    offset: node.offset,
+                    name: node
+                        .find(format::SOLID_HEADER)
+                        .map(|h| name::part_name(h.data(bytes)))
+                        .unwrap_or_default(),
+                    reason,
+                }),
             }
         }
     }
-    Ok(parts)
+    Ok((parts, skipped))
 }

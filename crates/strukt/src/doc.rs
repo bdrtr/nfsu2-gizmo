@@ -7,7 +7,7 @@
 //! whatever went wrong is kept as a [`Note`] for the log panel.
 
 use gizmo_nfs::chunk::{ChunkKind, ChunkNode, WalkOptions};
-use gizmo_nfs::{NfsMeshPart, NfsResult};
+use gizmo_nfs::NfsMeshPart;
 use std::path::{Path, PathBuf};
 
 /// How serious a note is. Mirrors the design's log-filter buttons.
@@ -47,6 +47,9 @@ pub struct Note {
 pub struct Row {
     /// Absolute offset of the chunk header — the selection key.
     pub offset: usize,
+    /// The part name, for the solids that carry one. The design puts it right in the tree, and it
+    /// is the difference between browsing 610 identical "SolidObject" rows and finding a panel.
+    pub name: Option<String>,
     pub data_offset: usize,
     pub id: u32,
     pub size: u32,
@@ -68,10 +71,11 @@ pub struct Doc {
     pub roots: Vec<ChunkNode>,
     /// Every node, depth-first, in the order the tree draws them.
     pub rows: Vec<Row>,
-    /// The parts, when the file is a `GEOMETRY.BIN` that parses. Read by the log's summary today,
-    /// by the tree's part names next.
+    /// The parts, when the file is a `GEOMETRY.BIN` that parses.
     #[allow(dead_code)]
     pub parts: Vec<NfsMeshPart>,
+    /// Solids that yielded no part, by offset — the tree marks them and the log says why.
+    pub skipped: std::collections::HashMap<usize, gizmo_nfs::SkipReason>,
     /// Anything worth telling the user about the open.
     pub notes: Vec<Note>,
 }
@@ -125,12 +129,30 @@ impl Doc {
 
         let mut rows = Vec::new();
         for r in &roots {
-            flatten(r, 0, &mut rows);
+            flatten(r, &bytes, 0, &mut rows);
         }
 
         // The geometry pass is separate and allowed to fail: the tree above is still useful.
-        let parts = match parse_parts(&bytes) {
-            Ok(p) => p,
+        let mut skipped = std::collections::HashMap::new();
+        let parts = match gizmo_nfs::parse_geometry_reporting(&bytes) {
+            Ok((parts, dropped)) => {
+                // A solid that yields no part used to vanish without a word. Each one is now a log
+                // line naming the solid and the reason.
+                for s in dropped {
+                    notes.push(Note {
+                        level: Level::Warn,
+                        chunk: Some(s.offset),
+                        chunk_id: format!("{:#010x}", gizmo_nfs::geometry::format::SOLID),
+                        message: format!(
+                            "{} → parça yok: {}",
+                            if s.name.is_empty() { "(isimsiz)".to_string() } else { s.name.clone() },
+                            describe(s.reason)
+                        ),
+                    });
+                    skipped.insert(s.offset, s.reason);
+                }
+                parts
+            }
             Err(e) => {
                 notes.push(Note {
                     level: Level::Warn,
@@ -149,7 +171,7 @@ impl Doc {
             message: format!("{} chunk · {} parça", rows.len(), parts.len()),
         });
 
-        Ok(Self { path: path.to_path_buf(), bytes, codec, roots, rows, parts, notes })
+        Ok(Self { path: path.to_path_buf(), bytes, codec, roots, rows, parts, skipped, notes })
     }
 
     /// The node whose header sits at `offset`.
@@ -190,6 +212,28 @@ impl Doc {
         best
     }
 
+    /// The `0x80134010` solid a chunk belongs to, if any. A vertex buffer's stride can only be
+    /// read together with the vertex count from its sibling mesh header, so the inspector needs
+    /// the owning solid, not just the chunk.
+    #[must_use]
+    pub fn solid_of(&self, offset: usize) -> Option<&ChunkNode> {
+        fn walk<'a>(nodes: &'a [ChunkNode], offset: usize, solid: Option<&'a ChunkNode>) -> Option<&'a ChunkNode> {
+            for n in nodes {
+                let end = n.data_offset + n.header.size as usize;
+                if offset < n.offset || offset >= end {
+                    continue;
+                }
+                let here = if n.header.id == gizmo_nfs::geometry::format::SOLID { Some(n) } else { solid };
+                if n.offset == offset {
+                    return here;
+                }
+                return walk(&n.children, offset, here);
+            }
+            solid
+        }
+        walk(&self.roots, offset, None)
+    }
+
     /// The file's name, for the status bar and the window title.
     #[must_use]
     pub fn file_name(&self) -> String {
@@ -197,15 +241,30 @@ impl Doc {
     }
 }
 
-/// Parse geometry, mapping the crate's error into a string the log can show.
-fn parse_parts(bytes: &[u8]) -> NfsResult<Vec<NfsMeshPart>> {
-    gizmo_nfs::parse_geometry(bytes)
+/// Why a solid produced no part, in the interface's own words.
+fn describe(reason: gizmo_nfs::SkipReason) -> String {
+    match reason {
+        gizmo_nfs::SkipReason::NotAMesh => "mesh chunk'ı yok (bağlantı noktası)".into(),
+        gizmo_nfs::SkipReason::EmptyMesh => "sayaçlar sıfır".into(),
+        gizmo_nfs::SkipReason::PackedVertexLayout { vert_count, vbuf_len } => format!(
+            "paketli vertex düzeni: {vert_count} × {} > {vbuf_len} B",
+            gizmo_nfs::geometry::VERTEX_STRIDE
+        ),
+        _ => "bilinmeyen".into(),
+    }
 }
 
 /// Depth-first flatten, in draw order.
-fn flatten(node: &ChunkNode, depth: usize, out: &mut Vec<Row>) {
+fn flatten(node: &ChunkNode, root: &[u8], depth: usize, out: &mut Vec<Row>) {
     out.push(Row {
         offset: node.offset,
+        name: (node.header.id == gizmo_nfs::geometry::format::SOLID)
+            .then(|| {
+                node.find(gizmo_nfs::geometry::format::SOLID_HEADER)
+                    .map(|h| gizmo_nfs::geometry::part_name(h.data(root)))
+                    .filter(|n| !n.is_empty())
+            })
+            .flatten(),
         data_offset: node.data_offset,
         id: node.header.id,
         size: node.header.size,
@@ -214,7 +273,7 @@ fn flatten(node: &ChunkNode, depth: usize, out: &mut Vec<Row>) {
         has_children: !node.children.is_empty(),
     });
     for c in &node.children {
-        flatten(c, depth + 1, out);
+        flatten(c, root, depth + 1, out);
     }
 }
 

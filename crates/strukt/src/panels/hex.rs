@@ -23,17 +23,24 @@ enum Class {
     Region,
     /// Inside the selected chunk's own 8-byte header.
     Header,
+    /// A field the inspector named: a counter, a name, a matrix, the alignment filler.
+    Key(gizmo_nfs::inspect::SpanRole),
 }
 
 /// The byte ranges the view highlights, derived from the selection once per frame.
 struct Highlights {
     region: std::ops::Range<usize>,
     header: std::ops::Range<usize>,
+    /// The inspector's own field offsets. These are the same numbers the inspector shows, so a row
+    /// in the pane and a run of bytes in the grid are literally the same fact.
+    key: Vec<gizmo_nfs::inspect::KeySpan>,
 }
 
 impl Highlights {
     fn class_of(&self, byte: usize) -> Class {
-        if self.header.contains(&byte) {
+        if let Some(span) = self.key.iter().find(|s| byte >= s.start && byte < s.start + s.len) {
+            Class::Key(span.role)
+        } else if self.header.contains(&byte) {
             Class::Header
         } else if self.region.contains(&byte) {
             Class::Region
@@ -54,6 +61,7 @@ pub fn show(app: &Strukt, ui: &mut egui::Ui) -> Option<usize> {
     let highlights = selected.map(|n| Highlights {
         region: n.offset..n.data_offset + n.header.size as usize,
         header: n.offset..n.data_offset,
+        key: app.selected_model().map(|m| m.key_spans.clone()).unwrap_or_default(),
     });
 
     let row_h = (app.density.body_size() + 4.0).round();
@@ -116,8 +124,8 @@ pub fn show(app: &Strukt, ui: &mut egui::Ui) -> Option<usize> {
                 }
                 // A zero byte is dimmed: in a multi-megabyte file the padding is most of what you
                 // scroll past, and dimming it is what makes the real data findable.
-                let colour = if class == Class::Header {
-                    token::NEUTRAL_100 // on the strong wash, light type
+                let colour = if light_type(class) {
+                    token::NEUTRAL_100
                 } else if *b == 0 {
                     theme::muted(28)
                 } else {
@@ -154,15 +162,27 @@ pub fn show(app: &Strukt, ui: &mut egui::Ui) -> Option<usize> {
     clicked
 }
 
-/// The wash behind a highlighted byte — the design's own two swatches: `accent-200` marks the
-/// chunk's region, `accent-500` the bytes that carry its counters. `accent-100` reads as white
-/// against the page and made the region invisible.
+/// The wash behind a highlighted byte — the design's own swatches: `accent-200` marks the chunk's
+/// region, `accent-500` the bytes that carry its counters. (`accent-100` reads as white against the
+/// page, which is what made the region invisible before.)
 fn wash(class: Class) -> Color32 {
+    use gizmo_nfs::inspect::SpanRole;
     match class {
         Class::Outside => Color32::TRANSPARENT,
         Class::Region => token::ACCENT_200,
-        Class::Header => token::ACCENT_500,
+        Class::Header => token::ACCENT_300,
+        Class::Key(SpanRole::Counter) => token::ACCENT_500,
+        Class::Key(SpanRole::Name) => token::ACCENT_2,
+        Class::Key(SpanRole::Matrix) => token::ACCENT_400,
+        // Filler is inert by definition: showing it as dead grey is itself the information.
+        Class::Key(_) => token::NEUTRAL_300,
     }
+}
+
+/// Whether type on this wash needs to be light.
+fn light_type(class: Class) -> bool {
+    use gizmo_nfs::inspect::SpanRole;
+    matches!(class, Class::Key(SpanRole::Counter | SpanRole::Name))
 }
 
 /// What the centre shows before a file is open.
@@ -182,10 +202,25 @@ mod tests {
     fn header_wins_over_region_where_they_overlap() {
         // The header is the first 8 bytes of the chunk's own extent, so a byte can be in both;
         // the stronger layer must win or the header stops being visible.
-        let h = Highlights { region: 0x100..0x200, header: 0x100..0x108 };
+        let h = Highlights { region: 0x100..0x200, header: 0x100..0x108, key: Vec::new() };
         assert_eq!(h.class_of(0x100), Class::Header);
         assert_eq!(h.class_of(0x108), Class::Region);
         assert_eq!(h.class_of(0x200), Class::Outside);
+    }
+
+    #[test]
+    fn a_named_field_outranks_the_region_and_the_header() {
+        // The counter bytes are inside the chunk's region and may sit inside its header too; the
+        // whole point of the layer is that it wins, so the inspector's row and the highlighted
+        // bytes are visibly the same fact.
+        use gizmo_nfs::inspect::{KeySpan, SpanRole};
+        let h = Highlights {
+            region: 0x100..0x200,
+            header: 0x100..0x108,
+            key: vec![KeySpan::new(0x140, 4, SpanRole::Counter)],
+        };
+        assert_eq!(h.class_of(0x140), Class::Key(SpanRole::Counter));
+        assert_eq!(h.class_of(0x144), Class::Region);
     }
 
     #[test]

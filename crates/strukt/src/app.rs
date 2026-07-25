@@ -80,6 +80,8 @@ pub struct Strukt {
     pub recents: Vec<std::path::PathBuf>,
     /// The welcome screen's path field.
     pub path_input: String,
+    /// The selected chunk's parsed model, keyed by its offset so it is rebuilt only on a change.
+    model: Option<(usize, gizmo_nfs::inspect::ChunkModel)>,
     /// Set when the density or language changed and the style must be rebuilt.
     restyle: bool,
     /// `--shot <path>`: draw a few frames, save the window as a PNG, and exit. The tool renders
@@ -115,6 +117,7 @@ impl Strukt {
             error: None,
             recents: Vec::new(),
             path_input: String::new(),
+            model: None,
             restyle: false,
             shot: shot.map(|p| Shot { path: p.into(), warmup: 4, asked: false }),
         };
@@ -136,6 +139,7 @@ impl Strukt {
                 self.recents.insert(0, path.to_path_buf());
                 self.recents.truncate(6);
                 self.doc = Some(doc);
+                self.model = None;
                 self.screen = Screen::Workspace;
             }
             Err(e) => self.error = Some(e),
@@ -152,6 +156,36 @@ impl Strukt {
     pub fn select(&mut self, offset: usize) {
         self.selection = Some(offset);
         self.scroll_hex_to = Some(offset);
+        self.model = None; // rebuilt on the next frame, for the new selection
+    }
+
+    /// The selected chunk.
+    #[must_use]
+    pub fn selected_node(&self) -> Option<&gizmo_nfs::chunk::ChunkNode> {
+        self.doc.as_ref()?.node_at(self.selection?)
+    }
+
+    /// The parsed model of the selected chunk, built once per selection rather than per frame.
+    #[must_use]
+    pub fn selected_model(&self) -> Option<&gizmo_nfs::inspect::ChunkModel> {
+        self.model.as_ref().filter(|(off, _)| Some(*off) == self.selection).map(|(_, m)| m)
+    }
+
+    /// Build the model for the current selection if it is missing. Called once a frame, before
+    /// the panels draw, so the inspector and the hex view read the same one.
+    pub fn refresh_model(&mut self) {
+        let Some(offset) = self.selection else {
+            self.model = None;
+            return;
+        };
+        if self.model.as_ref().is_some_and(|(o, _)| *o == offset) {
+            return;
+        }
+        self.model = self.doc.as_ref().and_then(|doc| {
+            let node = doc.node_at(offset)?;
+            let solid = doc.solid_of(offset);
+            Some((offset, gizmo_nfs::inspect::model(node, solid, &doc.bytes)))
+        });
     }
 }
 
@@ -161,6 +195,7 @@ impl eframe::App for Strukt {
             theme::apply(ui.ctx(), self.density);
             self.restyle = false;
         }
+        self.refresh_model();
         self.top_bar(ui);
         self.status_bar(ui);
         match self.screen {

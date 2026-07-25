@@ -28,6 +28,7 @@ macro_rules! outln {
 
 mod dump;
 mod export;
+mod fields;
 mod globalb;
 mod info;
 mod obj;
@@ -89,6 +90,17 @@ enum Command {
         selected: bool,
         #[command(flatten)]
         config: ConfigArgs,
+    },
+    /// Read a chunk back as labelled fields — the same model STRUKT's inspector shows.
+    Fields {
+        /// A car directory or its `GEOMETRY.BIN`.
+        car: PathBuf,
+        /// A single chunk, by the hex offset of its header (`--at 0x1b8`).
+        #[arg(long, value_name = "OFFSET")]
+        at: Option<String>,
+        /// Otherwise: every chunk whose type name or id contains this.
+        #[arg(long, value_name = "SUBSTR")]
+        filter: Option<String>,
     },
     /// Print the chunk tree of any asset file (or list a BIGF/VIV archive).
     Dump {
@@ -154,6 +166,7 @@ fn main() -> ExitCode {
     let result = match cli.command {
         Command::Info { car, config } => info::run(&car, config.into()),
         Command::Parts { car, selected, config } => parts::run(&car, selected, config.into()),
+        Command::Fields { car, at, filter } => fields::run(&car, at, filter.as_deref()),
         Command::Dump { file, max_depth, hex } => dump::run(&file, max_depth, hex),
         Command::Textures { car, filter } => textures::run(&car, filter.as_deref()),
         Command::Globalb { path, filter } => globalb::run(&path, filter.as_deref()),

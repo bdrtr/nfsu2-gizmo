@@ -47,7 +47,7 @@ pub fn show(app: &Strukt, ui: &mut egui::Ui) -> Option<usize> {
                 ui.painter().rect_filled(rect, 0.0, token::SURFACE);
             }
 
-            let p = ui.painter();
+            let p = ui.painter().clone();
             let indent = 6.0 + row.depth as f32 * 11.0;
             let mid = rect.center().y;
             let mono = theme::font::mono(app.density.body_size() - 1.5);
@@ -62,31 +62,74 @@ pub fn show(app: &Strukt, ui: &mut egui::Ui) -> Option<usize> {
                     theme::muted(55),
                 );
             }
-            // Status dot — the design's at-a-glance "is there something wrong here".
+            // Status dot — the design's at-a-glance "is there something wrong here". A solid that
+            // yielded no part is the one thing the tree can already flag.
             p.circle_filled(
                 egui::pos2(rect.left() + indent + 4.0, mid),
                 2.5,
-                dot_colour(row.container),
+                if doc.skipped.contains_key(&row.offset) { token::ACCENT } else { dot_colour(row.container) },
             );
             let label = crate::panels::inspector::chunk_label(row.id);
-            p.text(
-                egui::pos2(rect.left() + indent + 13.0, mid),
+            let x = rect.left() + indent + 13.0;
+            let w = p.text(
+                egui::pos2(x, mid),
                 egui::Align2::LEFT_CENTER,
                 label,
                 mono.clone(),
                 if selected { token::ACCENT_800 } else { token::TEXT },
-            );
+            )
+            .width();
             // The id, right-aligned, always monospace — this is what you match against a spec.
-            p.text(
-                egui::pos2(rect.right() - 6.0, mid),
-                egui::Align2::RIGHT_CENTER,
-                format!("{:#010x}", row.id),
-                theme::font::mono(app.density.body_size() - 2.5),
-                theme::muted(42),
-            );
+            let id_font = theme::font::mono(app.density.body_size() - 2.5);
+            let id_w = p
+                .text(
+                    egui::pos2(rect.right() - 6.0, mid),
+                    egui::Align2::RIGHT_CENTER,
+                    format!("{:#010x}", row.id),
+                    id_font.clone(),
+                    theme::muted(42),
+                )
+                .width();
+            // The part's own name, which is what makes 610 solids navigable. It is elided rather
+            // than allowed to run under the id column — two strings on top of each other read as
+            // neither.
+            if let Some(name) = &row.name {
+                let name_font = theme::font::mono(app.density.body_size() - 2.0);
+                let start = x + w + 8.0;
+                let room = rect.right() - 12.0 - id_w - start;
+                if room > 20.0 {
+                    p.text(
+                        egui::pos2(start, mid),
+                        egui::Align2::LEFT_CENTER,
+                        elide(ui, name, &name_font, room),
+                        name_font,
+                        theme::muted(58),
+                    );
+                }
+            }
         }
     });
     clicked
+}
+
+/// Shorten `text` until it fits `room`, ending in an ellipsis.
+fn elide(ui: &egui::Ui, text: &str, font: &egui::FontId, room: f32) -> String {
+    let width = |s: &str| {
+        ui.painter().layout_no_wrap(s.to_owned(), font.clone(), token::TEXT).size().x
+    };
+    if width(text) <= room {
+        return text.to_owned();
+    }
+    // Names are ASCII in this format, but char boundaries are respected anyway.
+    let mut cut: Vec<char> = text.chars().collect();
+    while !cut.is_empty() {
+        cut.pop();
+        let candidate: String = cut.iter().collect::<String>() + "…";
+        if width(&candidate) <= room {
+            return candidate;
+        }
+    }
+    String::new()
 }
 
 /// Containers and leaves read differently at a glance; a validation status will colour this dot

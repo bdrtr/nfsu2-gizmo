@@ -8,7 +8,7 @@ use crate::reader::ByteReader;
 /// layout. A few solids use a smaller packed stride — in practice only hidden engine meshes such
 /// as `3000GT_KIT00_ENGINE_B` — and those are skipped rather than mis-decoded (or aborting the
 /// parse of the whole car).
-pub(super) fn standard_vertex_layout(vert_count: usize, vbuf_len: usize) -> bool {
+pub fn standard_vertex_layout(vert_count: usize, vbuf_len: usize) -> bool {
     vert_count.saturating_mul(VERTEX_STRIDE) <= vbuf_len
 }
 

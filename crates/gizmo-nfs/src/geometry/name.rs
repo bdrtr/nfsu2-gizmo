@@ -7,7 +7,7 @@ use crate::types::{LodLevel, Mat4, PartRole};
 
 /// Read the 4x4 local matrix from a solid header (row-major, 16 f32 at [`MATRIX_OFFSET`]).
 /// Falls back to identity if the header is too short.
-pub(super) fn read_matrix(header: &[u8]) -> Mat4 {
+pub fn read_matrix(header: &[u8]) -> Mat4 {
     let mut m = crate::types::IDENTITY;
     if let Ok(mut r) = ByteReader::at(header, MATRIX_OFFSET) {
         for row in &mut m {
@@ -24,7 +24,7 @@ pub(super) fn read_matrix(header: &[u8]) -> Mat4 {
 
 /// Extract the part name: the longest printable run in the header (names are ASCII with
 /// `_`, e.g. `240SX_BASE_A`, `240SX_KIT01_HOOD_A`).
-pub(super) fn part_name(header: &[u8]) -> String {
+pub fn part_name(header: &[u8]) -> String {
     let mut best = "";
     let mut start = 0usize;
     let mut i = 0usize;

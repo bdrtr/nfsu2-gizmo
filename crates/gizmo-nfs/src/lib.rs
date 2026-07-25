@@ -17,6 +17,9 @@
 //!   baked into the vertices), which every consumer must decide the same way.
 //! * [`parts`] — which parts make up a given configuration of a car, and which material group
 //!   each belongs to. Pure name/triangle-count policy, shared by the engine layer and the CLI.
+//! * [`inspect`] — a chunk's bytes read back as labelled fields, for anything that shows a file's
+//!   structure. It reads through the same offset map the parser does, so a viewer cannot drift
+//!   from the reader about what a file says.
 //!
 //! [`texture`] parses `TPK` (`TEXTURES.BIN`) into an RGBA8 pixel pool + per-texture
 //! descriptors; [`geometry`] parses `GEOMETRY.BIN`. World modules come later. Several of
@@ -38,6 +41,7 @@ pub mod error;
 pub mod fourcc;
 pub mod geometry;
 pub mod globalb;
+pub mod inspect;
 pub mod parts;
 pub mod placement;
 pub mod reader;
@@ -46,7 +50,7 @@ pub mod types;
 pub mod viv;
 
 pub use error::{NfsError, NfsResult};
-pub use geometry::parse_geometry;
+pub use geometry::{parse_geometry, parse_geometry_reporting, SkipReason, Skipped};
 pub use globalb::{parse_cartypeinfos, CarTypeInfo, WheelSpec};
 pub use parts::{group_of, select_car, select_stock_car, CarConfig, Grp};
 pub use texture::{Tpk, TpkEntry};
