@@ -159,6 +159,8 @@ fn setup_scene(world: &mut World, renderer: &gizmo::renderer::Renderer) -> Drive
     });
     let (width, height, length) = (car.width, car.height, car.length);
     let WheelFit { half_wheelbase, half_track, .. } = car.wheel_fit;
+    // Kept before `car` is borrowed apart below; both feed `scene::wheel_mounts`.
+    let (car_fit, car_center) = (car.wheel_fit, car.center);
     // The record states the radius; `fit_wheel`'s is a bbox guess with a clamp on it.
     let radius = scene::wheel_radius(gb.info.as_ref(), car.wheel_fit);
 
@@ -185,17 +187,24 @@ fn setup_scene(world: &mut World, renderer: &gizmo::renderer::Renderer) -> Drive
             .with_pbr(Vec4::new(tint[0], tint[1], tint[2], 1.0), rough, metal)
             .with_double_sided(true)
     });
-    // ── Wheels: the single wheel mesh instanced at four fitted corners ──
-    // Wheel centre near the bottom of the body so the lower half sticks out of the arch.
-    let wheel_y = -height * 0.5 + radius * 0.95;
+    // ── Wheels: the single wheel mesh instanced at the four corners **the record names** ──
+    //
+    // This used to build them from `fit_wheel`'s guess — one symmetric pair derived from the
+    // modelled wheel's bounding box, with `.max()` floors under it — while `GLOBALB` states all
+    // four mounts outright. Measured on a 240SX, the guess put the fronts 0.14 m out and the rears
+    // **1.56 m** out: 0.07 too narrow, 0.10 too low, 0.12 too far back, and the rear pair on the
+    // wrong sides, because the record's order is front-left, front-right, **rear-right**, rear-left
+    // and the sign table read `(-1,-1), (1,-1), (-1,1), (1,1)`. `nfs_viewer` and `nfs_shot` have
+    // used `scene::wheel_mounts` all along; the two binaries anybody actually drives did not,
+    // which is why nobody saw it.
+    let mounts = scene::wheel_mounts(gb.info.as_ref(), car_fit, car_center, height);
     let mut wheels = Vec::new();
     if let Some((mesh, wmat)) = wheel {
-        // The driven wheels sit at the same four corners the vehicle controller attaches to,
-        // each mirrored so its rim faces outward.
-        for (sx, sz, front) in [(-1.0, -1.0, true), (1.0, -1.0, true), (-1.0, 1.0, false), (1.0, 1.0, false)] {
-            let local = Vec3::new(sx * half_track, wheel_y, sz * half_wheelbase);
+        for (i, &local) in mounts.iter().enumerate() {
             let id = scene::spawn_mesh(world, mesh.clone(), wmat.clone(), Transform::new(Vec3::ZERO));
-            wheels.push(WheelVis { id, local, front });
+            // The first two are the front pair — the record's own order, and the one the vehicle
+            // controller's axles are built in below.
+            wheels.push(WheelVis { id, local, front: i < 2 });
         }
     }
     world.insert_resource(asset_manager);
@@ -206,13 +215,13 @@ fn setup_scene(world: &mut World, renderer: &gizmo::renderer::Renderer) -> Drive
     add_transform(world, chassis, Transform::new(spawn));
 
     // The car's own record, where there is one: mass, rpm limits, the gearbox, the final drive, the
-    // torque curve's peak and the drivetrain. Without it the engine's defaults stand, which is what
-    // every car in this game used to drive on.
+    // whole nine-point torque curve on its own rpm axis, and the drivetrain. Without it the
+    // engine's defaults stand, which is what every car in this game used to drive on.
     let tune = gb.info.as_ref().zip(gb.handling.as_ref()).map(|(info, h)| {
         nfsu2::car::tune::tune_from_record(
             info,
             h,
-            nfsu2::car::tune::GearboxLevel::default(),
+            nfsu2::car::tune::Upgrades::from_env(),
             half_wheelbase * 2.0,
             half_track * 2.0,
         )
@@ -223,6 +232,15 @@ fn setup_scene(world: &mut World, renderer: &gizmo::renderer::Renderer) -> Drive
             t.mass_kg, t.gears, t.tuning.final_drive_ratio, t.tuning.max_engine_torque,
             t.drivetrain, t.tuning.upshift_rpm,
         );
+        // The curve, not just its peak — printed because the peak is what this line used to say
+        // and the shape is the thing that changed. Nine points is short enough to read.
+        let curve = &t.tuning.torque_curve;
+        if !curve.is_empty() {
+            let rpm: Vec<String> = curve.iter().map(|(r, _)| format!("{r:>6.0}")).collect();
+            let nm: Vec<String> = curve.iter().map(|(_, n)| format!("{n:>6.0}")).collect();
+            println!("  curve {}   rpm", rpm.join(""));
+            println!("        {}   Nm", nm.join(""));
+        }
     }
     // The record's own mass. 1200 kg was a stand-in for every car in the game.
     let mass = tune.as_ref().map_or(1200.0, |t| t.mass_kg);
@@ -235,15 +253,19 @@ fn setup_scene(world: &mut World, renderer: &gizmo::renderer::Renderer) -> Drive
     rb.lock_rotation_y = false;
     rb.lock_rotation_z = false;
 
-    let attach_y = -height * 0.5 + radius;
     let mut vehicle = gizmo::physics::vehicle::VehicleController::new();
-    for (sx, sz, front, left) in [(-1.0, -1.0, true, true), (1.0, -1.0, true, false), (-1.0, 1.0, false, true), (1.0, 1.0, false, false)] {
+    // The same four mounts the visuals use, so the wheel the eye sees is the wheel the suspension
+    // raycasts from. The suspension hangs its wheel *below* the attachment, so the bolt goes one
+    // rest-length above the mount and the wheel settles where the record puts it.
+    let rest = (radius * 0.25).max(0.05);
+    for (i, &mount) in mounts.iter().enumerate() {
+        let (front, left) = (i < 2, mount.x < 0.0);
         vehicle.add_wheel(gizmo::physics::vehicle::Wheel {
-            attachment_local_pos: Vec3::new(sx * half_track, attach_y, sz * half_wheelbase),
+            attachment_local_pos: mount + Vec3::new(0.0, rest, 0.0),
             radius,
             axle_type: if front { gizmo::physics::vehicle::Axle::Front } else { gizmo::physics::vehicle::Axle::Rear },
             is_left: left,
-            suspension_rest_length: (radius * 0.25).max(0.05),
+            suspension_rest_length: rest,
             suspension_max_travel: (radius * 0.45).max(0.12),
             suspension_stiffness: 45000.0,
             suspension_damping: 3500.0,

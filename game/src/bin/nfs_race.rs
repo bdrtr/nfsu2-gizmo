@@ -57,6 +57,8 @@ struct RaceState {
     lap: u32,
     cur_time: f32,
     best_time: f32,
+    /// `NFS_DIAG` throttle: the last whole second a line was printed for.
+    diag_tick: i32,
 }
 
 /// A closed oval track ribbon (visual geometry + centerline for checkpoints).
@@ -152,11 +154,10 @@ fn setup_scene(world: &mut World, renderer: &gizmo::renderer::Renderer) -> RaceS
             .with_double_sided(true)
     };
 
-    // ── Ground: a big flat drivable plane (grass-green, asphalt grip) ──
-    // The car drives reliably on a plane collider (proven in nfs_drive). The track ribbon
-    // below is a VISUAL overlay marking the racing line; the checkpoints define the lap.
-    // (`Collider::trimesh` is added to the engine and unit-tested, but a rigid chassis box
-    // vs. a trimesh currently mis-collides, so we keep the drivable surface a plane.)
+    // ── Ground: the grass around the circuit ──
+    // A plane, and now only the *surroundings*: the track itself is a real triangle-mesh collider
+    // below. It stays because a car that leaves the ribbon should land on grass rather than fall
+    // out of the world.
     let ground = world.spawn();
     add_transform(world, ground, Transform::new(Vec3::ZERO));
     world.add_component(ground, AssetManager::create_plane(&renderer.device, 600.0));
@@ -174,16 +175,43 @@ fn setup_scene(world: &mut World, renderer: &gizmo::renderer::Renderer) -> RaceS
         Collider::plane(Vec3::Y, 0.0),
     );
 
-    // ── Track ribbon: a flat oval visual (built with the trimesh geometry helper) ──
-    let track = build_track(80.0, 55.0, 15.0, 0.0, 200);
+    // ── Track ribbon: a banked oval that is actually **driven on** ──
+    //
+    // This used to be a flat visual overlay marking the racing line, with the note that a rigid
+    // chassis box against a trimesh mis-collided. It did, and the reason was not the box: a
+    // `TriMesh` pair fell through to GJK+EPA, which is a *convex* algorithm, so the engine was
+    // colliding against the mesh's convex hull — and the hull of a closed oval is a filled disc.
+    // A car inside the ring was inside the hull. `NarrowPhase::shape_trimesh` now dispatches
+    // per-triangle, so the ribbon can carry the surface, and `hill` can stop being 0.
+    let hill = std::env::var("NFS_HILL").ok().and_then(|s| s.parse().ok()).unwrap_or(3.0_f32);
+    let track = build_track(80.0, 55.0, 15.0, hill, 200);
+    let track_at = Vec3::new(0.0, 0.02, 0.0);
     let track_ent = world.spawn();
-    add_transform(world, track_ent, Transform::new(Vec3::new(0.0, 0.02, 0.0)));
+    add_transform(world, track_ent, Transform::new(track_at));
     world.add_component(
         track_ent,
         Mesh::from_vertices(&renderer.device, &track.visual, "nfs_track"),
     );
     world.add_component(track_ent, mat([0.12, 0.12, 0.14], 0.9, 0.0).with_double_sided(true));
     world.add_component(track_ent, MeshRenderer::new());
+    // The same triangles the eye sees, handed to physics. `build_track` emits an unindexed
+    // triangle soup, so the index list is just its own order — no welding, because two ribbon
+    // segments meeting at a shared edge are still two triangles to a per-triangle narrowphase.
+    let tri_verts: Vec<Vec3> =
+        track.visual.iter().map(|v| Vec3::new(v.position[0], v.position[1], v.position[2])).collect();
+    let tri_indices: Vec<u32> = (0..tri_verts.len() as u32).collect();
+    let track_collider = Collider::trimesh(tri_verts, tri_indices);
+    world.add_component(track_ent, RigidBody::new_static());
+    world.add_component(track_ent, Velocity::default());
+    world.add_component(track_ent, track_collider.clone());
+    world.add_component(track_ent, gizmo::physics::components::PhysicsMaterial::ASPHALT);
+    phys.add_body(
+        gizmo::physics::BodyHandle::from_id(track_ent.id()),
+        RigidBody::new_static(),
+        Transform::new(track_at),
+        Velocity::default(),
+        track_collider,
+    );
 
     // Checkpoints along the centerline.
     let n = track.centerline.len();
@@ -251,6 +279,8 @@ fn setup_scene(world: &mut World, renderer: &gizmo::renderer::Renderer) -> RaceS
     });
     let (width, height, length) = (car.width, car.height, car.length);
     let WheelFit { half_wheelbase, half_track, .. } = car.wheel_fit;
+    // Kept before `car` is borrowed apart below; both feed `scene::wheel_mounts`.
+    let (car_fit, car_center) = (car.wheel_fit, car.center);
     // The record states the radius; `fit_wheel`'s is a bbox guess with a clamp on it.
     let radius = scene::wheel_radius(gb.info.as_ref(), car.wheel_fit);
 
@@ -277,16 +307,24 @@ fn setup_scene(world: &mut World, renderer: &gizmo::renderer::Renderer) -> RaceS
             .with_pbr(Vec4::new(tint[0], tint[1], tint[2], 1.0), rough, metal)
             .with_double_sided(true)
     });
-    // Wheels: the single wheel mesh instanced at four fitted corners.
-    let wheel_y = -height * 0.5 + radius * 0.95;
+    // Wheels: the single wheel mesh instanced at the four corners **the record names**.
+    //
+    // This used to build them from `fit_wheel`'s guess — one symmetric pair derived from the
+    // modelled wheel's bounding box, with `.max()` floors under it — while `GLOBALB` states all
+    // four mounts outright. Measured on a 240SX, the guess put the fronts 0.14 m out and the rears
+    // **1.56 m** out: 0.07 too narrow, 0.10 too low, 0.12 too far back, and the rear pair on the
+    // wrong sides, because the record's order is front-left, front-right, **rear-right**, rear-left
+    // and the sign table read `(-1,-1), (1,-1), (-1,1), (1,1)`. `nfs_viewer` and `nfs_shot` have
+    // used `scene::wheel_mounts` all along; the two binaries anybody actually drives did not,
+    // which is why nobody saw it.
+    let mounts = scene::wheel_mounts(gb.info.as_ref(), car_fit, car_center, height);
     let mut wheels = Vec::new();
     if let Some((mesh, wmat)) = wheel {
-        // The driven wheels sit at the same four corners the vehicle controller attaches to,
-        // each mirrored so its rim faces outward.
-        for (sx, sz, front) in [(-1.0, -1.0, true), (1.0, -1.0, true), (-1.0, 1.0, false), (1.0, 1.0, false)] {
-            let local = Vec3::new(sx * half_track, wheel_y, sz * half_wheelbase);
+        for (i, &local) in mounts.iter().enumerate() {
             let id = scene::spawn_mesh(world, mesh.clone(), wmat.clone(), Transform::new(Vec3::ZERO));
-            wheels.push(WheelVis { id, local, front });
+            // The first two are the front pair — the record's own order, and the one the vehicle
+            // controller's axles are built in below.
+            wheels.push(WheelVis { id, local, front: i < 2 });
         }
     }
     world.insert_resource(asset_manager);
@@ -312,15 +350,19 @@ fn setup_scene(world: &mut World, renderer: &gizmo::renderer::Renderer) -> RaceS
     rb.lock_rotation_y = false;
     rb.lock_rotation_z = false;
 
-    let attach_y = -height * 0.5 + radius;
     let mut vehicle = gizmo::physics::vehicle::VehicleController::new();
-    for (sx, sz, front, left) in [(-1.0, -1.0, true, true), (1.0, -1.0, true, false), (-1.0, 1.0, false, true), (1.0, 1.0, false, false)] {
+    // The same four mounts the visuals use, so the wheel the eye sees is the wheel the suspension
+    // raycasts from. The suspension hangs its wheel *below* the attachment, so the bolt goes one
+    // rest-length above the mount and the wheel settles where the record puts it.
+    let rest = (radius * 0.25).max(0.05);
+    for (i, &mount) in mounts.iter().enumerate() {
+        let (front, left) = (i < 2, mount.x < 0.0);
         vehicle.add_wheel(gizmo::physics::vehicle::Wheel {
-            attachment_local_pos: Vec3::new(sx * half_track, attach_y, sz * half_wheelbase),
+            attachment_local_pos: mount + Vec3::new(0.0, rest, 0.0),
             radius,
             axle_type: if front { gizmo::physics::vehicle::Axle::Front } else { gizmo::physics::vehicle::Axle::Rear },
             is_left: left,
-            suspension_rest_length: (radius * 0.25).max(0.05),
+            suspension_rest_length: rest,
             suspension_max_travel: (radius * 0.45).max(0.12),
             suspension_stiffness: 45000.0,
             suspension_damping: 3500.0,
@@ -328,10 +370,38 @@ fn setup_scene(world: &mut World, renderer: &gizmo::renderer::Renderer) -> RaceS
             ..Default::default()
         });
     }
+    // The car's own record, the same way `nfs_drive` takes it: mass, rpm limits, the gearbox and
+    // the whole nine-point torque curve on its own rpm axis. This used to be `max_engine_torque =
+    // 560.0` — one invented number, the same for every car — while the file next door held nine
+    // measured ones. `NFS_ENGINE` / `NFS_GEARBOX` pick the upgrade level.
+    let tune = gb.info.as_ref().zip(gb.handling.as_ref()).map(|(info, h)| {
+        nfsu2::car::tune::tune_from_record(
+            info,
+            h,
+            nfsu2::car::tune::Upgrades::from_env(),
+            half_wheelbase * 2.0,
+            half_track * 2.0,
+        )
+    });
+    match &tune {
+        Some(t) => {
+            vehicle.tuning = t.tuning.clone();
+            println!(
+                "handling: {:.0} kg · {} gears · final drive {:.3} · {:.0} N·m peak · {:?}",
+                t.mass_kg, t.gears, t.tuning.final_drive_ratio, t.tuning.max_engine_torque,
+                t.drivetrain,
+            );
+        }
+        None => {
+            // No record reachable (a `GEOMETRY.BIN` copied out of an install). The invented
+            // number stands, and says so.
+            println!("handling: no record for this car — engine defaults, 560 N·m invented");
+            vehicle.tuning.max_engine_torque = 560.0;
+        }
+    }
     vehicle.tuning.wheelbase = half_wheelbase * 2.0;
     vehicle.tuning.track_width = half_track * 2.0;
-    vehicle.tuning.max_engine_torque = 560.0;
-    vehicle.max_steering_angle = 0.44;
+    vehicle.max_steering_angle = nfsu2::car::tune::steering_lock();
 
     let collider = Collider::offset_box(
         Vec3::new(0.0, height * 0.12, 0.0),
@@ -375,6 +445,7 @@ fn setup_scene(world: &mut World, renderer: &gizmo::renderer::Renderer) -> RaceS
         lap: 0,
         cur_time: 0.0,
         best_time: 0.0,
+        diag_tick: -1,
     }
 }
 
@@ -483,6 +554,27 @@ fn update(world: &mut World, state: &mut RaceState, dt: f32, input: &Input) {
             state.next_cp = 1;
         } else {
             state.next_cp = (state.next_cp + 1) % N_CHECKPOINTS;
+        }
+    }
+
+    // `NFS_DIAG=1`: once a second, what the physics actually thinks is happening. Three vague
+    // symptoms ("doesn't move", "W goes backwards", "a square") become numbers.
+    if std::env::var("NFS_DIAG").is_ok() {
+        state.t += 0.0; // (t is advanced elsewhere; this block only reads)
+        let tick = (state.cur_time * 1.0) as i32;
+        if tick != state.diag_tick {
+            state.diag_tick = tick;
+            let vs = world.borrow::<gizmo::physics::vehicle::VehicleController>();
+            if let Some(v) = vs.get(state.chassis_id) {
+                let grounded: Vec<bool> = v.wheels.iter().map(|w| w.is_grounded).collect();
+                let susp: Vec<f32> = v.wheels.iter().map(|w| w.suspension_length).collect();
+                println!(
+                    "diag  pos ({:+.2},{:+.2},{:+.2})  fwd_speed {:+.2} m/s  gear {}  rpm {:.0}  throttle {:.2}  grounded {:?}  susp {:?}",
+                    cpos.x, cpos.y, cpos.z, speed, v.current_gear, v.engine_rpm, v.throttle_input,
+                    grounded,
+                    susp.iter().map(|x| (x * 100.0).round() / 100.0).collect::<Vec<_>>(),
+                );
+            }
         }
     }
 
