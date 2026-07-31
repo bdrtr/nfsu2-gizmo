@@ -568,12 +568,18 @@ fn update(world: &mut World, state: &mut RaceState, dt: f32, input: &Input) {
             if let Some(v) = vs.get(state.chassis_id) {
                 let grounded: Vec<bool> = v.wheels.iter().map(|w| w.is_grounded).collect();
                 let susp: Vec<f32> = v.wheels.iter().map(|w| w.suspension_length).collect();
+                // The rigid body's *own* velocity, beside the controller's idea of speed. If the
+                // two disagree the bug is not in the car, it is in what is being integrated.
+                let vel = world.borrow::<Velocity>().get(state.chassis_id).map(|v| v.linear)
+                    .unwrap_or(Vec3::ZERO);
+                let drive: Vec<f32> = v.wheels.iter().map(|w| w.drive_torque).collect();
                 println!(
-                    "diag  pos ({:+.2},{:+.2},{:+.2})  fwd_speed {:+.2} m/s  gear {}  rpm {:.0}  throttle {:.2}  grounded {:?}  susp {:?}",
-                    cpos.x, cpos.y, cpos.z, speed, v.current_gear, v.engine_rpm, v.throttle_input,
-                    grounded,
-                    susp.iter().map(|x| (x * 100.0).round() / 100.0).collect::<Vec<_>>(),
+                    "diag  pos ({:+.2},{:+.2},{:+.2})  vel ({:+.2},{:+.2},{:+.2})  fwd_speed {:+.2}  gear {}  rpm {:.0}  throttle {:.2}  grounded {:?}  drive {:?}",
+                    cpos.x, cpos.y, cpos.z, vel.x, vel.y, vel.z, speed,
+                    v.current_gear, v.engine_rpm, v.throttle_input, grounded,
+                    drive.iter().map(|x| x.round()).collect::<Vec<_>>(),
                 );
+                let _ = &susp;
             }
         }
     }
