@@ -63,6 +63,105 @@ impl GearboxLevel {
     }
 }
 
+/// Which engine package is fitted: the record keeps four torque tables and the shop sells three
+/// levels.
+///
+/// Separate from [`GearboxLevel`] because the game sells them separately — a car can have a
+/// built engine and a stock gearbox — and because they read out of *different* slots of the
+/// profile.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum EngineLevel {
+    #[default]
+    Stock,
+    One,
+    Two,
+    Three,
+}
+
+impl EngineLevel {
+    /// Index into [`CarHandling::torque_gain_nm`], which is what
+    /// [`gizmo_nfs::CarHandling::torque_at`] takes.
+    #[must_use]
+    pub fn slot(self) -> usize {
+        match self {
+            Self::Stock => 0,
+            Self::One => 1,
+            Self::Two => 2,
+            Self::Three => 3,
+        }
+    }
+
+    /// The level a profile's engine total implies.
+    ///
+    /// **Weaker than its gearbox twin, and the weakness is worth stating.** That one rests on a
+    /// series measured over four purchases at even steps of 0.33. This one was measured over
+    /// **two**: `0 → 0.21 → 0.51`. The steps are not even (+0.21 then +0.30) and the third was
+    /// never bought, so the top threshold is where the series *would* go rather than where it was
+    /// seen. Thresholds sit at the midpoints of what is known and at an extrapolation above it.
+    ///
+    /// Getting this wrong costs a level, not a crash: every value maps to some level and the
+    /// worst case is a built engine read as one step down.
+    #[must_use]
+    pub fn from_engine_total(total: f32) -> Self {
+        match total {
+            t if t < 0.105 => Self::Stock,
+            t if t < 0.36 => Self::One,
+            t if t < 0.70 => Self::Two,
+            _ => Self::Three,
+        }
+    }
+}
+
+/// What the player has bought, as the two categories that reach the physics.
+///
+/// A struct rather than two arguments because they are read together, from one profile, and a
+/// call site that passes them positionally is one transposition away from a stock engine in a
+/// built gearbox.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub struct Upgrades {
+    pub gearbox: GearboxLevel,
+    pub engine: EngineLevel,
+}
+
+impl Upgrades {
+    /// Read both from the environment: `NFS_ENGINE` and `NFS_GEARBOX`, each `0`–`3`.
+    ///
+    /// The same way every other configuration in this game arrives (`NFS_KIT`, `NFS_STYLE_HOOD`,
+    /// `NFS_PAINT`), and for the same reason: there is no garage to buy anything in yet, so the
+    /// only way to drive a built car is to say so. Absent or unparseable is stock, and anything
+    /// above 3 clamps rather than indexing off the end.
+    #[must_use]
+    pub fn from_env() -> Self {
+        let level = |var: &str| {
+            std::env::var(var).ok().and_then(|s| s.trim().parse::<u8>().ok()).unwrap_or(0).min(3)
+        };
+        Self {
+            gearbox: match level("NFS_GEARBOX") {
+                1 => GearboxLevel::One,
+                2 => GearboxLevel::Two,
+                3 => GearboxLevel::Three,
+                _ => GearboxLevel::Stock,
+            },
+            engine: match level("NFS_ENGINE") {
+                1 => EngineLevel::One,
+                2 => EngineLevel::Two,
+                3 => EngineLevel::Three,
+                _ => EngineLevel::Stock,
+            },
+        }
+    }
+
+    /// Read both out of a player profile.
+    #[must_use]
+    pub fn from_profile(profile: &gizmo_nfs::Profile) -> Self {
+        use gizmo_nfs::profile::Category;
+        Self {
+            gearbox: GearboxLevel::from_transmission_total(profile.total(Category::Transmission)),
+            engine: EngineLevel::from_engine_total(profile.total(Category::Engine)),
+        }
+    }
+}
+
 /// How the car is driven, from the record's rear-drive fraction.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Drivetrain {
@@ -104,9 +203,15 @@ pub struct CarTune {
 
 /// The steering lock, in radians.
 ///
-/// **Invented.** The only steering angles in `GLOBALB.BUN` are a global ±43° identical in all 46
-/// records, so a car-specific value cannot be read from this game's files — a row fed from it would
-/// print the same number for a bus and a Skyline. This is the engine's own feel, kept where it was.
+/// **Invented, and now invented on purpose rather than for want of looking.** The claim used to be
+/// that the only steering angles in `GLOBALB.BUN` are a global ±43° identical in all 46 records, so
+/// nothing per-car could be read. A per-car angle then turned up at `+0x284` — 27° to 60° over the
+/// playable cars — and it was wired in, set from 37° to 12° on a 240SX, installed and driven. The
+/// car steered exactly as before. It also reads 100 on every traffic vehicle against a bus's 75,
+/// and 60 on a HUMMER against 27 on a 106, which is the wrong way round for a lock.
+///
+/// So this stays the engine's own feel, and `gizmo_nfs::Unproven::angle_284_deg` keeps the lane and
+/// the refutation. Tested, not unexamined.
 const STEERING_LOCK_RAD: f32 = 0.44;
 
 /// Build engine tuning from a car's own record.
@@ -118,11 +223,11 @@ const STEERING_LOCK_RAD: f32 = 0.44;
 pub fn tune_from_record(
     info: &CarTypeInfo,
     handling: &CarHandling,
-    level: GearboxLevel,
+    upgrades: Upgrades,
     wheelbase: f32,
     track: f32,
 ) -> CarTune {
-    let gb = &handling.gearbox[level.slot()];
+    let gb = &handling.gearbox[upgrades.gearbox.slot()];
     let gears = gb.gears();
 
     // `[reverse, neutral, forward…]` — the file's own order, unrearranged.
@@ -131,10 +236,23 @@ pub fn tune_from_record(
     gear_ratios.push(0.0);
     gear_ratios.extend_from_slice(gears);
 
-    // The curve's peak. The nine points have no rpm axis in the file, so the *shape* cannot be given
-    // to an engine that wants torque at an rpm; its highest value is the one number that means the
-    // same thing either way.
-    let peak_nm = handling.torque_nm.iter().copied().fold(0.0_f32, f32::max);
+    // The whole curve, not its peak. This used to hand the engine one number, with the reason
+    // written down beside it: the nine points had no rpm axis in the file, so the *shape* could not
+    // be given to something that wants torque at an rpm. The axis was found — idle to limiter in
+    // eight equal steps, checked against the game's own dynamometer on two cars — so the reason is
+    // gone and so is the number.
+    //
+    // What it cost while it stood: `VehicleTuning`'s own curve peaks at `ratio = 0.4`, which on a
+    // 240SX is 3280 rpm, and that car peaks at 4675. Every car in this game made its torque 1,400
+    // rpm early and in a shape none of them have, and two cars with the same peak drove identically.
+    //
+    // `torque_at` applies the engine upgrade: the record keeps four tables and the level picks one.
+    let rpm_axis = handling.torque_rpm();
+    let curve_nm = handling.torque_at(upgrades.engine.slot());
+    let torque_curve: Vec<(f32, f32)> =
+        rpm_axis.iter().copied().zip(curve_nm.iter().copied()).collect();
+    // Still set, because it is what the engine falls back to and what a HUD would print.
+    let peak_nm = curve_nm.iter().copied().fold(0.0_f32, f32::max);
 
     let mut tuning = VehicleTuning {
         idle_rpm: handling.engine.idle_rpm,
@@ -145,6 +263,7 @@ pub fn tune_from_record(
         wheelbase,
         track_width: track,
         max_engine_torque: peak_nm,
+        torque_curve,
         ..VehicleTuning::default()
     };
     // Downshift has no counterpart in the record either. Half the red line keeps it below the
@@ -183,6 +302,90 @@ mod tests {
         assert_eq!(GearboxLevel::from_transmission_total(99.0), GearboxLevel::Three);
         // And a negative, which no save should hold but no reader should trust it not to.
         assert_eq!(GearboxLevel::from_transmission_total(-1.0), GearboxLevel::Stock);
+    }
+
+    /// The engine total reads as a level, on a series measured over two purchases rather than four.
+    #[test]
+    fn an_engine_total_reads_as_a_level() {
+        // The two steps the profile was actually seen to write.
+        assert_eq!(EngineLevel::from_engine_total(0.0), EngineLevel::Stock);
+        assert_eq!(EngineLevel::from_engine_total(0.21), EngineLevel::One);
+        assert_eq!(EngineLevel::from_engine_total(0.51), EngineLevel::Two);
+        // The third was never bought; anything above the series lands on the top level rather
+        // than indexing off the end.
+        assert_eq!(EngineLevel::from_engine_total(0.90), EngineLevel::Three);
+        assert_eq!(EngineLevel::from_engine_total(99.0), EngineLevel::Three);
+        // And a negative, which no profile should hold but no reader should trust it not to.
+        assert_eq!(EngineLevel::from_engine_total(-1.0), EngineLevel::Stock);
+        // Slots line up with the record's four torque tables.
+        assert_eq!(EngineLevel::Stock.slot(), 0);
+        assert_eq!(EngineLevel::Three.slot(), 3);
+    }
+
+    /// The two categories are read from their own slots and do not swap.
+    #[test]
+    fn upgrades_default_to_stock_and_are_read_per_category() {
+        let u = Upgrades::default();
+        assert_eq!(u.gearbox, GearboxLevel::Stock);
+        assert_eq!(u.engine, EngineLevel::Stock);
+    }
+
+    /// The whole path over a **real** install: the file the game opens → the parser → the
+    /// `VehicleTuning` the physics runs on.
+    ///
+    /// Skipped unless `NFSU2_ROOT` is set, like every other test in these repos that needs the
+    /// game.
+    ///
+    /// It asserts **structure, not numbers** — nine points, an ascending axis pinned to the car's
+    /// own idle and limiter, and a built engine strictly above a stock one. Hardcoding a 240SX's
+    /// 216 N·m at 4675 rpm would be a better-looking test and a wrong one: PryHUB exists to edit
+    /// exactly these lanes, so a tuned install would fail it, and "the numbers are the ones I have"
+    /// is not a property of the pipeline.
+    #[test]
+    fn a_real_record_reaches_the_engine_as_a_curve() {
+        let Some(root) = std::env::var_os("NFSU2_ROOT") else {
+            eprintln!("NFSU2_ROOT unset — skipping");
+            return;
+        };
+        let geo = std::path::Path::new(&root).join("CARS").join("240SX").join("GEOMETRY.BIN");
+        let Some(path) = geo.to_str() else { return };
+        let gb = crate::assets::load_globalb_beside(path);
+        let (Some(info), Some(h)) = (gb.info.as_ref(), gb.handling.as_ref()) else {
+            eprintln!("no 240SX record in this install — skipping");
+            return;
+        };
+
+        let stock = tune_from_record(info, h, Upgrades::default(), 2.6, 1.6);
+        let curve = &stock.tuning.torque_curve;
+        assert_eq!(curve.len(), 9, "the file's nine points, not its peak");
+        assert!(
+            curve.windows(2).all(|w| w[0].0 < w[1].0),
+            "the axis must ascend, or the engine's lookup reads the wrong segment"
+        );
+        assert_eq!(curve[0].0, h.engine.idle_rpm, "the curve starts at this car's idle");
+        assert_eq!(curve[8].0, h.engine.limiter_rpm, "and ends at its limiter");
+        assert!(curve.iter().all(|&(_, nm)| nm > 0.0), "every point is real torque");
+        // The peak the engine falls back on is the peak of the curve it was given.
+        let peak = curve.iter().map(|&(_, nm)| nm).fold(f32::MIN, f32::max);
+        assert!((stock.tuning.max_engine_torque - peak).abs() < 1e-3);
+
+        // A built engine is strictly more torque at every point, and the axis does not move —
+        // the upgrade tables are gains on the same nine speeds.
+        let built = tune_from_record(
+            info,
+            h,
+            Upgrades { gearbox: GearboxLevel::Three, engine: EngineLevel::Three },
+            2.6,
+            1.6,
+        );
+        for (i, (&(rpm, stock_nm), &(built_rpm, built_nm))) in
+            curve.iter().zip(built.tuning.torque_curve.iter()).enumerate()
+        {
+            assert_eq!(rpm, built_rpm, "point {i}: the axis is the same at every level");
+            assert!(built_nm > stock_nm, "point {i}: {built_nm} is no more than stock {stock_nm}");
+        }
+        // …and the gearbox moved with it, which is the other half of what an upgrade buys.
+        assert!(built.gears >= stock.gears);
     }
 
     #[test]

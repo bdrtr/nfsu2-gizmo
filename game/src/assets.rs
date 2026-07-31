@@ -14,7 +14,7 @@ pub fn load_tpk_beside(geometry_path: &str) -> Option<Tpk> {
     Tpk::parse(&bytes).ok()
 }
 
-/// Everything `GLOBAL/GLOBALB.BUN` has to say about one car, read in a single pass.
+/// Everything the install's car database has to say about one car, read in a single pass.
 ///
 /// The bundle is 8 MB and holds three unrelated things this game wants — the car's placement record,
 /// how it drives, and the palette its paint comes from — so reading and decompressing it once and
@@ -32,8 +32,8 @@ pub struct GlobalbCar {
     pub palette: Vec<Colour>,
 }
 
-/// Read `GLOBAL/GLOBALB.BUN` for the car a `CARS/<name>/GEOMETRY.BIN` path names: up two
-/// directories to the game root, then the bundle, looked up by the car's folder name.
+/// Read the install's bundle for the car a `CARS/<name>/GEOMETRY.BIN` path names, looked up by the
+/// car's folder name — see [`globalb_bytes`] for *which* bundle, which is not the obvious one.
 #[must_use]
 pub fn load_globalb_beside(geometry_path: &str) -> GlobalbCar {
     let Some(bytes) = globalb_bytes(geometry_path) else { return GlobalbCar::default() };
@@ -51,15 +51,21 @@ pub fn load_globalb_beside(geometry_path: &str) -> GlobalbCar {
     }
 }
 
-/// The bundle's bytes, decompressed if it is stored that way.
+/// The bundle's bytes, decompressed.
+///
+/// **`GlobalB.lzc`, not `GLOBALB.BUN`.** They ship identical and this used to read the `.BUN`,
+/// which was fine while nothing wrote to either. It is not fine now: the `.lzc` is the file the
+/// *game* opens — established by tripling a 240SX's mass in each and driving both — so it is the
+/// one that says how the car being recreated actually drives. A tool that edits only the `.lzc`
+/// would leave this reading a car nobody is driving.
+///
+/// `install::find` also walks up from anywhere in the install and matches the name
+/// case-insensitively, which matters here and not on the machine the game was built for: a Wine
+/// prefix keeps `GlobalB.lzc` beside `GLOBALB.BUN`, mixed case and all, and a Linux filesystem will
+/// not find one by asking for the other.
 fn globalb_bytes(geometry_path: &str) -> Option<Vec<u8>> {
-    let geo = std::path::Path::new(geometry_path);
-    let root = geo.parent()?.parent()?.parent()?; // up past CARS/<name>/
-    let raw = std::fs::read(root.join("GLOBAL").join("GLOBALB.BUN")).ok()?;
-    match gizmo_nfs::compression::detect(&raw) {
-        gizmo_nfs::compression::Codec::None => Some(raw),
-        _ => gizmo_nfs::compression::decompress(&raw).ok(),
-    }
+    let bundle = gizmo_nfs::globalb::install::find(std::path::Path::new(geometry_path))?;
+    gizmo_nfs::globalb::install::read(&bundle).ok()
 }
 
 /// Load this car's [`CarTypeInfo`] (exact wheel mounts, radius, mass) from the game's global
@@ -74,8 +80,8 @@ pub fn load_cartypeinfo_beside(geometry_path: &str) -> Option<CarTypeInfo> {
 /// the palette, else the first.
 ///
 /// This replaces a hardcoded RGB triple. NFSU2 does not texture a car's body — it paints it — and
-/// `GLOBALB.BUN` is the only place those colours are written down, so a car painted anything else
-/// is painted a colour the game does not have. `NFS_COLOR` still overrides with a raw triple, for
+/// the global bundle is the only place those colours are written down, so a car painted anything
+/// else is painted a colour the game does not have. `NFS_COLOR` still overrides with a raw triple, for
 /// looking at something deliberately wrong.
 #[must_use]
 pub fn paint_from_palette(palette: &[Colour], fallback: [f32; 3]) -> [f32; 3] {
