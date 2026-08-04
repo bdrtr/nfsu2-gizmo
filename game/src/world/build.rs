@@ -123,8 +123,21 @@ pub fn build_region(
                 let gp = world_point(&object.header, p) - origin;
                 let n = object.normals.get(i).copied().unwrap_or([0.0, 1.0, 0.0]);
                 let gn = super::remap(n);
+                // The vertex colour **is** the city's lighting. A static world stores it here
+                // rather than recomputing it, which is why the scenery needs no light to look
+                // right — and why throwing it away (the `Vertex` default is white) leaves the city
+                // to be lit by whatever the scene happens to have, which is not what it was drawn
+                // for. `unlit.wgsl` multiplies it in; the PBR path discards it.
+                let c = object.colours.get(i).copied().unwrap_or([255, 255, 255, 255]);
+                let srgb = |b: u8| {
+                    let v = f32::from(b) / 255.0;
+                    // The bytes are sRGB and the shader works in linear, the same conversion the
+                    // texture upload does for its own pixels.
+                    if v <= 0.04045 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
+                };
                 verts.push(Vertex {
                     position: [gp.x, gp.y, gp.z],
+                    color: [srgb(c[0]), srgb(c[1]), srgb(c[2])],
                     normal: [gn.x, gn.y, gn.z],
                     tex_coords: object.uvs.get(i).copied().unwrap_or([0.0, 0.0]),
                     ..Default::default()

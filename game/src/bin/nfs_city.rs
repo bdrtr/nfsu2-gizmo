@@ -130,15 +130,18 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
 
     // ── Spawn ──
     //
-    // Baked-lit scenery: the vertex colour is the lighting, so the material is a flat white the
-    // texture modulates rather than a PBR surface pretending to be lit from somewhere.
+    // Unlit, because the city is already lit: its lighting is baked into the vertex colour, and
+    // `unlit.wgsl` is the one path that multiplies that in — the PBR fragment shader carries the
+    // attribute all the way to the fragment and then discards it, so the city came out washed and
+    // lit by whatever fake sun the scene had. It is also 1 draw per batch instead of the 11 a lit
+    // one costs (23 before the point-shadow passes were gated).
     let mut spawned = 0usize;
     for m in &city.meshes {
         let material = match m.texture.and_then(|k| bound.get(&k)) {
-            Some(bg) => Material::new(bg.clone()).with_pbr(Vec4::new(1.0, 1.0, 1.0, 1.0), 0.9, 0.0),
+            Some(bg) => Material::new(bg.clone()).with_unlit(Vec4::new(1.0, 1.0, 1.0, 1.0)),
             // A run whose texture resolved nowhere draws in a flat grey rather than vanishing —
             // a hole in the world reads as a parser bug, and this is not one.
-            None => Material::new(white.clone()).with_pbr(Vec4::new(0.35, 0.35, 0.38, 1.0), 0.95, 0.0),
+            None => Material::new(white.clone()).with_unlit(Vec4::new(0.35, 0.35, 0.38, 1.0)),
         };
         scene::spawn_mesh(&mut world, m.mesh.clone(), material, Transform::new(m.origin));
         spawned += 1;
