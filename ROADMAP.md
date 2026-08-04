@@ -815,3 +815,43 @@ gerçek belirsizlikler: (a) bir bölge indexsiz belleğe sığıyor mu, (b) gön
 alanları OpenUG'un tahmin ettiği anlama geliyor mu, (c) fixed/variable schedule ayrımı `Phase`
 kapalı bir enum olduğu için ne kadar dalgalanıyor. Bu plandaki diğer her şey birinin daha önce
 aldığı bir ölçüme dayanıyor.
+
+---
+
+## Nerede kaldık (2026-08-04)
+
+Bu bölüm taze bir oturumun buradan devam edebilmesi için. Ayrıntı commit mesajlarında.
+
+### Biten
+
+| katman | durum |
+|---|---|
+| **Parser** (`PryHUB`, dal `world-manifest`) | Şehrin geometrisi, dokuları, doku bağlaması. 28.985 obje · 5.087 doku (hepsi çözülüyor) · 70.439 doku slotunun %98,17'si kendi bölgesinde. Kalan: **rota dosyaları** (`ROUTES*/Paths*.bin`) |
+| **Oyun** (`nfsu2-gizmo`, dal `roadmap`) | `world/` katmanı: dedup → hücre → (hücre,doku) birleştirme → yeniden merkezleme. `nfs_city` (tek kare), `nfs_fly` (pencere), `collision_cells` (hücre başına üçgen çorbası) |
+| **Motor** (`Gizmo`) | `shadow-gate` dalı: point-shadow geçidi + `walk_positions` + `MaterialType::BakedLit`. `trimesh-aabb` dalı: önbelleklenmiş trimesh AABB (**push edilmedi**, commit `main`'de de duruyor) |
+
+### Sıradaki adım — M3, arabayı Bayview'a koymak
+
+1. **Önce ortak araba kurulumunu çıkar.** `nfs_drive.rs` ve `nfs_race.rs` ~230 satır neredeyse aynı
+   kodu paylaşıyor ve bu canlı bir hataya mal oluyor: `nfs_race.rs:344` kütleyi `1200.0` sabitlerken
+   `nfs_drive.rs:246` `tune.mass_kg`'ı onurlandırıyor, ve `nfs_race` kullanmadığı kütleyi yazdırıyor.
+   Üçüncü bir kopya çıkarmadan `game/src/rig/`'e topla.
+2. Şehir + araba binary'si: `world::collision_cells` → hücre başına `Collider::trimesh` +
+   `phys.add_body`, artı `nfs_race`'in `VehicleController` kurulumu.
+3. `update_vehicle`'a sorgu tutamacı (motor): şu an tekerlek başına tüm collider listesini doğrusal
+   tarıyor ve `gather_colliders` her çağrıda hepsini klonluyor.
+
+### Bilinen açıklar
+
+- **Culling yok.** 8.119 mesh her kare gönderiliyor; `Frustum::test_aabb_masked` hâlâ sıfır çağıranlı
+  ve Gizmo'da hücre/bölge kavramı yok. `nfs_fly` ile kare hızına bakmak bunun aciliyetini belirler.
+- **Backdrop ve LOD çizilmiyor.** `is_backdrop` / `is_distant_lod` onları eliyor; ikisi de gerçek
+  veri, sadece mesafeye göre seçen bir şey yok.
+- **98 çözülmeyen run** (589'dan indi). Kalanların 111'i kurulumun hiçbir yerinde yok.
+
+### Gezerken işine yarayacak
+
+Yolların çoğu `y ≈ -11` civarında; `nfs_fly`'ın varsayılan başlangıcı `y = 40`'ta havada.
+Yola inmek için `NFS_AT="1354,-11,-2457"`. Diagnostikler: `NFS_ID="x,y"` (o pikseli hangi mesh
+kaplıyor), `NFS_FIND=<substr>` (isme göre kaç obje yüklü, ilk birkaçı nerede), `NFS_NEAR=<r>`
+(bir noktanın ayak izini kapsayan objeler + doku slotlarının hangi katmanda çözüldüğü).
