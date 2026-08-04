@@ -1406,7 +1406,7 @@ checksum = "e629b9b98ef3dd8afe6ca2bd0f89306cec16d43d907889945bc5d6687f2f13c7"
 
 [[package]]
 name = "gizmo-ai"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "gizmo-core",
  "gizmo-math",
@@ -1419,7 +1419,7 @@ dependencies = [
 
 [[package]]
 name = "gizmo-analysis"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "egui",
  "gizmo-core",
@@ -1427,7 +1427,7 @@ dependencies = [
 
 [[package]]
 name = "gizmo-animation"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "gizmo-core",
  "gizmo-math",
@@ -1438,7 +1438,7 @@ dependencies = [
 
 [[package]]
 name = "gizmo-app"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "backtrace",
  "console_error_panic_hook",
@@ -1474,7 +1474,7 @@ dependencies = [
 
 [[package]]
 name = "gizmo-audio"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "gizmo-core",
  "log",
@@ -1484,7 +1484,7 @@ dependencies = [
 
 [[package]]
 name = "gizmo-core"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "chrono",
  "crossbeam-queue",
@@ -1500,7 +1500,7 @@ dependencies = [
 
 [[package]]
 name = "gizmo-editor"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "dirs",
  "egui",
@@ -1524,7 +1524,7 @@ dependencies = [
 
 [[package]]
 name = "gizmo-engine"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "bytemuck",
  "egui",
@@ -1554,7 +1554,7 @@ dependencies = [
 
 [[package]]
 name = "gizmo-math"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "getrandom 0.2.17",
  "glam 0.29.3",
@@ -1563,7 +1563,7 @@ dependencies = [
 
 [[package]]
 name = "gizmo-net"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "bincode",
  "gizmo-core",
@@ -1580,7 +1580,7 @@ version = "0.3.0"
 
 [[package]]
 name = "gizmo-physics-core"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "arrayvec",
  "gizmo-core",
@@ -1592,7 +1592,7 @@ dependencies = [
 
 [[package]]
 name = "gizmo-physics-dynamics"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "gizmo-core",
  "gizmo-math",
@@ -1603,7 +1603,7 @@ dependencies = [
 
 [[package]]
 name = "gizmo-physics-rigid"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "crossbeam-queue",
  "dashmap",
@@ -1623,7 +1623,7 @@ dependencies = [
 
 [[package]]
 name = "gizmo-physics-soft"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "gizmo-core",
  "gizmo-math",
@@ -1634,7 +1634,7 @@ dependencies = [
 
 [[package]]
 name = "gizmo-renderer"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "bytemuck",
  "getrandom 0.3.4",
@@ -1666,7 +1666,7 @@ dependencies = [
 
 [[package]]
 name = "gizmo-scene"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "gizmo-core",
  "gizmo-math",
@@ -1680,7 +1680,7 @@ dependencies = [
 
 [[package]]
 name = "gizmo-scripting"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "gizmo-ai",
  "gizmo-animation",
@@ -1695,7 +1695,7 @@ dependencies = [
 
 [[package]]
 name = "gizmo-ui"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "gizmo-app",
  "gizmo-core",
@@ -1705,7 +1705,7 @@ dependencies = [
 
 [[package]]
 name = "gizmo-window"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "tracing",
  "winit",
