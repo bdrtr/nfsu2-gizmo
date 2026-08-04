@@ -827,19 +827,25 @@ Bu bölüm taze bir oturumun buradan devam edebilmesi için. Ayrıntı commit me
 | katman | durum |
 |---|---|
 | **Parser** (`PryHUB`, dal `world-manifest`) | Şehrin geometrisi, dokuları, doku bağlaması. 28.985 obje · 5.087 doku (hepsi çözülüyor) · 70.439 doku slotunun %98,17'si kendi bölgesinde. Kalan: **rota dosyaları** (`ROUTES*/Paths*.bin`) |
-| **Oyun** (`nfsu2-gizmo`, dal `roadmap`) | `world/` katmanı: dedup → hücre → (hücre,doku) birleştirme → yeniden merkezleme. `nfs_city` (tek kare), `nfs_fly` (pencere), `collision_cells` (hücre başına üçgen çorbası) |
+| **Oyun** (`nfsu2-gizmo`, dal `roadmap`) | `world/` katmanı: dedup → hücre → (hücre,doku) birleştirme → yeniden merkezleme. `nfs_city` (tek kare), `nfs_fly` (pencere), `collision_cells` (hücre başına üçgen çorbası). `rig/` katmanı: tek `spawn_car` + `Driver` + `ChaseCamera`; `nfs_drive`/`nfs_race` artık onun üstünde |
 | **Motor** (`Gizmo`) | `shadow-gate` dalı: point-shadow geçidi + `walk_positions` + `MaterialType::BakedLit`. `trimesh-aabb` dalı: önbelleklenmiş trimesh AABB (**push edilmedi**, commit `main`'de de duruyor) |
 
 ### Sıradaki adım — M3, arabayı Bayview'a koymak
 
-1. **Önce ortak araba kurulumunu çıkar.** `nfs_drive.rs` ve `nfs_race.rs` ~230 satır neredeyse aynı
-   kodu paylaşıyor ve bu canlı bir hataya mal oluyor: `nfs_race.rs:344` kütleyi `1200.0` sabitlerken
-   `nfs_drive.rs:246` `tune.mass_kg`'ı onurlandırıyor, ve `nfs_race` kullanmadığı kütleyi yazdırıyor.
-   Üçüncü bir kopya çıkarmadan `game/src/rig/`'e topla.
-2. Şehir + araba binary'si: `world::collision_cells` → hücre başına `Collider::trimesh` +
-   `phys.add_body`, artı `nfs_race`'in `VehicleController` kurulumu.
+1. ~~**Önce ortak araba kurulumunu çıkar.**~~ **Bitti.** `game/src/rig/`: `spawn_car` +
+   `Placement`, `Driver` (giriş + sabit adım), `ChaseCamera`. İki binary 1.193 satırdan 506'ya
+   indi. Yolda üç sapma düzeldi: `nfs_race` her arabayı `1200.0` kg ile yarıştırıyordu (kaydın
+   kütlesini okuyup yazdırırken), kayıtsız araba için uydurma tork ikisinde iki farklı sayıydı
+   (520/560), ve `nfs_drive`'ın **R**'si arabayı doğduğu yere değil sabit `y = 1.5`'e bırakıyordu.
+   Doğrulama: 240SX ile `NFS_AUTODRIVE=1 NFS_DIAG=1 nfs_race` — 1220 kg, dört teker yerde, tork
+   yalnız arka aksta.
+2. **Sıradaki:** şehir + araba binary'si. `world::collision_cells` → hücre başına
+   `Collider::trimesh` + `phys.add_body`, artı `rig::spawn_car` (üçüncü kopya yok artık).
+   Arabayı `NFS_AT="1354,-11,-2457"` civarına, `Placement { clearance }`'ı yüksek tut: hücrenin
+   o noktadaki yüzey yüksekliği bilinmiyor.
 3. `update_vehicle`'a sorgu tutamacı (motor): şu an tekerlek başına tüm collider listesini doğrusal
-   tarıyor ve `gather_colliders` her çağrıda hepsini klonluyor.
+   tarıyor ve `gather_colliders` her çağrıda hepsini klonluyor. Şehirde bu adım başına 14.000
+   collider'ın klonu demek — 2. adımın kare hızını bu belirleyecek.
 
 ### Bilinen açıklar
 

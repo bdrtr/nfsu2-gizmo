@@ -1,58 +1,37 @@
 //! # NFSU2 Car — RACE on a procedural track (M3)
 //!
-//! Extends the drivable NFSU2 car with a real course: a procedurally generated closed
-//! loop with elevation, given a **triangle-mesh collider** (`Collider::trimesh`) the
-//! vehicle suspension raycasts against, plus checkpoints and lap timing.
+//! The same car [`nfsu2::rig`] builds for `nfs_drive`, given a real course: a procedurally
+//! generated closed loop with elevation, carrying a **triangle-mesh collider**
+//! (`Collider::trimesh`) the vehicle suspension raycasts against, plus checkpoints and lap timing.
+//! The track is what this binary is; the car is the shared rig.
 //!
 //! Controls: **W/↑** accelerate · **S/↓** reverse · **A/D or ←/→** steer · **Space** brake ·
 //! **R** reset to the start line · **T** auto-shift · hold **right mouse** to orbit.
 //!
 //! ```bash
-//! cargo run --release -p demo --bin nfs_race -- "/path/to/CARS/240SX/GEOMETRY.BIN"
+//! cargo run --release -p nfsu2 --bin nfs_race -- "/path/to/CARS/240SX/GEOMETRY.BIN"
 //! ```
 
 use gizmo::egui;
 use gizmo::physics::world::PhysicsWorld;
 use gizmo::prelude::*;
 use gizmo::renderer::gpu_types::Vertex;
-use gizmo_nfs::parse_geometry;
-use nfsu2::assets::load_tpk_beside;
-use nfsu2::car::{build_car_visuals, WheelFit};
-use nfsu2::scene::{self, Textures};
 use nfsu2::geom::add_transform;
+use nfsu2::rig::{spawn_car, CarRig, ChaseCamera, Driver, Placement};
+use nfsu2::scene;
 
 const DEFAULT_CAR: &str =
     "/home/bedir/Games/need-for-speed-underground-2/drive_c/Need for Speed Underground 2/CARS/240SX/GEOMETRY.BIN";
-const FIXED_DT: f32 = 1.0 / 240.0;
 const N_CHECKPOINTS: usize = 12;
 const CP_RADIUS: f32 = 9.0;
 
-struct WheelVis {
-    id: u32,
-    local: Vec3,
-    front: bool,
-}
-
 struct RaceState {
-    chassis_id: u32,
-    camera_id: u32,
-    visual_ids: Vec<u32>,
-    wheels: Vec<WheelVis>,
-    wheel_radius: f32,
-    max_steer: f32,
-    wheel_spin: f32,
-    cam_pos: Vec3,
-    cam_yaw: f32,
-    cam_pitch: f32,
-    steer_angle: f32,
-    phys_accum: f32,
+    rig: CarRig,
+    driver: Driver,
+    camera: ChaseCamera,
     autodrive: bool,
-    shotcam: bool,
-    t: f32,
     // Track / lap state.
     checkpoints: Vec<Vec3>,
-    start_pos: Vec3,
-    start_rot: Quat,
     next_cp: usize,
     lap: u32,
     cur_time: f32,
@@ -133,31 +112,27 @@ fn main() {
 }
 
 fn setup_scene(world: &mut World, renderer: &gizmo::renderer::Renderer) -> RaceState {
-    let path = std::env::args()
-        .nth(1)
-        .or_else(|| std::env::var("NFSU2_CAR").ok())
-        .unwrap_or_else(|| DEFAULT_CAR.to_string());
+    let path = scene::car_path(DEFAULT_CAR);
 
-    let mut asset_manager = AssetManager::new();
+    let mut assets = AssetManager::new();
     let mut phys = PhysicsWorld::new();
     phys.integrator.gravity = Vec3::new(0.0, -9.81, 0.0);
-    let tex = asset_manager.create_white_texture(
+    let white = assets.create_white_texture(
         &renderer.device,
         &renderer.queue,
         &renderer.scene.texture_bind_group_layout,
     );
-    // Double-sided so the glass-less greenhouse (windows are texture-only decals) doesn't
-    // read as see-through, and the track ribbon is visible from both sides.
+    // Double-sided so the track ribbon is visible from both sides.
     let mat = |rgb: [f32; 3], rough: f32, metal: f32| {
-        Material::new(tex.clone())
+        Material::new(white.clone())
             .with_pbr(Vec4::new(rgb[0], rgb[1], rgb[2], 1.0), rough, metal)
             .with_double_sided(true)
     };
 
     // ── Ground: the grass around the circuit ──
-    // A plane, and now only the *surroundings*: the track itself is a real triangle-mesh collider
-    // below. It stays because a car that leaves the ribbon should land on grass rather than fall
-    // out of the world.
+    // A plane, and only the *surroundings*: the track itself is a real triangle-mesh collider below.
+    // It stays because a car that leaves the ribbon should land on grass rather than fall out of the
+    // world.
     let ground = world.spawn();
     add_transform(world, ground, Transform::new(Vec3::ZERO));
     world.add_component(ground, AssetManager::create_plane(&renderer.device, 600.0));
@@ -192,7 +167,7 @@ fn setup_scene(world: &mut World, renderer: &gizmo::renderer::Renderer) -> RaceS
         track_ent,
         Mesh::from_vertices(&renderer.device, &track.visual, "nfs_track"),
     );
-    world.add_component(track_ent, mat([0.12, 0.12, 0.14], 0.9, 0.0).with_double_sided(true));
+    world.add_component(track_ent, mat([0.12, 0.12, 0.14], 0.9, 0.0));
     world.add_component(track_ent, MeshRenderer::new());
     // The same triangles the eye sees, handed to physics. `build_track` emits an unindexed
     // triangle soup, so the index list is just its own order — no welding, because two ribbon
@@ -232,215 +207,44 @@ fn setup_scene(world: &mut World, renderer: &gizmo::renderer::Renderer) -> RaceS
         world.add_component(start, MeshRenderer::new());
     }
 
-    // ── Lights ──
-    let sun = world.spawn();
-    add_transform(
+    scene::add_lights(
         world,
-        sun,
         Transform::new(Vec3::new(60.0, 120.0, 40.0))
             .with_rotation(Quat::from_axis_angle(Vec3::new(1.0, 0.3, 0.0).normalize(), -0.9)),
-    );
-    world.add_component(
-        sun,
-        DirectionalLight::new(Vec3::new(1.0, 0.97, 0.9), 2.7, gizmo::renderer::components::LightRole::Sun),
-    );
-    let fill = world.spawn();
-    add_transform(world, fill, Transform::new(Vec3::new(-40.0, 50.0, -30.0)));
-    world.add_component(
-        fill,
-        DirectionalLight::new(Vec3::new(0.6, 0.7, 0.9), 0.6, gizmo::renderer::components::LightRole::Sun),
+        2.7,
+        Vec3::new(-40.0, 50.0, -30.0),
     );
 
-    // ── Camera ──
-    let camera_ent = world.spawn();
-    add_transform(world, camera_ent, Transform::new(Vec3::new(0.0, 4.0, 10.0)));
-    world.add_component(
-        camera_ent,
-        Camera::new(std::f32::consts::FRAC_PI_4, 0.1, 4000.0, -std::f32::consts::FRAC_PI_2, -0.3, true),
-    );
-    // ── Car ──
-    let bytes = std::fs::read(&path).unwrap_or_else(|e| panic!("cannot read {path}: {e}"));
-    let all = parse_geometry(&bytes).expect("parse GEOMETRY.BIN");
-    let tpk = load_tpk_beside(&path); // TEXTURES.BIN next to the model, if present
-    // One read of GLOBALB.BUN: where the wheels go, how the car drives, and the 123 colours it may
-    // be painted. NFSU2 does not texture a body, it paints it, and this bundle is the only place
-    // those colours are written down.
-    let gb = nfsu2::assets::load_globalb_beside(&path);
-    let paint = nfsu2::assets::paint_from_palette(&gb.palette, [0.10, 0.28, 0.72]);
-    let cfg = nfsu2::parts::CarConfig::from_env();
-    let car = build_car_visuals(&renderer.device, &all, tpk.as_ref(), paint, &cfg, |look| {
-        Material::new(tex.clone())
-            .with_pbr(
-                Vec4::new(look.rgb[0], look.rgb[1], look.rgb[2], look.alpha),
-                look.roughness,
-                look.metallic,
-            )
-            .with_double_sided(true)
-    });
-    let (width, height, length) = (car.width, car.height, car.length);
-    let WheelFit { half_wheelbase, half_track, .. } = car.wheel_fit;
-    // Kept before `car` is borrowed apart below; both feed `scene::wheel_mounts`.
-    let (car_fit, car_center) = (car.wheel_fit, car.center);
-    // The record states the radius; `fit_wheel`'s is a bbox guess with a clamp on it.
-    let radius = scene::wheel_radius(gb.info.as_ref(), car.wheel_fit);
-
-    let mut car = car;
-    let mut tex = Textures {
-        assets: &mut asset_manager,
-        device: &renderer.device,
-        queue: &renderer.queue,
-        layout: &renderer.scene.texture_bind_group_layout,
-    };
-    // Resolve the wheel material first: it borrows the uploader, as `spawn_body` does.
-    let wheel = car.wheel.take().map(|(mesh, surface)| {
-        let m = scene::wheel_material(
-            surface,
-            &mut tex,
-            |bg| Material::new(bg).with_pbr(Vec4::new(1.0, 1.0, 1.0, 1.0), 0.7, 0.2).with_double_sided(true),
-            |look| mat(look.rgb, look.roughness, look.metallic),
-        );
-        (mesh, m)
-    });
-    // Each body mesh is its own entity that rigidly follows the chassis.
-    let visual_ids = scene::spawn_body(world, &mut car, &mut tex, |bg, tint, rough, metal| {
-        Material::new(bg)
-            .with_pbr(Vec4::new(tint[0], tint[1], tint[2], 1.0), rough, metal)
-            .with_double_sided(true)
-    });
-    // Wheels: the single wheel mesh instanced at the four corners **the record names**.
+    // ── Car: on the start line, facing along the track ──
     //
-    // This used to build them from `fit_wheel`'s guess — one symmetric pair derived from the
-    // modelled wheel's bounding box, with `.max()` floors under it — while `GLOBALB` states all
-    // four mounts outright. Measured on a 240SX, the guess put the fronts 0.14 m out and the rears
-    // **1.56 m** out: 0.07 too narrow, 0.10 too low, 0.12 too far back, and the rear pair on the
-    // wrong sides, because the record's order is front-left, front-right, **rear-right**, rear-left
-    // and the sign table read `(-1,-1), (1,-1), (-1,1), (1,1)`. `nfs_viewer` and `nfs_shot` have
-    // used `scene::wheel_mounts` all along; the two binaries anybody actually drives did not,
-    // which is why nobody saw it.
-    let mounts = scene::wheel_mounts(gb.info.as_ref(), car_fit, car_center, height);
-    let mut wheels = Vec::new();
-    if let Some((mesh, wmat)) = wheel {
-        for (i, &local) in mounts.iter().enumerate() {
-            let id = scene::spawn_mesh(world, mesh.clone(), wmat.clone(), Transform::new(Vec3::ZERO));
-            // The first two are the front pair — the record's own order, and the one the vehicle
-            // controller's axles are built in below.
-            wheels.push(WheelVis { id, local, front: i < 2 });
-        }
-    }
-    world.insert_resource(asset_manager);
-
-    // Spawn the car on the start line, facing along the track.
-    let tan0 = track.tangents[0];
-    let tan_h = Vec3::new(tan0.x, 0.0, tan0.z).normalize();
-    // Face the car (forward = -Z) along the track tangent via an explicit yaw. (Avoid
-    // `from_rotation_arc` here: for the antiparallel -Z→+Z case it picks an arbitrary axis
-    // and can flip the car onto its side/roof.)
-    let start_rot = Quat::from_rotation_y((-tan_h.x).atan2(-tan_h.z));
-    let start_pos = track.centerline[0] + Vec3::new(0.0, height * 0.5 + radius + 0.4, 0.0);
-
-    let chassis = world.spawn();
-    add_transform(world, chassis, Transform::new(start_pos).with_rotation(start_rot));
-
-    let mut rb = RigidBody::new(1200.0, true);
-    rb.linear_damping = 0.1;
-    rb.angular_damping = 1.8;
-    rb.calculate_box_inertia(width, height, length);
-    rb.center_of_mass = Vec3::new(0.0, -height * 0.1, 0.0);
-    rb.lock_rotation_x = false;
-    rb.lock_rotation_y = false;
-    rb.lock_rotation_z = false;
-
-    let mut vehicle = gizmo::physics::vehicle::VehicleController::new();
-    // The same four mounts the visuals use, so the wheel the eye sees is the wheel the suspension
-    // raycasts from. The suspension hangs its wheel *below* the attachment, so the bolt goes one
-    // rest-length above the mount and the wheel settles where the record puts it.
-    let rest = (radius * 0.25).max(0.05);
-    for (i, &mount) in mounts.iter().enumerate() {
-        let (front, left) = (i < 2, mount.x < 0.0);
-        vehicle.add_wheel(gizmo::physics::vehicle::Wheel {
-            attachment_local_pos: mount + Vec3::new(0.0, rest, 0.0),
-            radius,
-            axle_type: if front { gizmo::physics::vehicle::Axle::Front } else { gizmo::physics::vehicle::Axle::Rear },
-            is_left: left,
-            suspension_rest_length: rest,
-            suspension_max_travel: (radius * 0.45).max(0.12),
-            suspension_stiffness: 45000.0,
-            suspension_damping: 3500.0,
-            wheel_mass: 25.0,
-            ..Default::default()
-        });
-    }
-    // The car's own record, the same way `nfs_drive` takes it: mass, rpm limits, the gearbox and
-    // the whole nine-point torque curve on its own rpm axis. This used to be `max_engine_torque =
-    // 560.0` — one invented number, the same for every car — while the file next door held nine
-    // measured ones. `NFS_ENGINE` / `NFS_GEARBOX` pick the upgrade level.
-    let tune = gb.info.as_ref().zip(gb.handling.as_ref()).map(|(info, h)| {
-        nfsu2::car::tune::tune_from_record(
-            info,
-            h,
-            nfsu2::car::tune::Upgrades::from_env(),
-            half_wheelbase * 2.0,
-            half_track * 2.0,
-        )
-    });
-    match &tune {
-        Some(t) => {
-            vehicle.tuning = t.tuning.clone();
-            println!(
-                "handling: {:.0} kg · {} gears · final drive {:.3} · {:.0} N·m peak · {:?}",
-                t.mass_kg, t.gears, t.tuning.final_drive_ratio, t.tuning.max_engine_torque,
-                t.drivetrain,
-            );
-        }
-        None => {
-            // No record reachable (a `GEOMETRY.BIN` copied out of an install). The invented
-            // number stands, and says so.
-            println!("handling: no record for this car — engine defaults, 560 N·m invented");
-            vehicle.tuning.max_engine_torque = 560.0;
-        }
-    }
-    vehicle.tuning.wheelbase = half_wheelbase * 2.0;
-    vehicle.tuning.track_width = half_track * 2.0;
-    vehicle.max_steering_angle = nfsu2::car::tune::steering_lock();
-
-    let collider = Collider::offset_box(
-        Vec3::new(0.0, height * 0.12, 0.0),
-        Vec3::new(width * 0.42, height * 0.3, length * 0.46),
+    // Dropped from further up than on flat ground: the ribbon is banked and hilly, so its surface
+    // under the start line is not at the centerline's own height.
+    let rig = spawn_car(
+        world,
+        renderer,
+        &mut assets,
+        &mut phys,
+        &path,
+        Placement::facing(track.centerline[0], track.tangents[0], 0.4),
     );
-    world.add_component(chassis, vehicle);
-    world.add_component(chassis, rb);
-    world.add_component(chassis, Velocity::new(Vec3::ZERO));
-    world.add_component(chassis, collider.clone());
-    phys.add_body(
-        gizmo::physics::BodyHandle::from_id(chassis.id()),
-        rb,
-        Transform::new(start_pos).with_rotation(start_rot),
-        Velocity::default(),
-        collider,
-    );
+    world.insert_resource(assets);
     world.insert_resource(phys);
 
-    println!("race ready: track {} tris, {} checkpoints; car {width:.2}×{height:.2}×{length:.2}", track.visual.len() / 3, N_CHECKPOINTS);
+    let camera = ChaseCamera::spawn(world, rig.start.position + Vec3::new(0.0, 4.0, 10.0), 4000.0)
+        .trailing(7.0, 2.2, 10.0);
+
+    println!(
+        "race ready: track {} tris, {} checkpoints",
+        track.visual.len() / 3,
+        N_CHECKPOINTS
+    );
 
     RaceState {
-        chassis_id: chassis.id(),
-        camera_id: camera_ent.id(),
-        visual_ids,
-        wheels,
-        wheel_radius: radius,
-        max_steer: 0.44,
-        wheel_spin: 0.0,
-        cam_pos: start_pos + Vec3::new(0.0, 4.0, 10.0),
-        cam_yaw: -std::f32::consts::FRAC_PI_2,
-        cam_pitch: -0.3,
-        steer_angle: 0.0,
-        phys_accum: 0.0,
+        rig,
+        driver: Driver::new(),
+        camera,
         autodrive: std::env::var("NFS_AUTODRIVE").is_ok(),
-        shotcam: std::env::var("NFS_SHOTCAM").is_ok(),
-        t: 0.0,
         checkpoints,
-        start_pos,
-        start_rot,
         next_cp: 1,
         lap: 0,
         cur_time: 0.0,
@@ -450,98 +254,39 @@ fn setup_scene(world: &mut World, renderer: &gizmo::renderer::Renderer) -> RaceS
 }
 
 fn update(world: &mut World, state: &mut RaceState, dt: f32, input: &Input) {
-    state.t += dt;
     state.cur_time += dt;
 
-    let mut throttle = 0.0f32;
-    let mut brake = 0.0f32;
-    if input.is_key_pressed(KeyCode::KeyW as u32) || input.is_key_pressed(KeyCode::ArrowUp as u32) {
-        throttle += 1.0;
-    }
-    if input.is_key_pressed(KeyCode::KeyS as u32) || input.is_key_pressed(KeyCode::ArrowDown as u32) {
-        throttle -= 1.0;
-    }
-    if input.is_key_pressed(KeyCode::Space as u32) {
-        brake = 1.0;
-    }
-    let mut steering = false;
-    if input.is_key_pressed(KeyCode::KeyA as u32) || input.is_key_pressed(KeyCode::ArrowLeft as u32) {
-        state.steer_angle = (state.steer_angle + 6.0 * dt).min(1.0);
-        steering = true;
-    }
-    if input.is_key_pressed(KeyCode::KeyD as u32) || input.is_key_pressed(KeyCode::ArrowRight as u32) {
-        state.steer_angle = (state.steer_angle - 6.0 * dt).max(-1.0);
-        steering = true;
-    }
-    if !steering {
-        state.steer_angle *= (-15.0 * dt).exp();
-    }
+    let mut controls = state.driver.read(input, dt);
     if state.autodrive {
-        throttle = 1.0;
+        controls.throttle = 1.0;
         // Steer toward the next checkpoint so it actually laps the track.
-        if let Some(t) = world.borrow::<Transform>().get(state.chassis_id) {
-            let to = state.checkpoints[state.next_cp] - t.position;
-            let fwd = t.rotation * Vec3::new(0.0, 0.0, -1.0);
-            let right = t.rotation * Vec3::new(1.0, 0.0, 0.0);
-            let err = to.normalize_or_zero().dot(right);
-            state.steer_angle = (-err * 2.5).clamp(-1.0, 1.0);
-            if to.normalize_or_zero().dot(fwd) < -0.3 {
-                state.steer_angle = 1.0; // sharp turn if facing away
-            }
+        if let Some(t) = world.borrow::<Transform>().get(state.rig.chassis) {
+            let to = (state.checkpoints[state.next_cp] - t.position).normalize_or_zero();
+            let fwd = t.rotation * Vec3::NEG_Z;
+            let right = t.rotation * Vec3::X;
+            state.driver.steer = if to.dot(fwd) < -0.3 {
+                1.0 // sharp turn if facing away
+            } else {
+                (-to.dot(right) * 2.5).clamp(-1.0, 1.0)
+            };
         }
+        controls.steer = state.driver.steer;
     }
-
-    {
-        let mut vs = world.borrow_mut::<gizmo::physics::vehicle::VehicleController>();
-        if let Some(mut v) = vs.get_mut(state.chassis_id) {
-            v.set_reverse(throttle < 0.0);
-            v.throttle_input = throttle.abs().min(1.0);
-            v.brake_input = brake;
-            v.steering_input = state.steer_angle.clamp(-1.0, 1.0);
-            if input.is_key_just_pressed(KeyCode::KeyT as u32) {
-                v.auto_shift = !v.auto_shift;
-            }
-        }
-    }
+    state.rig.drive(world, &controls);
 
     if input.is_key_just_pressed(KeyCode::KeyR as u32) {
-        let (sp, sr) = (state.start_pos, state.start_rot);
-        let mut transforms = unsafe { world.borrow_mut_unchecked::<Transform>() };
-        let mut velocities = unsafe { world.borrow_mut_unchecked::<Velocity>() };
-        if let Some(mut t) = transforms.get_mut(state.chassis_id) {
-            *t = Transform::new(sp).with_rotation(sr);
-            t.update_local_matrix();
-        }
-        if let Some(mut v) = velocities.get_mut(state.chassis_id) {
-            *v = Velocity::default();
-        }
-        state.steer_angle = 0.0;
+        state.rig.reset(world);
+        state.driver.reset();
         state.next_cp = 1;
         state.cur_time = 0.0;
     }
 
-    // Fixed-step physics.
-    state.phys_accum += dt.min(0.1);
-    let mut steps = 0;
-    while state.phys_accum >= FIXED_DT && steps < 32 {
-        gizmo::physics::vehicle_controller_system(world, FIXED_DT);
-        gizmo::physics::physics_step_system(world, FIXED_DT);
-        state.phys_accum -= FIXED_DT;
-        steps += 1;
-    }
+    state.driver.step_physics(world, dt);
 
-    let (cpos, crot, speed) = {
-        let ts = world.borrow::<Transform>();
-        let vs = world.borrow::<gizmo::physics::vehicle::VehicleController>();
-        let sp = vs.get(state.chassis_id).map(|v| v.current_speed_kmh / 3.6).unwrap_or(0.0);
-        match ts.get(state.chassis_id) {
-            Some(t) => (t.position, t.rotation, sp),
-            None => return,
-        }
-    };
+    let Some(pose) = state.rig.pose(world) else { return };
 
     // Lap / checkpoint detection (proximity to the next expected checkpoint, in XZ).
-    let car_xz = Vec3::new(cpos.x, 0.0, cpos.z);
+    let car_xz = Vec3::new(pose.position.x, 0.0, pose.position.z);
     let cp = state.checkpoints[state.next_cp];
     if car_xz.distance(Vec3::new(cp.x, 0.0, cp.z)) < CP_RADIUS {
         if state.next_cp == 0 {
@@ -557,119 +302,43 @@ fn update(world: &mut World, state: &mut RaceState, dt: f32, input: &Input) {
         }
     }
 
-    // `NFS_DIAG=1`: once a second, what the physics actually thinks is happening. Three vague
-    // symptoms ("doesn't move", "W goes backwards", "a square") become numbers.
-    if std::env::var("NFS_DIAG").is_ok() {
-        state.t += 0.0; // (t is advanced elsewhere; this block only reads)
-        let tick = (state.cur_time * 1.0) as i32;
-        if tick != state.diag_tick {
-            state.diag_tick = tick;
-            let vs = world.borrow::<gizmo::physics::vehicle::VehicleController>();
-            if let Some(v) = vs.get(state.chassis_id) {
-                let grounded: Vec<bool> = v.wheels.iter().map(|w| w.is_grounded).collect();
-                let susp: Vec<f32> = v.wheels.iter().map(|w| w.suspension_length).collect();
-                // The rigid body's *own* velocity, beside the controller's idea of speed. If the
-                // two disagree the bug is not in the car, it is in what is being integrated.
-                let vel = world.borrow::<Velocity>().get(state.chassis_id).map(|v| v.linear)
-                    .unwrap_or(Vec3::ZERO);
-                let drive: Vec<f32> = v.wheels.iter().map(|w| w.drive_torque).collect();
-                println!(
-                    "diag  pos ({:+.2},{:+.2},{:+.2})  vel ({:+.2},{:+.2},{:+.2})  fwd_speed {:+.2}  gear {}  rpm {:.0}  throttle {:.2}  grounded {:?}  drive {:?}",
-                    cpos.x, cpos.y, cpos.z, vel.x, vel.y, vel.z, speed,
-                    v.current_gear, v.engine_rpm, v.throttle_input, grounded,
-                    drive.iter().map(|x| x.round()).collect::<Vec<_>>(),
-                );
-                let _ = &susp;
-            }
-        }
-    }
+    diagnose(world, state, pose);
 
-    // Sync visuals.
-    state.wheel_spin += (speed / state.wheel_radius.max(0.05)) * dt;
-    let spin = Quat::from_axis_angle(Vec3::X, state.wheel_spin);
-    let steer = Quat::from_axis_angle(Vec3::Y, -state.steer_angle * state.max_steer);
-    {
-        let mut ts = unsafe { world.borrow_mut_unchecked::<Transform>() };
-        let mut gs = unsafe { world.borrow_mut_unchecked::<GlobalTransform>() };
-        for &id in &state.visual_ids {
-            if let Some(mut t) = ts.get_mut(id) {
-                t.position = cpos;
-                t.rotation = crot;
-                t.update_local_matrix();
-                if let Some(mut g) = gs.get_mut(id) {
-                    g.matrix = t.local_matrix;
-                }
-            }
-        }
-        for w in &state.wheels {
-            // Yaw the left wheels 180° so their rim faces outward (else the flat inboard back
-            // shows); mirror is innermost so spin still turns about the shared chassis axle.
-            let mirror = if w.local.x < 0.0 { Quat::from_rotation_y(std::f32::consts::PI) } else { Quat::IDENTITY };
-            let lr = if w.front { steer * spin * mirror } else { spin * mirror };
-            if let Some(mut t) = ts.get_mut(w.id) {
-                t.position = cpos + crot * w.local;
-                t.rotation = crot * lr;
-                t.update_local_matrix();
-                if let Some(mut g) = gs.get_mut(w.id) {
-                    g.matrix = t.local_matrix;
-                }
-            }
-        }
-    }
-
-    // Camera.
-    let orbit = input.is_mouse_button_pressed(gizmo::core::input::mouse::RIGHT);
-    if state.shotcam {
-        // Low front-3/4 cinematic view (forward = -Z, +X = right), tracking the car's frame.
-        state.cam_pos = cpos + crot * Vec3::new(4.2, 1.4, -5.6);
-        let look = cpos + Vec3::new(0.0, 0.5, 0.0);
-        let dir = (look - state.cam_pos).normalize();
-        state.cam_yaw = dir.z.atan2(dir.x);
-        state.cam_pitch = dir.y.asin();
-    } else if orbit {
-        let fwd = Camera::forward_from(state.cam_yaw, state.cam_pitch);
-        state.cam_pos = cpos + Vec3::new(0.0, 1.2, 0.0) - fwd * 9.0;
-    } else {
-        let forward = crot * Vec3::new(0.0, 0.0, -1.0);
-        let target = cpos - forward * 7.0 + Vec3::new(0.0, 2.2, 0.0);
-        let k = 1.0 - (-10.0 * dt).exp();
-        state.cam_pos = state.cam_pos.lerp(target, k);
-        let look = cpos + Vec3::new(0.0, 0.7, 0.0);
-        let dir = (look - state.cam_pos).normalize();
-        state.cam_yaw = dir.z.atan2(dir.x);
-        state.cam_pitch = dir.y.asin();
-    }
-    update_camera(world, state, input);
+    state.rig.sync_visuals(world, pose, dt, controls.steer);
+    state.camera.update(world, input, pose, dt);
 }
 
-fn update_camera(world: &mut World, state: &mut RaceState, input: &Input) {
-    if input.is_mouse_button_pressed(gizmo::core::input::mouse::RIGHT) {
-        let d = input.mouse_delta();
-        state.cam_yaw += d.0 * 0.005;
-        state.cam_pitch += d.1 * 0.005;
+/// `NFS_DIAG=1`: once a second, what the physics actually thinks is happening. Three vague
+/// symptoms ("doesn't move", "W goes backwards", "a square") become numbers.
+fn diagnose(world: &World, state: &mut RaceState, pose: nfsu2::rig::Pose) {
+    if std::env::var("NFS_DIAG").is_err() {
+        return;
     }
-    state.cam_pitch = state.cam_pitch.clamp(-std::f32::consts::FRAC_PI_2 + 0.1, std::f32::consts::FRAC_PI_2 - 0.1);
-    let cam_id = state.camera_id;
-    let mut transforms = unsafe { world.borrow_mut_unchecked::<Transform>() };
-    let mut globals = unsafe { world.borrow_mut_unchecked::<GlobalTransform>() };
-    let mut cameras = unsafe { world.borrow_mut_unchecked::<Camera>() };
-    if let Some(mut t) = transforms.get_mut(cam_id) {
-        t.position = state.cam_pos;
-        t.update_local_matrix();
-        if let Some(mut g) = globals.get_mut(cam_id) {
-            g.matrix = t.local_matrix;
-        }
+    let tick = state.cur_time as i32;
+    if tick == state.diag_tick {
+        return;
     }
-    if let Some(mut c) = cameras.get_mut(cam_id) {
-        c.yaw = state.cam_yaw;
-        c.pitch = state.cam_pitch;
-    }
+    state.diag_tick = tick;
+    let vehicles = world.borrow::<gizmo::physics::vehicle::VehicleController>();
+    let Some(v) = vehicles.get(state.rig.chassis) else { return };
+    let grounded: Vec<bool> = v.wheels.iter().map(|w| w.is_grounded).collect();
+    let drive: Vec<f32> = v.wheels.iter().map(|w| w.drive_torque.round()).collect();
+    // The rigid body's *own* velocity, beside the controller's idea of speed. If the two disagree
+    // the bug is not in the car, it is in what is being integrated.
+    let vel = world.borrow::<Velocity>().get(state.rig.chassis).map_or(Vec3::ZERO, |v| v.linear);
+    println!(
+        "diag  pos ({:+.2},{:+.2},{:+.2})  vel ({:+.2},{:+.2},{:+.2})  fwd_speed {:+.2}  gear {}  rpm {:.0}  throttle {:.2}  grounded {grounded:?}  drive {drive:?}",
+        pose.position.x, pose.position.y, pose.position.z,
+        vel.x, vel.y, vel.z,
+        pose.speed,
+        v.current_gear, v.engine_rpm, v.throttle_input,
+    );
 }
 
 fn ui(world: &mut World, state: &mut RaceState, ctx: &egui::Context) {
     let speed = world
         .borrow::<gizmo::physics::vehicle::VehicleController>()
-        .get(state.chassis_id)
+        .get(state.rig.chassis)
         .map(|v| v.current_speed_kmh.abs())
         .unwrap_or(0.0);
     egui::Area::new(egui::Id::new("hud"))

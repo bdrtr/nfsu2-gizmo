@@ -15,10 +15,15 @@
 //! * [`assets`] — the filesystem/environment edge (sibling asset files, env overrides).
 //! * [`scene`] — the engine-side scaffolding the demo binaries share: spawning an assembled
 //!   car into a world, and the lights to see it by.
+//! * [`rig`] — the car as a machine standing in a world: chassis, suspension, controls, camera.
+//!   Everything a binary needs between "here is a `GEOMETRY.BIN`" and "it drives".
+//! * [`world`] — the city, on the same terms: parsed regions into cells of merged meshes and
+//!   per-cell collision geometry.
 
 pub mod assets;
 pub mod car;
 pub mod geom;
+pub mod rig;
 pub mod scene;
 pub mod world;
 
