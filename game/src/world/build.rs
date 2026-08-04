@@ -36,16 +36,29 @@ pub struct CityVisuals {
     pub duplicates: usize,
     /// Index runs whose texture slot resolved in no pack of this region.
     pub unresolved_runs: usize,
+    /// The distinct keys behind those runs, so a caller can try the shared tiers for them rather
+    /// than guessing at which ones went missing.
+    pub unresolved_keys: Vec<AssetHash>,
 }
 
 /// Which texture a run uses: its group names a slot by position, and the slot names a key.
+///
+/// `shared` is consulted after the region's own packs — see [`super::SharedTextures`] for why the
+/// order is here and not in the parser.
 ///
 /// Returning `None` for a key no pack in this region carries is deliberate rather than a fallback.
 /// 1,289 of the city's 70,439 slots are in that state — most live in `TRACKS/LOC4DYNTEX.BIN` or
 /// under `GLOBAL/`, and 111 exist nowhere in the install — and quietly substituting some other
 /// texture would make a missing tier look like a working one.
-fn texture_for(key: AssetHash, packs: &[TrackPack<'_>]) -> Option<AssetHash> {
-    packs.iter().find_map(|p| p.get(key)).map(|t| t.key)
+fn texture_for(
+    key: AssetHash,
+    packs: &[TrackPack<'_>],
+    shared: Option<&super::SharedTextures>,
+) -> Option<AssetHash> {
+    if packs.iter().any(|p| p.get(key).is_some()) {
+        return Some(key);
+    }
+    shared.and_then(|s| s.get(key)).map(|_| key)
 }
 
 /// Build one region's meshes.
@@ -56,6 +69,7 @@ pub fn build_region(
     device: &wgpu::Device,
     meshes: Vec<WorldMesh>,
     packs: &[TrackPack<'_>],
+    shared: Option<&super::SharedTextures>,
     around: Vec3,
     budget: Option<usize>,
 ) -> CityVisuals {
@@ -83,6 +97,7 @@ pub fn build_region(
     // twice produces the same meshes in the same order — a golden screenshot needs that.
     let mut buckets: BTreeMap<BucketKey, Vec<Vertex>> = BTreeMap::new();
     let mut unresolved_runs = 0usize;
+    let mut unresolved_keys: std::collections::BTreeSet<u32> = std::collections::BTreeSet::new();
 
     for object in &objects {
         if object.positions.is_empty() {
@@ -99,15 +114,16 @@ pub fn build_region(
         // A run with no group table still draws — it is the whole index buffer with slot 0.
         let runs: Vec<(usize, usize, Option<AssetHash>)> = if object.groups.is_empty() {
             let key = object.texture_slots.first().copied();
-            vec![(0, object.indices.len(), key.and_then(|k| texture_for(k, packs)))]
+            vec![(0, object.indices.len(), key.and_then(|k| texture_for(k, packs, shared)))]
         } else {
             object
                 .groups
                 .iter()
                 .map(|g| {
-                    let tex = texture_for(g.hash, packs);
+                    let tex = texture_for(g.hash, packs, shared);
                     if tex.is_none() {
                         unresolved_runs += 1;
+                        unresolved_keys.insert(g.hash.0);
                     }
                     (g.index_offset, g.index_count, tex)
                 })
@@ -163,5 +179,11 @@ pub fn build_region(
         })
         .collect();
 
-    CityVisuals { meshes, objects: objects.len(), duplicates, unresolved_runs }
+    CityVisuals {
+        meshes,
+        objects: objects.len(),
+        duplicates,
+        unresolved_runs,
+        unresolved_keys: unresolved_keys.into_iter().map(AssetHash).collect(),
+    }
 }

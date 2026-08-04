@@ -26,9 +26,11 @@
 
 mod build;
 mod cell;
+mod tiers;
 
 pub use build::{build_region, CityMesh, CityVisuals};
 pub use cell::{cell_centre, cell_of, CELL_SIZE};
+pub use tiers::SharedTextures;
 
 use gizmo::prelude::*;
 use gizmo_nfs::world::{WorldMesh, WorldSolidHeader};
@@ -121,6 +123,23 @@ pub fn is_backdrop(name: &str) -> bool {
     name.contains("SKYDOME") || name.starts_with("PAN_") || name.contains("PANARAMA")
 }
 
+/// Whether an object is a distant-detail proxy rather than the world itself.
+///
+/// `*_WORLD_LOD` is a coarse stand-in the game swaps in beyond a distance —
+/// `TRN_HILLRIDGE_WORLD_LOD` is one plane spanning a kilometre. Drawn unconditionally it sits
+/// across the real streets as a pale surface, which is what the flat white ground in every
+/// street-level shot was: not an unresolved texture (those draw grey) and not the road, because
+/// there is no road object within 60 m of that junction at all.
+///
+/// This is **not** something to throw away — it is exactly the LOD data a distance-based swap
+/// wants, and drawing it far away is most of what makes a city this size affordable. It is
+/// excluded here only because nothing selects by distance yet, and until something does, a proxy
+/// drawn at arm's length is worse than no proxy.
+#[must_use]
+pub fn is_distant_lod(name: &str) -> bool {
+    name.contains("WORLD_LOD")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -197,6 +216,17 @@ mod tests {
         ] {
             assert!(!is_backdrop(name), "{name} is city");
         }
+    }
+
+    /// The LOD proxies are a separate family from the backdrop and must not be confused with the
+    /// terrain they stand in for.
+    #[test]
+    fn a_world_lod_proxy_is_not_the_world() {
+        assert!(is_distant_lod("TRN_HILLRIDGE_WORLD_LOD"));
+        assert!(!is_distant_lod("TRN_HILLRIDGE"));
+        assert!(!is_distant_lod("TRN_ROADA_CHOP_A2_R14"));
+        // And it is not backdrop: a backdrop is never drawn, a proxy is drawn far away.
+        assert!(!is_backdrop("TRN_HILLRIDGE_WORLD_LOD"));
     }
 
     #[test]

@@ -77,7 +77,9 @@ fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> FlyState {
         meshes.extend(gizmo_nfs::world::meshes(bytes).expect("meshes"));
         packs.extend(gizmo_nfs::world::packs(bytes).expect("packs"));
     }
-    meshes.retain(|m| !nfsu2::world::is_backdrop(&m.header.name));
+    meshes.retain(|m| {
+        !nfsu2::world::is_backdrop(&m.header.name) && !nfsu2::world::is_distant_lod(&m.header.name)
+    });
 
     let start = std::env::var("NFS_AT")
         .ok()
@@ -86,8 +88,17 @@ fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> FlyState {
             (v.len() == 3).then(|| Vec3::new(v[0], v[1], v[2]))
         })
         .unwrap_or(Vec3::new(640.0, 40.0, -2816.0));
+    // The shared tiers: `TRACKS/LOC4DYNTEX.BIN` and `GLOBAL/`, found from the TRACKS directory's
+    // parent. Missing means grey walls, not a failure to start.
+    let root = std::path::Path::new(&path)
+        .ancestors()
+        .find(|a| a.join("GLOBAL").is_dir())
+        .map(std::path::Path::to_path_buf);
+    let shared = root.map(|r| nfsu2::world::SharedTextures::load(&r)).unwrap_or_default();
+    println!("{} shared textures", shared.len());
+
     let budget = std::env::var("NFS_BUDGET").ok().and_then(|s| s.parse::<usize>().ok());
-    let city = build_region(&renderer.device, meshes, &packs, start, budget);
+    let city = build_region(&renderer.device, meshes, &packs, Some(&shared), start, budget);
 
     let white = {
         let mut a = AssetManager::new();
@@ -105,8 +116,8 @@ fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> FlyState {
         if bound.contains_key(&key) {
             continue;
         }
-        let Some((pack, rec)) = packs.iter().find_map(|p| p.get(key).map(|r| (p, r))) else { continue };
-        let Ok(img) = pack.decode(rec) else { continue };
+        let own = packs.iter().find_map(|p| p.get(key).and_then(|r| p.decode(r).ok()));
+        let Some(img) = own.or_else(|| shared.get(key).cloned()) else { continue };
         if let Some(bg) = tex.upload(&format!("city_{:08X}", key.0), &img.rgba, img.width, img.height) {
             bound.insert(key, bg);
         }

@@ -66,7 +66,10 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
     // Sky and panorama are drawn by nothing yet, and drawn as ordinary geometry they are a wall
     // across the frame — see `world::is_backdrop` for what they are and how they were found.
     let sky = meshes.iter().filter(|m| nfsu2::world::is_backdrop(&m.header.name)).count();
-    meshes.retain(|m| !nfsu2::world::is_backdrop(&m.header.name));
+    let lod = meshes.iter().filter(|m| nfsu2::world::is_distant_lod(&m.header.name)).count();
+    meshes.retain(|m| {
+        !nfsu2::world::is_backdrop(&m.header.name) && !nfsu2::world::is_distant_lod(&m.header.name)
+    });
     let declared = meshes.len();
 
     // NFS_TOP=<n>: name the n objects with the largest extent, which is how you find out what a
@@ -87,13 +90,63 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
         }
     }
 
+    // The shared tiers: `TRACKS/LOC4DYNTEX.BIN` and `GLOBAL/`, found from the TRACKS directory's
+    // parent. Missing means grey walls, not a failure to start.
+    let root = std::path::Path::new(&path)
+        .ancestors()
+        .find(|a| a.join("GLOBAL").is_dir())
+        .map(std::path::Path::to_path_buf);
+    let shared = root.map(|r| nfsu2::world::SharedTextures::load(&r)).unwrap_or_default();
+    println!("{} shared textures", shared.len());
+
+    // NFS_NEAR=<radius>: name the objects whose box contains or nearly contains the look-at
+    // point, with their resolved texture. For finding out what a surface actually is.
+    if let Ok(r) = std::env::var("NFS_NEAR").map(|v| v.parse::<f32>().unwrap_or(40.0)) {
+        let at = std::env::var("NFS_AT")
+            .ok()
+            .and_then(|s| vec3_of(&s))
+            .unwrap_or(Vec3::ZERO);
+        let mut near: Vec<(f32, &str, usize, String)> = meshes
+            .iter()
+            .filter(|m| !m.positions.is_empty())
+            .filter_map(|m| {
+                let lo = nfsu2::world::world_point(&m.header, m.header.bbox_min);
+                let hi = nfsu2::world::world_point(&m.header, m.header.bbox_max);
+                let c = (lo + hi) * 0.5;
+                // Containment on the ground plane, not centre distance: a terrain plane centred a
+                // kilometre away is still the thing under your feet.
+                let inside = at.x >= lo.x.min(hi.x) - r
+                    && at.x <= lo.x.max(hi.x) + r
+                    && at.z >= lo.z.min(hi.z) - r
+                    && at.z <= lo.z.max(hi.z) + r;
+                let d = (c - at).length();
+                inside.then(|| {
+                    let keys: Vec<String> = m
+                        .texture_slots
+                        .iter()
+                        .map(|k| {
+                            let own = packs.iter().any(|p| p.get(*k).is_some());
+                            let sh = shared.get(*k).is_some();
+                            format!("{:08X}{}", k.0, if own { "" } else if sh { "^shared" } else { "^MISSING" })
+                        })
+                        .collect();
+                    (d, m.header.name.as_str(), m.positions.len(), keys.join(" "))
+                })
+            })
+            .collect();
+        near.sort_by(|a, b| a.0.total_cmp(&b.0));
+        for (d, name, v, keys) in near.iter().take(16) {
+            println!("  d={d:>7.0}  v={v:>6}  {name:<28} {keys}");
+        }
+    }
+
     let budget = std::env::var("NFS_BUDGET").ok().and_then(|s| s.parse::<usize>().ok());
     // Frame on the region's own centre so a budget takes a neighbourhood rather than an edge.
     let around = centre_of(&meshes);
-    let city = build_region(&renderer.device, meshes, &packs, around, budget);
+    let city = build_region(&renderer.device, meshes, &packs, Some(&shared), around, budget);
 
     println!(
-        "{declared} declared, {sky} backdrop, {} kept ({} duplicates), {} packs, {} merged meshes, {} unresolved runs",
+        "{declared} declared, {sky} backdrop, {lod} world-LOD, {} kept ({} duplicates), {} packs, {} merged meshes, {} unresolved runs",
         city.objects,
         city.duplicates,
         packs.len(),
@@ -116,10 +169,8 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
         if bound.contains_key(&key) {
             continue;
         }
-        let Some((pack, record)) = packs.iter().find_map(|p| p.get(key).map(|r| (p, r))) else {
-            continue;
-        };
-        let Ok(image) = pack.decode(record) else { continue };
+        let own = packs.iter().find_map(|p| p.get(key).and_then(|r| p.decode(r).ok()));
+        let Some(image) = own.or_else(|| shared.get(key).cloned()) else { continue };
         let name = format!("city_{:08X}", key.0);
         if let Some(bg) = tex.upload(&name, &image.rgba, image.width, image.height) {
             bound.insert(key, bg);
