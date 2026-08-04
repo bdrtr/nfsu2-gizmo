@@ -26,10 +26,12 @@
 
 mod build;
 mod cell;
+mod collide;
 mod tiers;
 
 pub use build::{build_region, CityMesh, CityVisuals};
 pub use cell::{cell_centre, cell_of, CELL_SIZE};
+pub use collide::{collision_cells, surface_of, CityCollider, Surface, WALL_NORMAL_Y};
 pub use tiers::SharedTextures;
 
 use gizmo::prelude::*;
