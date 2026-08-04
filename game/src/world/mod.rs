@@ -99,6 +99,28 @@ pub fn dedup(meshes: Vec<WorldMesh>) -> Vec<WorldMesh> {
         .collect()
 }
 
+/// Whether an object is backdrop rather than city: the sky shell and the painted panorama.
+///
+/// This is a **render category, not a parser fact** — the file does not label them, and what to do
+/// with them is a decision about how the world is drawn. It lives here because the decision needs
+/// making somewhere and the alternative is each binary inventing its own substring list.
+///
+/// Two families, found by measuring the largest objects in the loaded city rather than by guessing:
+///
+/// - `SKYDOME` — two per region, 40 across the eight bundles. Their texture keys live in
+///   `TRACKS/LOC4DYNTEX.BIN`, not in the region's own packs.
+/// - `PAN_*` and `*PANARAMA*` — the distant backdrop: `PAN_SKYLINE`, `PAN_OCEAN`, `PAN_HILLRIDGE`,
+///   `PAN_HILLS_C98`, `TRN_PANARAMA_AIRPORT`. (The game spells it "PANARAMA".) These span 12,000 to
+///   18,000 units against a district's few thousand, so drawn as ordinary geometry from inside the
+///   city they are a wall across the whole frame.
+///
+/// Both want the same treatment a real renderer gives a backdrop — drawn first, camera-locked,
+/// depth writes off — and until something does that, drawing them at all is worse than not.
+#[must_use]
+pub fn is_backdrop(name: &str) -> bool {
+    name.contains("SKYDOME") || name.starts_with("PAN_") || name.contains("PANARAMA")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -158,6 +180,23 @@ mod tests {
         };
         m.header.bbox_max = [bbox_max; 3];
         m
+    }
+
+    /// The names are the ones measured in the install, not a guess at a naming scheme.
+    #[test]
+    fn the_backdrop_families_are_recognised_and_the_city_is_not() {
+        for name in [
+            "SKYDOME", "SKYDOME_A", "PAN_SKYLINE", "PAN_OCEAN", "PAN_HILLRIDGE", "PAN_HILLS_C98",
+            "PAN_HILLSWEST", "TRN_PANARAMAB_01", "TRN_PANARAMA_AIRPORT",
+        ] {
+            assert!(is_backdrop(name), "{name} is backdrop");
+        }
+        for name in [
+            "TRN_ROADA_CHOP_A2_R14", "TRN_TERRAINA_01", "XB_CC_SPANISHCONDOB", "OBJ_PYLON",
+            "RDP_PARKING_NL_AA_KT", "TRN_GRASSC",
+        ] {
+            assert!(!is_backdrop(name), "{name} is city");
+        }
     }
 
     #[test]

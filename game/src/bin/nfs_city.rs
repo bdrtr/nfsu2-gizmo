@@ -4,13 +4,21 @@
 //! objects and its texture packs, merge them per (cell, texture), and render one frame from above
 //! into an offscreen target. No window, so it works over SSH and in CI.
 //!
-//! Usage: `nfs_city STREAML4RH.BUN OUT.raw [W H]`
+//! Usage: `nfs_city <STREAM*.BUN | TRACKS-dir> OUT.raw [W H]`
+//!
+//! Given the `TRACKS` directory it loads every region at once. The bundles are not adjacent tiles
+//! — they share one world coordinate system and overlap, being per-race-route supersets of the same
+//! city — so a district's buildings and the roads under them can live in different files, and
+//! loading one alone leaves the buildings hanging in the air.
 //!
 //! Env:
 //! - `NFS_BUDGET=<n>` — take only the `n` objects nearest the region's centre. The throwaway that
 //!   makes `STREAML4RA`'s 10,735 objects usable before streaming exists; delete it with the rest of
 //!   the radius filter.
-//! - `NFS_EYE="x,y,z"` — camera eye, relative to the loaded content's centre. Default is a high
+//! - `NFS_AT="x,y,z"` — what to look at, in world space. Defaults to the centre of what loaded,
+//!   which is only useful for one region; with the whole `TRACKS` directory the centre is a point
+//!   in the middle of eight overlapping districts.
+//! - `NFS_EYE="x,y,z"` — camera eye, relative to the look-at point. Default is a high
 //!   three-quarter view framing the whole of what loaded.
 //!
 //! Prints one line of counts before rendering, because most of what can go wrong here is visible
@@ -39,19 +47,45 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
     let mut world = World::new();
     let mut assets = AssetManager::new();
 
-    let bytes = std::fs::read(path).unwrap_or_else(|e| panic!("read {path}: {e}"));
-    let mut meshes = gizmo_nfs::world::meshes(&bytes).expect("read the region's meshes");
+    // Every bundle's bytes stay alive for the whole run: a pack borrows its pixel pool from them.
+    let files = bundles(path);
+    assert!(!files.is_empty(), "{path}: no STREAM*.BUN here");
+    let loaded: Vec<Vec<u8>> = files
+        .iter()
+        .map(|f| std::fs::read(f).unwrap_or_else(|e| panic!("read {}: {e}", f.display())))
+        .collect();
 
-    // The skydome is a viewer decision, not a parser one, so it is filtered here. Every region
-    // ships two of them, and their texture keys live in `TRACKS/LOC4DYNTEX.BIN` rather than in the
-    // region's own packs — so with the shared tier not wired up yet they draw in the unresolved
-    // grey, and being a sphere the size of the world they swallow the entire frame. A real
-    // renderer keeps them and draws them camera-locked with depth writes off; this one is looking
-    // at the ground.
-    let sky = meshes.iter().filter(|m| m.header.name.contains("SKYDOME")).count();
-    meshes.retain(|m| !m.header.name.contains("SKYDOME"));
-    let packs = gizmo_nfs::world::packs(&bytes).expect("read the region's texture packs");
+    let mut meshes = Vec::new();
+    let mut packs = Vec::new();
+    for bytes in &loaded {
+        meshes.extend(gizmo_nfs::world::meshes(bytes).expect("read a region's meshes"));
+        packs.extend(gizmo_nfs::world::packs(bytes).expect("read a region's texture packs"));
+    }
+    println!("{} bundle(s), {} objects, {} packs", loaded.len(), meshes.len(), packs.len());
+
+    // Sky and panorama are drawn by nothing yet, and drawn as ordinary geometry they are a wall
+    // across the frame — see `world::is_backdrop` for what they are and how they were found.
+    let sky = meshes.iter().filter(|m| nfsu2::world::is_backdrop(&m.header.name)).count();
+    meshes.retain(|m| !nfsu2::world::is_backdrop(&m.header.name));
     let declared = meshes.len();
+
+    // NFS_TOP=<n>: name the n objects with the largest extent, which is how you find out what a
+    // frame-filling surface actually is instead of guessing at it.
+    if let Ok(n) = std::env::var("NFS_TOP").map(|v| v.parse::<usize>().unwrap_or(20)) {
+        let mut by_size: Vec<(f32, &str, usize)> = meshes
+            .iter()
+            .filter(|m| !m.positions.is_empty())
+            .map(|m| {
+                let lo = nfsu2::world::world_point(&m.header, m.header.bbox_min);
+                let hi = nfsu2::world::world_point(&m.header, m.header.bbox_max);
+                ((hi - lo).length(), m.header.name.as_str(), m.positions.len())
+            })
+            .collect();
+        by_size.sort_by(|a, b| b.0.total_cmp(&a.0));
+        for (span, name, verts) in by_size.iter().take(n) {
+            println!("  span {span:>10.0}  verts {verts:>7}  {name}");
+        }
+    }
 
     let budget = std::env::var("NFS_BUDGET").ok().and_then(|s| s.parse::<usize>().ok());
     // Frame on the region's own centre so a budget takes a neighbourhood rather than an edge.
@@ -59,7 +93,7 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
     let city = build_region(&renderer.device, meshes, &packs, around, budget);
 
     println!(
-        "{declared} declared, {sky} skydome, {} kept ({} duplicates), {} packs, {} merged meshes, {} unresolved runs",
+        "{declared} declared, {sky} backdrop, {} kept ({} duplicates), {} packs, {} merged meshes, {} unresolved runs",
         city.objects,
         city.duplicates,
         packs.len(),
@@ -113,14 +147,14 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
 
     // ── Camera: frame what actually loaded ──
     let (lo, hi) = bounds(&city);
-    let mid = (lo + hi) * 0.5;
+    let mid = std::env::var("NFS_AT")
+        .ok()
+        .and_then(|s| vec3_of(&s))
+        .unwrap_or_else(|| (lo + hi) * 0.5);
     let radius = ((hi - lo).length() * 0.5).max(1.0);
     let eye_off = std::env::var("NFS_EYE")
         .ok()
-        .and_then(|s| {
-            let v: Vec<f32> = s.split(',').filter_map(|p| p.trim().parse().ok()).collect();
-            (v.len() == 3).then(|| Vec3::new(v[0], v[1], v[2]))
-        })
+        .and_then(|s| vec3_of(&s))
         .unwrap_or_else(|| Vec3::new(radius * 0.9, radius * 1.1, radius * 0.9));
     let eye = mid + eye_off;
 
@@ -153,14 +187,44 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
     shoot(&mut world, &mut renderer, out, w, h);
 }
 
+/// `"x,y,z"` → a vector, or `None` if it is not three numbers.
+fn vec3_of(s: &str) -> Option<Vec3> {
+    let v: Vec<f32> = s.split(',').filter_map(|p| p.trim().parse().ok()).collect();
+    (v.len() == 3).then(|| Vec3::new(v[0], v[1], v[2]))
+}
+
+/// One bundle, or every `STREAM*.BUN` in a directory, in name order.
+fn bundles(path: &str) -> Vec<std::path::PathBuf> {
+    let p = std::path::Path::new(path);
+    if p.is_file() {
+        return vec![p.to_path_buf()];
+    }
+    let Ok(dir) = std::fs::read_dir(p) else { return Vec::new() };
+    let mut out: Vec<_> = dir
+        .filter_map(Result::ok)
+        .map(|e| e.path())
+        .filter(|q| {
+            q.file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.starts_with("STREAM") && n.ends_with(".BUN"))
+        })
+        .collect();
+    out.sort();
+    out
+}
+
 /// The centre of every object's bounding box, in the Gizmo frame.
 fn centre_of(meshes: &[gizmo_nfs::world::WorldMesh]) -> Vec3 {
     let (mut lo, mut hi) = (Vec3::splat(f32::INFINITY), Vec3::splat(f32::NEG_INFINITY));
-    for m in meshes {
+    // Objects with no geometry are skipped: the `ANM_*` animation markers carry an infinite
+    // bounding box, and one of those turns the whole city's centre into a NaN.
+    for m in meshes.iter().filter(|m| !m.positions.is_empty()) {
         for corner in [m.header.bbox_min, m.header.bbox_max] {
             let p = nfsu2::world::world_point(&m.header, corner);
-            lo = lo.min(p);
-            hi = hi.max(p);
+            if p.is_finite() {
+                lo = lo.min(p);
+                hi = hi.max(p);
+            }
         }
     }
     if lo.is_finite() && hi.is_finite() {
