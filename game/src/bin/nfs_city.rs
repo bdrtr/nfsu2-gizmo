@@ -140,6 +140,20 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
         }
     }
 
+    // NFS_FIND=<substr>: how many loaded objects match, and where the first few are — for
+    // answering "is the road even here" without flying around looking for it.
+    if let Ok(pat) = std::env::var("NFS_FIND") {
+        let hits: Vec<&gizmo_nfs::world::WorldMesh> =
+            meshes.iter().filter(|m| m.header.name.contains(&pat)).collect();
+        println!("{} objects match {pat:?}", hits.len());
+        for m in hits.iter().take(6) {
+            let lo = nfsu2::world::world_point(&m.header, m.header.bbox_min);
+            let hi = nfsu2::world::world_point(&m.header, m.header.bbox_max);
+            let c = (lo + hi) * 0.5;
+            println!("  {:<28} centre {:.0},{:.0},{:.0}  v={}", m.header.name, c.x, c.y, c.z, m.positions.len());
+        }
+    }
+
     let budget = std::env::var("NFS_BUDGET").ok().and_then(|s| s.parse::<usize>().ok());
     // Frame on the region's own centre so a budget takes a neighbourhood rather than an edge.
     let around = centre_of(&meshes);
@@ -179,6 +193,17 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
     }
     println!("{decoded} textures decoded and uploaded");
 
+    // NFS_ID="x,y": render every merged mesh in a colour that encodes its index, then say which
+    // one covers that pixel. Four hypotheses about the flat white ground were each eliminated by
+    // filtering a family out and finding the frame unchanged; this asks the frame directly instead.
+    //
+    // The albedo is pre-converted linear→sRGB's inverse so the byte that lands in an
+    // `Rgba8UnormSrgb` target is the index back again.
+    let id_probe = std::env::var("NFS_ID").ok().and_then(|s| {
+        let v: Vec<u32> = s.split(',').filter_map(|p| p.trim().parse().ok()).collect();
+        (v.len() == 2).then(|| (v[0], v[1]))
+    });
+
     // ── Spawn ──
     //
     // Baked-lit: the city's own lighting is in the vertex colour, and the one thing the file
@@ -186,7 +211,19 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
     // colour in the way `unlit` does and adds the sun's cascade term, for one forward draw per
     // batch instead of the eleven a deferred-lit one costs.
     let mut spawned = 0usize;
-    for m in &city.meshes {
+    for (idx, m) in city.meshes.iter().enumerate() {
+        if id_probe.is_some() {
+            let to_linear = |b: u32| {
+                let v = b as f32 / 255.0;
+                if v <= 0.04045 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
+            };
+            let (r, g) = ((idx & 0xFF) as u32, ((idx >> 8) & 0xFF) as u32);
+            let material = Material::new(white.clone())
+                .with_unlit(Vec4::new(to_linear(r), to_linear(g), 0.0, 1.0));
+            scene::spawn_mesh(&mut world, m.mesh.clone(), material, Transform::new(m.origin));
+            spawned += 1;
+            continue;
+        }
         let material = match m.texture.and_then(|k| bound.get(&k)) {
             Some(bg) => Material::new(bg.clone()).with_baked_lit(Vec4::new(1.0, 1.0, 1.0, 1.0)),
             // A run whose texture resolved nowhere draws in a flat grey rather than vanishing —
@@ -237,7 +274,25 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
     );
     println!("camera at {eye:?} looking at {mid:?}, near={near:.1} far={far:.1}");
 
-    shoot(&mut world, &mut renderer, out, w, h);
+    let pixels = shoot(&mut world, &mut renderer, out, w, h);
+
+    if let Some((px, py)) = id_probe {
+        let i = ((py.min(h - 1) * w + px.min(w - 1)) * 4) as usize;
+        let (r, g) = (u32::from(pixels[i]), u32::from(pixels[i + 1]));
+        let idx = (g << 8 | r) as usize;
+        println!("pixel ({px},{py}) = rgb({r},{g},{}) → mesh #{idx}", pixels[i + 2]);
+        match city.meshes.get(idx) {
+            Some(m) => {
+                let name = m
+                    .texture
+                    .and_then(|k| packs.iter().find_map(|p| p.get(k)).map(|t| t.name.clone()))
+                    .or_else(|| m.texture.map(|k| format!("shared {:08X}", k.0)))
+                    .unwrap_or_else(|| "(no texture)".into());
+                println!("  cell {:?}  origin {:?}  texture {name}", m.cell, m.origin);
+            }
+            None => println!("  no mesh with that index — the pixel is background"),
+        }
+    }
 }
 
 /// `"x,y,z"` → a vector, or `None` if it is not three numbers.
@@ -303,7 +358,7 @@ fn bounds(city: &CityVisuals) -> (Vec3, Vec3) {
 }
 
 /// Render one frame into an offscreen target and write it out, tightly packed.
-fn shoot(world: &mut World, renderer: &mut Renderer, out: &str, w: u32, h: u32) {
+fn shoot(world: &mut World, renderer: &mut Renderer, out: &str, w: u32, h: u32) -> Vec<u8> {
     let format = renderer.config.format;
     let bpp = 4u32;
     let target = renderer.device.create_texture(&wgpu::TextureDescriptor {
@@ -362,4 +417,5 @@ fn shoot(world: &mut World, renderer: &mut Renderer, out: &str, w: u32, h: u32) 
     }
     std::fs::write(out, &tight).expect("write raw");
     println!("{w}x{h} format={format:?} -> {out}");
+    tight
 }
