@@ -40,7 +40,7 @@ Kendi kurulumumuza karşı sayıldı (crawl + resync yürüyüşüyle, §1.1):
 | `STREAML4RC` | 14.7 MB | 772 | 19 |
 | `STREAML4RR` | 4.2 MB | 482 | 1 |
 | `STREAML4RH` | 2.1 MB | 175 | 1 |
-| **toplam** | **324 MB** | **28.985** | **492** |
+| **toplam** | **324 MB** | **28.985** | **502** |
 
 Her bölgede mesh sayısı = vertex buffer sayısı = materyal sayısı, tam olarak. Yürüyüşün
 doğru olduğunun kanıtı bu.
@@ -397,7 +397,7 @@ türetilmiş kapılar, türetilmiş bariyerler ve beş rakiple, determinist olar
   mal olur ve kimse farkı anlamaz. Waypoint imleci, hız sınırlı direksiyon, öndeki virajdan
   köşe-farkında tempo, hedef hıza küçük bir çarpan olarak lastik bandı, yüksekliği lerp'leyerek
   zemin takibi, **sarmalanmış ilerleme** ile tur sayımı. Saf takip çekirdeği
-  `nfs_race.rs:479-492`'deki otosürüşte zaten var.
+  `nfs_race.rs:479-502`'deki otosürüşte zaten var.
 
 **Motor işi**
 - **State machine'i bağla.** `State<S>`'in `set`, `apply_transitions` ve `in_state` koşulu var,
@@ -729,6 +729,30 @@ L4RH'de 175/175, L4RR'de 482/482; L4RC'de 639/772 ve fark **isim kırpılması**
 "639 whole / 133 truncated"ıyla birebir), o yüzden `name_is_whole()` dünya tarafına da kondu.
 Araba başlıkları ise **her zaman tam 192 bayt, sıfır dolgu** (609/610/569 solid'de) — yani
 `geometry::read_matrix`'in mutlak `MATRIX_OFFSET`'i arabalar için doğru, araba yoluna dokunulmadı.
+
+**4. gün ve sonrası — M1'in parser tarafı bitti.** Sırasıyla: `world::tpk` (şehrin kendi paket
+varyantı), doku bağlaması, ve `world::object` (vertex/index tamponları).
+
+| | ölçüm |
+|---|---|
+| doku paketi | **502 paket, 5.087 doku, 5.087'si çözülüyor** |
+| format | **kayıtta yazıyor**, `+0x4A`: DXT1 4.464 · DXT3 532 · P8 91. `0x33310005 +0x14` ikinci kez söylüyor, çapraz tablo 5.087/5.087 diyagonal. Şehirde DXT5 yok |
+| havuz tabanı | `0x33320002` payload'ının 120 baytlık dolgudan sonrası — en uzak uzantı havuzun sonuna **tam** oturuyor, 502/502 |
+| paletler | imgelerden **önce**, havuzun başında. Araba yolunun `palette_at`'i bunu adıyla reddederdi (91 kaydın hepsi) |
+| doku slotu | 70.439 slot, **69.150'si (%98,17) kendi bölgesinde** çözülüyor. Kalanı `LOC4DYNTEX.BIN` (araba varyantı!) ve `GLOBAL/`; 111 referans hiçbir yerde yok |
+| geometri | 24 baytlık stride **doğrulanıyor, seçilmiyor** — `layout_for` önce 36'yı denerdi |
+
+Şehirde **shader yok**: `0x00134013` 28.985 solid'in 3.440'ında var ve 70.548 run'ın 62.270'i
+`0xFF` nöbetçisi taşıyor. Bu yüzden run'lar `shader: AssetHash(0)` ile dönüyor — dosyada olmayan
+bir hash uydurulmuyor.
+
+Goldenlar iki okuyucuyu birbirine karşı kontrol ediyor: aynı objeler, aynı sıra, aynı sayılar, her
+paralel dizi aynı uzunlukta, her index kendi tamponunun içinde, her run böldüğü index tamponunun
+içinde. Tahmin edilmiş bir stride ya da atlanmamış bir dolgu makul bir mesh üretir — bu anlaşmayı
+ise bozar. İkinci bir golden pozisyonların sınırlı bir dünyaya düştüğünü ve Z'nin kısa eksen
+olduğunu iddia ediyor: yanlış stride'da float'lar seve seve 1e38'e saçılır, bir şehir saçılmaz.
+
+**Kalan:** rota dosyaları (`ROUTES*/Paths*.bin`) ve `L4R*.BUN`. Parser'ın geri kalanı hazır.
 
 ---
 
