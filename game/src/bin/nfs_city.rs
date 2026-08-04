@@ -130,18 +130,17 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
 
     // ── Spawn ──
     //
-    // Unlit, because the city is already lit: its lighting is baked into the vertex colour, and
-    // `unlit.wgsl` is the one path that multiplies that in — the PBR fragment shader carries the
-    // attribute all the way to the fragment and then discards it, so the city came out washed and
-    // lit by whatever fake sun the scene had. It is also 1 draw per batch instead of the 11 a lit
-    // one costs (23 before the point-shadow passes were gated).
+    // Baked-lit: the city's own lighting is in the vertex colour, and the one thing the file
+    // cannot know is where the car in front of it is casting. `BakedLit` multiplies the baked
+    // colour in the way `unlit` does and adds the sun's cascade term, for one forward draw per
+    // batch instead of the eleven a deferred-lit one costs.
     let mut spawned = 0usize;
     for m in &city.meshes {
         let material = match m.texture.and_then(|k| bound.get(&k)) {
-            Some(bg) => Material::new(bg.clone()).with_unlit(Vec4::new(1.0, 1.0, 1.0, 1.0)),
+            Some(bg) => Material::new(bg.clone()).with_baked_lit(Vec4::new(1.0, 1.0, 1.0, 1.0)),
             // A run whose texture resolved nowhere draws in a flat grey rather than vanishing —
             // a hole in the world reads as a parser bug, and this is not one.
-            None => Material::new(white.clone()).with_unlit(Vec4::new(0.35, 0.35, 0.38, 1.0)),
+            None => Material::new(white.clone()).with_baked_lit(Vec4::new(0.35, 0.35, 0.38, 1.0)),
         };
         scene::spawn_mesh(&mut world, m.mesh.clone(), material, Transform::new(m.origin));
         spawned += 1;
