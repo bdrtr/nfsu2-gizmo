@@ -32,7 +32,7 @@ mod tiers;
 
 pub use build::{build_region, nearest, CityMesh, CityVisuals};
 pub use cell::{cell_centre, cell_of, CELL_SIZE};
-pub use collide::{collision_cells, surface_of, CityCollider, Surface, WALL_NORMAL_Y};
+pub use collide::{collision_cells, surface_of, Bounds, CityCollider, Surface, WALL_NORMAL_Y};
 pub use load::{bundles, load, start_at, tracks_path, Bundles};
 pub use tiers::SharedTextures;
 

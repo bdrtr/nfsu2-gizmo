@@ -532,6 +532,19 @@ impl CarRig {
             Rescue::NowhereSafe
         };
 
+        self.recover(world);
+        verdict
+    }
+
+    /// Put the car back on the last ground it stood on, at rest, whatever the reason.
+    ///
+    /// Separate from [`Self::keep_in_world`] because falling out of the world is not the only way
+    /// to end up somewhere a car should not be: leaving the mapped city is the other, and that one
+    /// is a decision the caller makes from [`crate::world::Bounds`], not something the wheels can
+    /// report.
+    pub fn recover(&mut self, world: &mut World) {
+        self.airborne_for = 0.0;
+        self.grounded_for = 0.0;
         let safe = self.last_safe;
         let mut transforms = unsafe { world.borrow_mut_unchecked::<Transform>() };
         let mut velocities = unsafe { world.borrow_mut_unchecked::<Velocity>() };
@@ -542,7 +555,6 @@ impl CarRig {
         if let Some(mut v) = velocities.get_mut(self.chassis) {
             *v = Velocity::default();
         }
-        verdict
     }
 
     /// Move every visual entity onto the chassis: the body rigidly, the wheels with spin and steer.

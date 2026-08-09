@@ -59,6 +59,19 @@ const DEFAULT_AT: Vec3 = Vec3::new(710.0, 27.0, 888.0);
 /// suspension settles it. Too small and it spawns inside the tarmac; too large and it lands hard.
 const DROP: f32 = 1.5;
 
+/// How long the car may be outside the mapped city before it is put back.
+///
+/// Long enough to be a warning rather than a punishment: at 100 km/h it is 140 m of road, which is
+/// far more than any corner cuts. It is deliberately much longer than the fall guard's 2.5 s,
+/// because the two answer different questions — falling is unrecoverable and being outside is not.
+const OUT_OF_BOUNDS_GRACE: f32 = 5.0;
+
+/// How far ahead the boundary is asked about, in seconds of travel at the current speed.
+///
+/// Seconds rather than metres because the warning has to arrive in time to act on, and at 30 km/h
+/// 200 m is a leisurely warning while at 200 km/h it is 3.6 seconds of panic.
+const OUT_OF_BOUNDS_LOOKAHEAD: f32 = 2.0;
+
 struct CruiseState {
     rig: CarRig,
     driver: Driver,
@@ -67,6 +80,12 @@ struct CruiseState {
     diag_tick: i32,
     t: f32,
     stats: CityStats,
+    /// Which cells the city covers — the map's edge, since the files carry no barriers.
+    bounds: city::Bounds,
+    /// Seconds spent outside those cells, unbroken. Reset the moment the car is back in.
+    out_for: f32,
+    /// Whether where the car is *pointed* leaves the map — the warning that arrives in time.
+    heading_out: bool,
 }
 
 /// What loading the city produced, kept for the HUD — the numbers that say whether the world under
@@ -150,6 +169,7 @@ fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> CruiseState
     // unit that is neither, and it is the same 256 m cell the visuals merge into, so the collider
     // under the car and the mesh in front of it come from the same objects.
     let colliders = city::collision_cells(&objects);
+    let bounds = city::Bounds::of(&colliders);
     let mut stats = CityStats {
         objects: objects.len(),
         meshes: 0, // the visuals are built below
@@ -295,7 +315,18 @@ fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> CruiseState
         ChaseCamera::spawn(world, rig.start.position + Vec3::new(0.0, 4.0, 10.0), 0.5, 20_000.0);
 
     println!("cruising at {:?} — {} meshes drawn", rig.start.position, stats.meshes);
-    CruiseState { rig, driver: Driver::new(), camera, diag_tick: -1, t: 0.0, stats }
+    println!("bounds: {} cells with ground", bounds.cells());
+    CruiseState {
+        rig,
+        driver: Driver::new(),
+        camera,
+        diag_tick: -1,
+        t: 0.0,
+        stats,
+        bounds,
+        out_for: 0.0,
+        heading_out: false,
+    }
 }
 
 fn update(world: &mut World, state: &mut CruiseState, dt: f32, input: &Input) {
@@ -326,6 +357,36 @@ fn update(world: &mut World, state: &mut CruiseState, dt: f32, input: &Input) {
         // The rig has already said why, once. Repeating it every 2.5 s would bury the diagnostics.
         Rescue::NowhereSafe => {
             state.driver.reset();
+            return;
+        }
+    }
+
+    // The boundary is asked **ahead of** the car, not under it, and that is the whole design.
+    //
+    // Asking where the car *is* was tried first and is worthless here: outside the mapped cells
+    // this city has no ground at all, so leaving the map is always a fall, the fall guard fires at
+    // 2.5 s and a 5 s boundary timer never gets a turn. Measured — spawned at (4000, 30, 3000), the
+    // only thing that ever printed was the rig's "no ground under the spawn point".
+    //
+    // Asked two seconds ahead it answers a question nothing else does, while the answer is still
+    // useful: *you are driving off the edge of the world*. That is the warning NFSU2's barriers
+    // would have made unnecessary, and until they can be derived it is what there is.
+    let forward = pose.rotation * Vec3::NEG_Z;
+    let look = (pose.speed.abs() * OUT_OF_BOUNDS_LOOKAHEAD).clamp(40.0, 250.0);
+    state.heading_out = !state.bounds.contains(pose.position + forward * look);
+
+    // The car being outside *itself* is the rare case — 17 of the city's 489 cells have collision
+    // but nothing drivable, a rooftop or a wall face — and there the wheels are down and no other
+    // guard applies, so it still gets a countdown.
+    if state.bounds.contains(pose.position) {
+        state.out_for = 0.0;
+    } else {
+        state.out_for += dt;
+        if state.out_for >= OUT_OF_BOUNDS_GRACE {
+            state.out_for = 0.0;
+            state.rig.recover(world);
+            state.driver.reset();
+            println!("out of bounds at {:?} — back on the last ground", pose.position);
             return;
         }
     }
@@ -380,6 +441,21 @@ fn ui(world: &mut World, state: &mut CruiseState, ctx: &egui::Context) {
             ui.label(format!("{} hücre · {} üçgen ({} sürülebilir)", s.cells, s.triangles, s.drivable));
             ui.label("W/S · A/D · Space · R · F konumu yazdırır");
         });
+    // The warning is the point of the grace period — a countdown nobody sees is just a delay.
+    if state.out_for > 0.0 || state.heading_out {
+        egui::Area::new(egui::Id::new("oob"))
+            .anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 48.0))
+            .show(ctx, |ui| {
+                if state.out_for > 0.0 {
+                    let left = (OUT_OF_BOUNDS_GRACE - state.out_for).max(0.0);
+                    ui.heading(format!("Haritanın dışındasın · {left:.0} sn"));
+                    ui.label("Out of bounds — turn back");
+                } else {
+                    ui.heading("Haritanın kenarına gidiyorsun");
+                    ui.label("Heading off the map");
+                }
+            });
+    }
     egui::Area::new(egui::Id::new("spd"))
         .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-30.0, -30.0))
         .show(ctx, |ui| {

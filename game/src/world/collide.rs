@@ -93,6 +93,44 @@ impl CityCollider {
     }
 }
 
+/// Which cells of the city have ground in them — the map's edge, at the resolution the data
+/// actually supports.
+///
+/// NFSU2 keeps the player in with barriers, and this install ships **none**: a chunk census over
+/// `TRACKS/L4R*.BUN`, `GLOBAL/InGame*.bun` and every ROUTES file finds no `0x0003410B` anywhere
+/// (`ROADMAP.md` §M4). They have to be derived from the route network, which is not read yet, so
+/// until then the only thing that says "the world stops here" is the geometry. A cell with no
+/// drivable triangle has no road, no pavement and no terrain in it — 256 m of nothing.
+///
+/// Deliberately no finer than a cell. Whether the car is over a surface *right now* is a different
+/// and harder question, and [`crate::rig::CarRig::keep_in_world`] already answers it by watching
+/// the wheels; this one only has to tell the inside of Bayview from the outside of it, and a
+/// per-triangle test would call every kerb-side gap a map edge.
+pub struct Bounds {
+    cells: std::collections::HashSet<(i32, i32)>,
+}
+
+impl Bounds {
+    /// Take the cells that have something to drive on. Built from the same colliders physics gets,
+    /// so the boundary is the world the car can actually stand on rather than a second opinion.
+    #[must_use]
+    pub fn of(colliders: &[CityCollider]) -> Self {
+        Self { cells: colliders.iter().filter(|c| c.drivable() > 0).map(|c| c.cell).collect() }
+    }
+
+    /// Whether `p` is over a cell with ground in it.
+    #[must_use]
+    pub fn contains(&self, p: Vec3) -> bool {
+        self.cells.contains(&cell_of(p))
+    }
+
+    /// How many cells the city covers.
+    #[must_use]
+    pub fn cells(&self) -> usize {
+        self.cells.len()
+    }
+}
+
 /// Bucket the city's triangles into per-cell collision meshes.
 ///
 /// Takes the same objects the visuals are built from, so what you hit is what you see. Objects with
@@ -234,6 +272,29 @@ mod tests {
         assert_eq!(c.vertices.len(), 6);
         assert!(c.indices.iter().all(|&i| (i as usize) < c.vertices.len()));
         assert_eq!(&c.indices, &[0, 1, 2, 3, 4, 5], "the second object's indices are rebased");
+    }
+
+    /// The boundary is the cells with something to drive on — and a cell whose only geometry is
+    /// vertical is not one of them, which is what keeps a building face from counting as ground.
+    #[test]
+    fn bounds_take_the_cells_with_drivable_ground() {
+        let road = mesh(vec![[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [0.0, 10.0, 0.0]], vec![0, 1, 2]);
+        let far_wall = mesh(
+            vec![[2000.0, 0.0, 0.0], [2010.0, 0.0, 0.0], [2000.0, 0.0, 10.0]],
+            vec![0, 1, 2],
+        );
+        let cells = collision_cells(&[road, far_wall]);
+        assert_eq!(cells.len(), 2, "one cell each");
+
+        let bounds = Bounds::of(&cells);
+        assert_eq!(bounds.cells(), 1, "only the cell with a flat triangle is inside");
+
+        let road_cell = cells.iter().find(|c| c.drivable() > 0).expect("the road cell");
+        let wall_cell = cells.iter().find(|c| c.drivable() == 0).expect("the wall cell");
+        assert!(bounds.contains(road_cell.origin), "the road's cell is in bounds");
+        assert!(!bounds.contains(wall_cell.origin), "a wall-only cell is not ground");
+        // And well outside either of them there is nothing at all.
+        assert!(!bounds.contains(Vec3::new(50_000.0, 0.0, 50_000.0)));
     }
 
     /// An object with no geometry, or an index past its own buffer, is skipped rather than
