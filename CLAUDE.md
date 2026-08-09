@@ -22,8 +22,9 @@ its `ug2` CLI and the PryHUB inspector built on it — is its own project:
 
 ```
 code/
-├─ Gizmo-engine/     ← the engine (github.com/bdrtr/Gizmo)
-├─ PryHUB/           ← the parser + asset toolkit (github.com/bdrtr/PryHUB)
+├─ Gizmo-engine/     ← the engine (github.com/bdrtr/Gizmo) — read it freely, but the build no
+│                      longer uses it: the engine is pinned by commit (see below)
+├─ PryHUB/           ← the parser + asset toolkit (github.com/bdrtr/PryHUB) — required sibling
 └─ nfsu2-gizmo/      ← this repo (the game)
 ```
 
@@ -39,17 +40,33 @@ worth keeping in mind:
 - The two repos are versioned independently. A parser change that breaks this repo's build shows up
   as a compile error after a `cargo update -p gizmo-nfs`, not as a silent behaviour change.
 
-## Critical setup: the engine dependency
+## Critical setup: the engine dependency is PINNED
 
-`game/` depends on the Gizmo engine via a **local path dependency to a sibling checkout**:
+`game/` builds against a **frozen engine commit**, not the sibling checkout:
 
+```toml
+gizmo = { package = "gizmo-engine", git = "https://github.com/bdrtr/Gizmo",
+          rev = "4d1a8cb7dab9df9e97b9e4c08255cbd56cef568f", ... }
 ```
-code/
-├─ Gizmo-engine/     ← the engine (github.com/bdrtr/Gizmo)
-└─ nfsu2-gizmo/      ← this repo
-```
 
-`Gizmo-engine/` **must be checked out next to this repo**. The game relies on unreleased engine features (`Collider::trimesh`, later a box-vs-trimesh narrowphase fix), so crates.io `gizmo-engine 0.8.0` is insufficient. This is not portable — building `game/` requires the sibling checkout.
+The game is being developed against a fixed engine version while Gizmo evolves independently.
+crates.io `gizmo-engine 0.8.0` is still insufficient (`Collider::trimesh`, cached trimesh AABB,
+`VehicleTuning::torque_curve`); the pinned commit has all of it. Rules that follow from this:
+
+- **Do not switch the dependency back to a path just to pick up an engine change.** If the game
+  needs something newer, that is a decision to *move the pin* — follow the checklist in
+  `MOTOR-NOTLARI.md`, don't drift.
+- **An engine gap found while working belongs in `MOTOR-NOTLARI.md`**, in engine-general language,
+  together with whatever workaround the game took. That file is the queue replayed when the pin
+  moves; a workaround nobody wrote down is a workaround nobody removes.
+- The root `Cargo.toml` has a commented-out `[patch."https://github.com/bdrtr/Gizmo"]` block for
+  temporarily building against the local tree. It overrides the `rev`. Comment it back when done —
+  `cargo tree -p gizmo-engine` says which source is live.
+- **Never `git checkout` in `../Gizmo`** (or `../PryHUB`): other sessions work in those trees. To
+  find out whether the engine has a commit, ask git — `git -C ../Gizmo log --oneline 4d1a8cb..main`.
+
+The parser is *not* pinned: `gizmo-nfs` stays patched to the sibling `../PryHUB` checkout, because
+the parser and the game still move together.
 
 ## Build & run
 

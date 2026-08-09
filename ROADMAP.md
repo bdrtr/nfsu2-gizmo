@@ -828,7 +828,7 @@ Bu bölüm taze bir oturumun buradan devam edebilmesi için. Ayrıntı commit me
 |---|---|
 | **Parser** (`PryHUB`, dal `world-manifest`) | Şehrin geometrisi, dokuları, doku bağlaması. 28.985 obje · 5.087 doku (hepsi çözülüyor) · 70.439 doku slotunun %98,17'si kendi bölgesinde. Kalan: **rota dosyaları** (`ROUTES*/Paths*.bin`) |
 | **Oyun** (`nfsu2-gizmo`, dal `roadmap`) | `world/` katmanı: dedup → hücre → (hücre,doku) birleştirme → yeniden merkezleme. `nfs_city` (tek kare), `nfs_fly` (pencere), `collision_cells` (hücre başına üçgen çorbası). `rig/` katmanı: tek `spawn_car` + `Driver` + `ChaseCamera`; `nfs_drive`/`nfs_race` artık onun üstünde |
-| **Motor** (`Gizmo`) | `shadow-gate` dalı: point-shadow geçidi + `walk_positions` + `MaterialType::BakedLit`. `trimesh-aabb` dalı: önbelleklenmiş trimesh AABB (**push edilmedi**, commit `main`'de de duruyor) |
+| **Motor** (`Gizmo`) | `shadow-gate` dalı: point-shadow geçidi + `walk_positions` + `MaterialType::BakedLit`. `trimesh-aabb` dalı: önbelleklenmiş trimesh AABB (**push edilmedi**, commit `main`'de de duruyor) — *2026-08-09 güncellemesi: ikisi de `main`'e girdi ve push edildi; oyun artık motoru takip etmiyor, `4d1a8cb`'ye **pinli**, bkz. `MOTOR-NOTLARI.md`* |
 
 ### Sıradaki adım — M3, arabayı Bayview'a koymak
 

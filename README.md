@@ -24,23 +24,28 @@ Reading NFSU2's files is a separate project: **[PryHUB](https://github.com/bdrtr
 
 ## The engine dependency (important)
 
-`game/` depends on the Gizmo engine via a **local path dependency** to a sibling checkout:
+`game/` builds against a **pinned engine commit**, not against whatever the local Gizmo checkout
+happens to be on:
 
 ```toml
-gizmo = { package = "gizmo-engine", path = "../../Gizmo-engine/crates/gizmo", ... }
+gizmo = { package = "gizmo-engine", git = "https://github.com/bdrtr/Gizmo",
+          rev = "4d1a8cb7dab9df9e97b9e4c08255cbd56cef568f", ... }
 ```
 
-So this repo expects **`Gizmo-engine/` checked out next to `nfsu2-gizmo/`**:
+The game is developed against a frozen engine while the engine keeps evolving on its own; the
+crates.io `gizmo-engine 0.8.0` is still not enough (the game needs `Collider::trimesh`, the cached
+trimesh AABB and `VehicleTuning::torque_curve`, all of which live at that commit). Consequences:
 
-```
-code/
-├─ Gizmo-engine/     ← the engine (github.com/bdrtr/Gizmo)
-└─ nfsu2-gizmo/      ← this repo
-```
+- **No sibling checkout is required any more.** Cargo fetches the engine once into `~/.cargo/git/`;
+  after that the build is offline. The parser (`gizmo-nfs`) *is* still patched to a sibling
+  `../PryHUB` — only the engine is pinned.
+- **The pin is the contract.** `Cargo.lock` records the same commit, so the build is reproducible
+  on any machine.
+- To try the local engine tree temporarily, uncomment the `[patch."https://github.com/bdrtr/Gizmo"]`
+  block in the root `Cargo.toml` — and comment it back afterwards.
 
-The game currently relies on unreleased engine features (`Collider::trimesh`, and later a
-box-vs-trimesh narrowphase fix), so the crates.io `gizmo-engine 0.8.0` is not enough yet.
-When the engine stabilises, switch to a git-pinned or crates.io dependency.
+Which engine commit is pinned, why, what it is missing, and the checklist for moving the pin:
+**[`MOTOR-NOTLARI.md`](MOTOR-NOTLARI.md)**.
 
 ## Build & run
 

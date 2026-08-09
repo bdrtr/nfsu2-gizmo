@@ -12,9 +12,22 @@ repository = "https://github.com/bdrtr/nfsu2-gizmo"
 
 # Parser'ı yerel PryHUB checkout'undan al. Git bağımlılığı (game/Cargo.toml) tek başına da
 # çalışır; bu patch onu kardeş klasöre yönlendirir, böylece parser'daki bir değişiklik push
-# beklemeden oyuna geçer — motor bağımlılığında olduğu gibi iki repo yan yana checkout'lu olmalı.
+# beklemeden oyuna geçer — iki repo yan yana checkout'lu olmalı. Parser'da SABİT SÜRÜM YOK:
+# oyun ve parser birlikte ilerliyor, sabitlenen yalnız motor.
 [patch."https://github.com/bdrtr/PryHUB.git"]
 gizmo-nfs = { path = "../PryHUB/crates/gizmo-nfs" }
+
+# Motor kaçış kapağı — NORMALDE KAPALI.
+#
+# `game/Cargo.toml` motoru sabit bir commit'e pinliyor. Yeni bir motor commit'ini denemek,
+# ya da yerel `Gizmo` checkout'unda yaptığın bir düzeltmeyi oyunda doğrulamak istediğinde
+# aşağıdaki iki satırı yorumdan çıkar: patch `rev` pinini de ezer, oyun yerel ağaca karşı
+# derlenir. Deneme bittiğinde GERİ YORUMA AL — açık unutulursa pin sessizce hiçbir şey ifade
+# etmez ve motor yine altından kayar. `cargo tree -p gizmo-engine` hangisinin geçerli
+# olduğunu söyler (git kaynağı mı, yoksa yerel path mi).
+#
+# [patch."https://github.com/bdrtr/Gizmo"]
+# gizmo-engine = { path = "../Gizmo-engine/crates/gizmo" }
 
 # Parser hata ayıklama derlemesinde de 7.6 MB'lık dosyalar açıyor: optimize kalsın, yoksa
 # araba yüklenmesi saniyeler sürüyor.
