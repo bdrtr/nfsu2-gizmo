@@ -167,7 +167,7 @@ fn update(world: &mut World, state: &mut DriveState, dt: f32, input: &Input) {
         }
     }
 
-    state.rig.sync_visuals(world, pose, dt, controls.steer);
+    state.rig.sync_visuals(world, pose, dt);
     state.camera.update(world, input, pose, dt);
 }
 

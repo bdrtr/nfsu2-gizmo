@@ -559,17 +559,37 @@ impl CarRig {
 
     /// Move every visual entity onto the chassis: the body rigidly, the wheels with spin and steer.
     ///
-    /// `steer` is the input in −1..1, not an angle; the visual lock is the same
-    /// [`steering_lock`] the controller is given, so the wheel the eye sees turns as far as the
-    /// wheel the physics steers.
-    pub fn sync_visuals(&mut self, world: &mut World, pose: Pose, dt: f32, steer: f32) {
+    /// It takes no steering argument. It used to take the driver's input and re-derive an angle
+    /// from it, which is how the wheels came to point out of the corner; the controller already
+    /// knows the angle it steered each wheel with, so that is what is read.
+    pub fn sync_visuals(&mut self, world: &mut World, pose: Pose, dt: f32) {
+        // The front wheels take the angle the *physics* is steering with, one per wheel, rather
+        // than re-deriving it from the input.
+        //
+        // Re-deriving it was wrong twice over. Sign: the visual used `-input * lock` about +Y,
+        // and a positive rotation about +Y carries this engine's −Z forward toward −X, which is
+        // left — the same direction the controller documents for a positive angle ("positive
+        // steers the wheel to the left", vehicle/mod.rs:282). So the wheels pointed away from the
+        // corner the car was taking. Magnitude: `update_vehicle` applies Ackermann, so the inner
+        // wheel of a turn steers *more* than the outer one, and one shared `input * lock` cannot
+        // express that at all.
+        //
+        // Reading the controller settles both and leaves no convention to get wrong: whatever the
+        // physics steered with is what the eye sees.
+        let angles: Vec<f32> = {
+            let vehicles = world.borrow::<VehicleController>();
+            vehicles
+                .get(self.chassis)
+                .map(|v| v.wheels.iter().map(|w| w.steering_angle).collect())
+                .unwrap_or_default()
+        };
+
         self.spin += (pose.speed / self.radius.max(0.05)) * dt;
         // About −X, not +X. The car's forward is −Z (see [`Placement::yaw`]), and by the right-hand
         // rule a positive rotation about +X carries the top of the wheel from +Y toward +Z — which
         // is backwards. Rolling forward turns the other way, so the axle is −X and `spin` keeps its
         // plain meaning: how far the wheel has rolled *forward*.
         let spin = Quat::from_axis_angle(Vec3::NEG_X, self.spin);
-        let steer = Quat::from_axis_angle(Vec3::Y, -steer.clamp(-1.0, 1.0) * steering_lock());
 
         let mut transforms = unsafe { world.borrow_mut_unchecked::<Transform>() };
         let mut globals = unsafe { world.borrow_mut_unchecked::<GlobalTransform>() };
@@ -586,12 +606,17 @@ impl CarRig {
         for &id in &self.visuals {
             place(id, pose.position, pose.rotation);
         }
-        for w in &self.wheels {
+        for (i, w) in self.wheels.iter().enumerate() {
             // The wheel mesh is modelled for one side; yaw the left wheels 180° so their rim faces
             // outward (else the flat inboard back shows). The mirror is innermost, so spin still
             // turns about the shared chassis axle and both sides roll the same way.
             let mirror = scene::wheel_mirror(w.local);
-            let turn = if w.front { steer * spin * mirror } else { spin * mirror };
+            // Sign as the controller writes it: positive is left, about the chassis up axis. The
+            // rig's wheels are built in the controller's order, so `i` indexes both.
+            let turn = match angles.get(i) {
+                Some(&a) if w.front => Quat::from_axis_angle(Vec3::Y, a) * spin * mirror,
+                _ => spin * mirror,
+            };
             place(w.id, pose.position + pose.rotation * w.local, pose.rotation * turn);
         }
     }

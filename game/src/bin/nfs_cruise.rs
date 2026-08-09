@@ -396,7 +396,7 @@ fn update(world: &mut World, state: &mut CruiseState, dt: f32, input: &Input) {
     }
     diagnose(world, state, pose);
 
-    state.rig.sync_visuals(world, pose, dt, controls.steer);
+    state.rig.sync_visuals(world, pose, dt);
     state.camera.update(world, input, pose, dt);
 }
 
