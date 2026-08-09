@@ -131,6 +131,134 @@ impl Bounds {
     }
 }
 
+/// How wide a [`Ground`] cell is, in metres.
+///
+/// Not [`super::CELL_SIZE`]. A 256 m cell is the right unit for *drawing* — it is what makes a
+/// merged mesh's bounding box small enough to cull and big enough to be one draw — and much too
+/// coarse for a height query, where every triangle in the cell is tested one by one. 64 m is
+/// OpenUG's `GCELL`, arrived at independently for the same query, and on this city it puts about
+/// 90 drivable triangles in a cell against roughly 1,600 at 256 m.
+pub const GROUND_CELL: f32 = 64.0;
+
+/// How high the drivable surface is at a given XZ — the question the city could never answer.
+///
+/// It is asked twice already and guessed both times. `Placement::clearance` exists only because
+/// "the city's surface height at a given XZ is not known without querying it", so a car is dropped
+/// from a little way up and the suspension settles it; and picking a spawn point at all has meant
+/// flying there, pressing **F**, and writing the number down. Neither is a property of the city —
+/// they are both this missing query.
+///
+/// Built from the same colliders physics gets, and only from the triangles [`Surface::Drivable`]
+/// admits, so it answers about the surface a car can stand on rather than the first thing a ray
+/// happens to hit — a building's wall is not ground.
+///
+/// **This is not a replacement for the vehicle's own raycast.** The suspension asks the engine,
+/// against the real colliders, and that is what makes the car drive; this answers a cheaper
+/// question for the code that has to place things *before* there is a car.
+pub struct Ground {
+    /// Drivable triangles in world space, ordered so that a cell's are contiguous.
+    tris: Vec<[Vec3; 3]>,
+    /// Each cell's half-open run in [`Self::tris`] — the CSR layout, so a cell costs no allocation.
+    runs: std::collections::HashMap<(i32, i32), (u32, u32)>,
+}
+
+impl Ground {
+    /// Index every drivable triangle by the cells its XZ footprint touches.
+    ///
+    /// By footprint, not by centroid: a triangle that straddles a cell edge is ground on both
+    /// sides of it, and indexing it once by its centre would leave a seam of unanswerable queries
+    /// along every boundary.
+    #[must_use]
+    pub fn of(colliders: &[CityCollider]) -> Self {
+        let key = |v: f32| (v / GROUND_CELL).floor() as i32;
+        let mut by_cell: std::collections::HashMap<(i32, i32), Vec<[Vec3; 3]>> =
+            std::collections::HashMap::new();
+
+        for c in colliders {
+            for (t, tri) in c.indices.chunks_exact(3).enumerate() {
+                if c.surfaces.get(t) != Some(&Surface::Drivable) {
+                    continue;
+                }
+                let Some(p) = tri
+                    .iter()
+                    .map(|&i| c.vertices.get(i as usize).map(|v| *v + c.origin))
+                    .collect::<Option<Vec<_>>>()
+                else {
+                    continue;
+                };
+                let w = [p[0], p[1], p[2]];
+                let (lo_x, hi_x) = (w.iter().fold(f32::MAX, |a, v| a.min(v.x)), w.iter().fold(f32::MIN, |a, v| a.max(v.x)));
+                let (lo_z, hi_z) = (w.iter().fold(f32::MAX, |a, v| a.min(v.z)), w.iter().fold(f32::MIN, |a, v| a.max(v.z)));
+                for cx in key(lo_x)..=key(hi_x) {
+                    for cz in key(lo_z)..=key(hi_z) {
+                        by_cell.entry((cx, cz)).or_default().push(w);
+                    }
+                }
+            }
+        }
+
+        let mut tris = Vec::with_capacity(by_cell.values().map(Vec::len).sum());
+        let mut runs = std::collections::HashMap::with_capacity(by_cell.len());
+        for (cell, mut group) in by_cell {
+            let from = u32::try_from(tris.len()).unwrap_or(u32::MAX);
+            tris.append(&mut group);
+            let to = u32::try_from(tris.len()).unwrap_or(u32::MAX);
+            runs.insert(cell, (from, to));
+        }
+        Self { tris, runs }
+    }
+
+    /// The highest drivable surface at `at`'s XZ that is **not above** `at.y`, or `None` where the
+    /// city has no ground under that point.
+    ///
+    /// At or below, rather than nearest: a point under a bridge wants the road it is standing on,
+    /// not the deck over its head, and the caller always knows roughly where it is looking from.
+    #[must_use]
+    pub fn height_at(&self, at: Vec3) -> Option<f32> {
+        let key = |v: f32| (v / GROUND_CELL).floor() as i32;
+        let &(from, to) = self.runs.get(&(key(at.x), key(at.z)))?;
+        let mut best: Option<f32> = None;
+        for t in self.tris.get(from as usize..to as usize)? {
+            let Some(y) = surface_y(t, at.x, at.z) else { continue };
+            // A small tolerance, because the caller's own `y` is usually a hand-written round
+            // number sitting a few centimetres inside the tarmac it is naming.
+            if y <= at.y + 0.5 && best.is_none_or(|b| y > b) {
+                best = Some(y);
+            }
+        }
+        best
+    }
+
+    /// Cells with drivable ground in them.
+    #[must_use]
+    pub fn cells(&self) -> usize {
+        self.runs.len()
+    }
+
+    /// Triangle references held, counting a straddling triangle once per cell it touches.
+    #[must_use]
+    pub fn refs(&self) -> usize {
+        self.tris.len()
+    }
+}
+
+/// Where a vertical line through `(x, z)` meets a triangle's plane, or `None` if it misses.
+///
+/// Barycentric in XZ, so a triangle standing exactly on its edge (zero area from above) is a miss
+/// rather than a division by zero.
+fn surface_y(t: &[Vec3; 3], x: f32, z: f32) -> Option<f32> {
+    let (a, b, c) = (t[0], t[1], t[2]);
+    let det = (b.z - c.z) * (a.x - c.x) + (c.x - b.x) * (a.z - c.z);
+    if det.abs() < 1e-9 {
+        return None;
+    }
+    let l1 = ((b.z - c.z) * (x - c.x) + (c.x - b.x) * (z - c.z)) / det;
+    let l2 = ((c.z - a.z) * (x - c.x) + (a.x - c.x) * (z - c.z)) / det;
+    let l3 = 1.0 - l1 - l2;
+    let inside = |v: f32| (-1e-4..=1.0 + 1e-4).contains(&v);
+    (inside(l1) && inside(l2) && inside(l3)).then(|| l1 * a.y + l2 * b.y + l3 * c.y)
+}
+
 /// Bucket the city's triangles into per-cell collision meshes.
 ///
 /// Takes the same objects the visuals are built from, so what you hit is what you see. Objects with
@@ -295,6 +423,56 @@ mod tests {
         assert!(!bounds.contains(wall_cell.origin), "a wall-only cell is not ground");
         // And well outside either of them there is nothing at all.
         assert!(!bounds.contains(Vec3::new(50_000.0, 0.0, 50_000.0)));
+    }
+
+    /// The height query answers about drivable ground, picks the surface *below* the asker, and
+    /// says nothing where the city has none.
+    #[test]
+    fn ground_answers_with_the_surface_under_the_asker() {
+        // Two flat quads at different heights over the same XZ — a road and the deck above it —
+        // plus a vertical face, which is geometry but not ground.
+        let flat = |z_off: f32| {
+            mesh(
+                vec![
+                    [0.0, 0.0, z_off],
+                    [40.0, 0.0, z_off],
+                    [0.0, 40.0, z_off],
+                    [40.0, 40.0, z_off],
+                ],
+                vec![0, 1, 2, 1, 3, 2],
+            )
+        };
+        // The file frame is Z-up, so a constant Z is a constant height in the Gizmo frame.
+        let cells = collision_cells(&[flat(0.0), flat(9.0)]);
+        let g = Ground::of(&cells);
+        assert!(g.cells() > 0, "the quads land in at least one cell");
+
+        // Standing on the road, the deck overhead is not the answer.
+        let on_road = Vec3::new(-20.0, 1.0, -20.0);
+        let y = g.height_at(on_road).expect("ground under the road point");
+        assert!((y - 0.0).abs() < 1e-3, "expected the lower deck at y=0, got {y}");
+
+        // Above both, the higher one wins.
+        let above = Vec3::new(-20.0, 50.0, -20.0);
+        let y = g.height_at(above).expect("ground under a point above both");
+        assert!((y - 9.0).abs() < 1e-3, "expected the upper deck at y=9, got {y}");
+
+        // Off the quads entirely, there is no ground and it says so.
+        assert!(g.height_at(Vec3::new(5_000.0, 10.0, 5_000.0)).is_none());
+    }
+
+    /// A wall is geometry and not ground, so it never answers a height query.
+    #[test]
+    fn a_vertical_face_is_not_ground() {
+        let wall = mesh(
+            vec![[0.0, 0.0, 0.0], [30.0, 0.0, 0.0], [0.0, 0.0, 30.0], [30.0, 0.0, 30.0]],
+            vec![0, 1, 2, 1, 3, 2],
+        );
+        let cells = collision_cells(&[wall]);
+        assert_eq!(cells[0].drivable(), 0, "the face is vertical");
+        let g = Ground::of(&cells);
+        assert_eq!(g.refs(), 0, "no drivable triangle, so nothing to answer with");
+        assert!(g.height_at(Vec3::new(-15.0, 10.0, 0.0)).is_none());
     }
 
     /// An object with no geometry, or an index past its own buffer, is skipped rather than

@@ -59,6 +59,14 @@ const DEFAULT_AT: Vec3 = Vec3::new(710.0, 27.0, 888.0);
 /// suspension settles it. Too small and it spawns inside the tarmac; too large and it lands hard.
 const DROP: f32 = 1.5;
 
+/// How far above the named point the ground is looked for.
+///
+/// `Ground::height_at` answers with the highest surface *at or below* the point it is given, so a
+/// spawn named a few centimetres inside the tarmac would otherwise find the road under the road.
+/// Two metres is enough to clear that and short enough not to reach the deck of an overpass the
+/// car is meant to be driving beneath.
+const SPAWN_PROBE: f32 = 2.0;
+
 /// How long the car may be outside the mapped city before it is put back.
 ///
 /// Long enough to be a warning rather than a punishment: at 100 km/h it is 140 m of road, which is
@@ -170,6 +178,23 @@ fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> CruiseState
     // under the car and the mesh in front of it come from the same objects.
     let colliders = city::collision_cells(&objects);
     let bounds = city::Bounds::of(&colliders);
+
+    // Where the ground actually is, instead of where the spawn constant guesses it is. Every
+    // `NFS_AT` in this file's history was found by flying there, pressing F and writing the number
+    // down — including the height, which is why the airport's `y = -11` was carried downtown where
+    // the ground is at `y = 27`. Asked properly, the number comes from the city.
+    let ground = city::Ground::of(&colliders);
+    let at = match ground.height_at(at + Vec3::Y * SPAWN_PROBE) {
+        Some(y) => {
+            println!("ground at ({:.0},{:.0}) is y={y:.2} — asked, not guessed", at.x, at.z);
+            Vec3::new(at.x, y, at.z)
+        }
+        None => {
+            println!("no drivable ground under ({:.0},{:.0}) — falling back to the named height", at.x, at.z);
+            at
+        }
+    };
+    println!("ground grid: {} cells of {} m, {} triangle refs", ground.cells(), city::GROUND_CELL, ground.refs());
     let mut stats = CityStats {
         objects: objects.len(),
         meshes: 0, // the visuals are built below

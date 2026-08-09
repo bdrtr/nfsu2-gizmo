@@ -85,6 +85,19 @@ mod tests {
 
         eprintln!("guess : half_track {:.3}  half_wheelbase {:.3}  radius {:.3}",
                   fit.half_track, fit.half_wheelbase, fit.radius);
+        // The guess above is post-`.max()`, so it can be the floor rather than a measurement, and
+        // reading it as "where the wheel is modelled" is how one ends up arguing about the wrong
+        // number. These are the raw ones: where the modelled wheel actually sits, how wide it is,
+        // and what the floors would have been.
+        let wcenter = (wl + wh) * 0.5;
+        eprintln!(
+            "model : wheel bbox x {:+.3}..{:+.3} (centre {:+.3}, width {:.3}), \
+             |x-centre| {:.3}  ·  floors: track {:.3} wheelbase {:.3}",
+            wl.x, wh.x, wcenter.x, wh.x - wl.x,
+            (wcenter.x - center.x).abs(),
+            width * 0.40, length * 0.30
+        );
+        eprintln!("body  : half-width {:.3}  (x {:+.3}..{:+.3})", width * 0.5, lo.x, hi.x);
         for (i, w) in cti.wheels.iter().enumerate() {
             let m = wheel_mount(w, center);
             eprintln!("record[{i}]: mount ({:+.3}, {:+.3}, {:+.3})  radius {:.3}",
