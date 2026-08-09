@@ -55,47 +55,13 @@ fn main() {
 }
 
 fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> FlyState {
-    let path = std::env::args().nth(1).unwrap_or_else(|| {
-        std::env::var("NFSU2_ROOT").map(|r| format!("{r}/TRACKS")).expect("usage: nfs_fly <TRACKS>")
-    });
+    let path = nfsu2::world::tracks_path(std::env::args().nth(1));
 
-    let files = bundles(&path);
-    assert!(!files.is_empty(), "{path}: no STREAM*.BUN here");
-    // The bytes outlive the packs that borrow their pixel pools, so they are leaked on purpose:
-    // this is the whole city and it stays loaded for the life of the window.
-    let loaded: &'static [Vec<u8>] = Box::leak(
-        files
-            .iter()
-            .map(|f| std::fs::read(f).unwrap_or_else(|e| panic!("read {}: {e}", f.display())))
-            .collect::<Vec<_>>()
-            .into_boxed_slice(),
-    );
-
-    let mut meshes = Vec::new();
-    let mut packs = Vec::new();
-    for bytes in loaded {
-        meshes.extend(gizmo_nfs::world::meshes(bytes).expect("meshes"));
-        packs.extend(gizmo_nfs::world::packs(bytes).expect("packs"));
-    }
-    meshes.retain(|m| {
-        !nfsu2::world::is_backdrop(&m.header.name) && !nfsu2::world::is_distant_lod(&m.header.name)
-    });
-
-    let start = std::env::var("NFS_AT")
-        .ok()
-        .and_then(|s| {
-            let v: Vec<f32> = s.split(',').filter_map(|p| p.trim().parse().ok()).collect();
-            (v.len() == 3).then(|| Vec3::new(v[0], v[1], v[2]))
-        })
-        .unwrap_or(Vec3::new(640.0, 40.0, -2816.0));
-    // The shared tiers: `TRACKS/LOC4DYNTEX.BIN` and `GLOBAL/`, found from the TRACKS directory's
-    // parent. Missing means grey walls, not a failure to start.
-    let root = std::path::Path::new(&path)
-        .ancestors()
-        .find(|a| a.join("GLOBAL").is_dir())
-        .map(std::path::Path::to_path_buf);
-    let shared = root.map(|r| nfsu2::world::SharedTextures::load(&r)).unwrap_or_default();
+    let nfsu2::world::Bundles { mut meshes, packs, shared, .. } = nfsu2::world::load(&path);
+    meshes.retain(|m| nfsu2::world::is_drawn(&m.header.name));
     println!("{} shared textures", shared.len());
+
+    let start = nfsu2::world::start_at(Vec3::new(640.0, 40.0, -2816.0));
 
     let budget = std::env::var("NFS_BUDGET").ok().and_then(|s| s.parse::<usize>().ok());
     let city = build_region(&renderer.device, meshes, &packs, Some(&shared), start, budget);
@@ -226,21 +192,3 @@ fn ui(_world: &mut World, state: &mut FlyState, ctx: &egui::Context) {
     });
 }
 
-fn bundles(path: &str) -> Vec<std::path::PathBuf> {
-    let p = std::path::Path::new(path);
-    if p.is_file() {
-        return vec![p.to_path_buf()];
-    }
-    let Ok(dir) = std::fs::read_dir(p) else { return Vec::new() };
-    let mut out: Vec<_> = dir
-        .filter_map(Result::ok)
-        .map(|e| e.path())
-        .filter(|q| {
-            q.file_name()
-                .and_then(|n| n.to_str())
-                .is_some_and(|n| n.starts_with("STREAM") && n.ends_with(".BUN"))
-        })
-        .collect();
-    out.sort();
-    out
-}

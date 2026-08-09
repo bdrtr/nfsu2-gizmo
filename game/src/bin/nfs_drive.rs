@@ -92,7 +92,7 @@ fn setup_scene(world: &mut World, renderer: &gizmo::renderer::Renderer) -> Drive
         Vec3::new(-30.0, 40.0, -20.0),
     );
 
-    let camera = ChaseCamera::spawn(world, Vec3::new(0.0, 4.0, 10.0), 2000.0);
+    let camera = ChaseCamera::spawn(world, Vec3::new(0.0, 4.0, 10.0), 0.1, 2000.0);
     let rig = spawn_car(world, renderer, &mut assets, &mut phys, &path, Placement::origin());
     world.insert_resource(assets);
     world.insert_resource(phys);

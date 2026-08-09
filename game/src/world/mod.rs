@@ -27,11 +27,13 @@
 mod build;
 mod cell;
 mod collide;
+mod load;
 mod tiers;
 
-pub use build::{build_region, CityMesh, CityVisuals};
+pub use build::{build_region, nearest, CityMesh, CityVisuals};
 pub use cell::{cell_centre, cell_of, CELL_SIZE};
 pub use collide::{collision_cells, surface_of, CityCollider, Surface, WALL_NORMAL_Y};
+pub use load::{bundles, load, start_at, tracks_path, Bundles};
 pub use tiers::SharedTextures;
 
 use gizmo::prelude::*;
@@ -79,9 +81,21 @@ pub fn world_point(header: &WorldSolidHeader, p: [f32; 3]) -> Vec3 {
 
 /// Drop objects that are exact duplicates of one already seen.
 ///
-/// The key is the object's own key plus its counts and its bounding box, so an instanced prop
-/// placed somewhere else keeps its own entry — its box differs — while a mesh genuinely emitted
-/// twice does not. Measured city-wide this removes 5,364 of 28,985; L4RD alone has 2,652.
+/// The key is the object's own key, its counts, its bounding box **and its placement matrix**.
+/// The matrix is what makes the key mean "the same mesh in the same place" rather than just "the
+/// same mesh", and this used to claim the box did that job: *"an instanced prop placed somewhere
+/// else keeps its own entry — its box differs"*. It does not. `WorldSolidHeader::bbox_*` is stored
+/// in the solid's **own** frame, and 16,071 of the city's 28,985 objects are `placed` — their
+/// vertices and their box are local and the matrix is what puts them anywhere. For those, two
+/// copies of one lamppost on two different corners had **identical** keys and one was deleted.
+///
+/// The city really does instance: 34 meshes appear at 115 placements. Only a naming convention was
+/// keeping this off them, and it already failed once — one group of four objects at two placements
+/// was separated by nothing but a 0.007 float in a local box.
+///
+/// Adding the matrix costs **nothing today**: the survivor count is 13,985 either way, because
+/// every one of the 14,847 objects this drops is byte-identical to the one it kept (9,517 of them
+/// are the same solid shipped by more than one region bundle). It is here so that stays true.
 ///
 /// It runs before cells, textures or meshes, because every one of those costs more once and the
 /// duplicates are indistinguishable from the originals by then.
@@ -92,12 +106,16 @@ pub fn dedup(meshes: Vec<WorldMesh>) -> Vec<WorldMesh> {
         .into_iter()
         .filter(|m| {
             let bits = |v: [f32; 3]| [v[0].to_bits(), v[1].to_bits(), v[2].to_bits()];
+            // Raw bits, not an epsilon compare: two placements that differ in the last mantissa bit
+            // are two placements, and a tolerance here would delete one of them.
+            let matrix = m.header.matrix.map(|row| row.map(f32::to_bits));
             seen.insert((
                 m.header.hash.0,
                 m.positions.len(),
                 m.indices.len(),
                 bits(m.header.bbox_min),
                 bits(m.header.bbox_max),
+                matrix,
             ))
         })
         .collect()
@@ -140,6 +158,16 @@ pub fn is_backdrop(name: &str) -> bool {
 #[must_use]
 pub fn is_distant_lod(name: &str) -> bool {
     name.contains("WORLD_LOD")
+}
+
+/// Whether an object is drawn at all right now: city, rather than backdrop or LOD proxy.
+///
+/// The two exclusions always travel together — a binary that filtered one and not the other would
+/// get a wall across the frame or a pale plane over the streets — so the conjunction has a name
+/// rather than being retyped at each call site.
+#[must_use]
+pub fn is_drawn(name: &str) -> bool {
+    !is_backdrop(name) && !is_distant_lod(name)
 }
 
 #[cfg(test)]
@@ -241,5 +269,26 @@ mod tests {
         ];
         let kept = dedup(objects);
         assert_eq!(kept.len(), 3, "only the exact repeat goes");
+    }
+
+    /// Two copies of one prop on two different corners: same mesh, same *local* box, different
+    /// placement.
+    ///
+    /// The test above cannot catch this — every object it builds is `identity`, and the bug only
+    /// exists for `placed` ones, which are 16,071 of the city's 28,985. Their box is in their own
+    /// frame, so without the matrix in the key both copies hash the same and one is deleted.
+    #[test]
+    fn dedup_keeps_two_placements_of_the_same_mesh() {
+        let at = |x: f32| {
+            let mut m = mesh(7, 100, 1.0);
+            m.header.matrix[3] = [x, 0.0, 0.0, 1.0];
+            m
+        };
+        assert_eq!(dedup(vec![at(10.0), at(250.0)]).len(), 2, "two corners, two objects");
+        assert_eq!(
+            dedup(vec![at(10.0), at(10.0), at(250.0)]).len(),
+            2,
+            "an exact repeat of one placement still goes"
+        );
     }
 }

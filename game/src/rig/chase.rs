@@ -47,14 +47,17 @@ pub struct ChaseCamera {
 impl ChaseCamera {
     /// Spawn the camera entity looking down −X at `at`, with the trailing defaults.
     ///
-    /// `far` is the far plane: a car on a plane needs a couple of kilometres, a car in Bayview needs
-    /// twenty. The near plane stays at 0.1 — what costs depth precision is the *ratio*, and moving
-    /// the near plane out is what clips whatever the camera is standing next to.
-    pub fn spawn(world: &mut World, at: Vec3, far: f32) -> Self {
+    /// **Both planes are the caller's**, because what costs depth precision is their *ratio* and
+    /// only the caller knows how big its world is. A car on a plane wants `0.1 / 2_000`; a car in
+    /// Bayview wants `0.5 / 20_000`, which is 40,000:1 rather than 200,000:1 — at street level the
+    /// tighter ratio is the difference between a city and a field of z-fighting. Moving the near
+    /// plane out has its own cost (it clips whatever the camera is standing next to), which is why
+    /// the small-world binaries do not pay it.
+    pub fn spawn(world: &mut World, at: Vec3, near: f32, far: f32) -> Self {
         let (yaw, pitch) = (-std::f32::consts::FRAC_PI_2, -0.3);
         let camera = world.spawn();
         crate::geom::add_transform(world, camera, Transform::new(at));
-        world.add_component(camera, Camera::new(std::f32::consts::FRAC_PI_4, 0.1, far, yaw, pitch, true));
+        world.add_component(camera, Camera::new(std::f32::consts::FRAC_PI_4, near, far, yaw, pitch, true));
         Self {
             id: camera.id(),
             position: at,

@@ -61,10 +61,34 @@ fn texture_for(
     shared.and_then(|s| s.get(key)).map(|_| key)
 }
 
+/// Keep only the `budget` objects nearest `around`, by their own centres. `None` keeps everything.
+///
+/// The throwaway that makes a 10,735-object region usable before streaming exists. Nearest-first so
+/// what survives is a contiguous neighbourhood rather than whatever the file happened to list first.
+///
+/// Public because a caller that builds **both** visuals and colliders has to apply it once and hand
+/// the same objects to both — `collision_cells` promises that what you hit is what you see, and two
+/// independently budgeted lists would quietly break that promise at the edge of the budget.
+pub fn nearest(objects: &mut Vec<WorldMesh>, around: Vec3, budget: Option<usize>) {
+    let Some(n) = budget else { return };
+    if objects.len() <= n {
+        return;
+    }
+    objects.sort_by(|a, b| {
+        let d = |m: &WorldMesh| {
+            let c = world_point(&m.header, m.header.bbox_min)
+                .midpoint(world_point(&m.header, m.header.bbox_max));
+            (c - around).length_squared()
+        };
+        d(a).total_cmp(&d(b))
+    });
+    objects.truncate(n);
+}
+
 /// Build one region's meshes.
 ///
-/// `budget` caps how many objects are taken, nearest-first from `around` — the throwaway that
-/// makes a 10,735-object region usable before streaming exists. `None` takes everything.
+/// `budget` is applied here for callers that want only visuals; one that also builds colliders
+/// should call [`nearest`] itself and pass `None`, so both are built from the same objects.
 pub fn build_region(
     device: &wgpu::Device,
     meshes: Vec<WorldMesh>,
@@ -77,21 +101,7 @@ pub fn build_region(
     let mut objects = dedup(meshes);
     let duplicates = declared - objects.len();
 
-    if let Some(n) = budget {
-        if objects.len() > n {
-            // Nearest-first by the object's own centre, so what survives is a contiguous
-            // neighbourhood rather than whatever the file happened to list first.
-            objects.sort_by(|a, b| {
-                let d = |m: &WorldMesh| {
-                    let c = world_point(&m.header, m.header.bbox_min)
-                        .midpoint(world_point(&m.header, m.header.bbox_max));
-                    (c - around).length_squared()
-                };
-                d(a).total_cmp(&d(b))
-            });
-            objects.truncate(n);
-        }
-    }
+    nearest(&mut objects, around, budget);
 
     // (cell, texture) → vertices. `BTreeMap` rather than a hash map so a run over the same region
     // twice produces the same meshes in the same order — a golden screenshot needs that.
@@ -145,15 +155,24 @@ pub fn build_region(
                 // to be lit by whatever the scene happens to have, which is not what it was drawn
                 // for. `unlit.wgsl` multiplies it in; the PBR path discards it.
                 let c = object.colours.get(i).copied().unwrap_or([255, 255, 255, 255]);
-                let srgb = |b: u8| {
-                    let v = f32::from(b) / 255.0;
-                    // The bytes are sRGB and the shader works in linear, the same conversion the
-                    // texture upload does for its own pixels.
-                    if v <= 0.04045 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
-                };
+                // The byte is used as-is, **not** decoded through the sRGB curve, and that is a
+                // decision rather than an omission.
+                //
+                // It used to be decoded, on the reasoning that "the bytes are sRGB and the shader
+                // works in linear". Measured, that is what made Bayview unreadable: the road's own
+                // baked bytes are 24–35, the curve turns those into 0.009–0.017 of linear light,
+                // `baked_lit.wgsl` multiplies that straight into an already-dark night texture, and
+                // the road lands at 2–14/255 with the whole frame at a median of **1/255**.
+                //
+                // The curve was never the right instrument for this attribute. These are not
+                // radiometric samples: they are the modulator a 2004 fixed-function pipeline applied
+                // to the texture in display space, where 255 means "unchanged". Read that way the
+                // byte is already the multiplier the artist chose, so it goes through untouched —
+                // white stays white, and a road at 30 dims the tarmac to 12% instead of to 1%.
+                let modulate = |b: u8| f32::from(b) / 255.0;
                 verts.push(Vertex {
                     position: [gp.x, gp.y, gp.z],
-                    color: [srgb(c[0]), srgb(c[1]), srgb(c[2])],
+                    color: [modulate(c[0]), modulate(c[1]), modulate(c[2])],
                     normal: [gn.x, gn.y, gn.z],
                     tex_coords: object.uvs.get(i).copied().unwrap_or([0.0, 0.0]),
                     ..Default::default()

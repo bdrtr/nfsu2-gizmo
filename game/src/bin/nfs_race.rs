@@ -230,8 +230,9 @@ fn setup_scene(world: &mut World, renderer: &gizmo::renderer::Renderer) -> RaceS
     world.insert_resource(assets);
     world.insert_resource(phys);
 
-    let camera = ChaseCamera::spawn(world, rig.start.position + Vec3::new(0.0, 4.0, 10.0), 4000.0)
-        .trailing(7.0, 2.2, 10.0);
+    let camera =
+        ChaseCamera::spawn(world, rig.start.position + Vec3::new(0.0, 4.0, 10.0), 0.1, 4000.0)
+            .trailing(7.0, 2.2, 10.0);
 
     println!(
         "race ready: track {} tris, {} checkpoints",
