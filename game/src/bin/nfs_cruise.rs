@@ -167,6 +167,86 @@ fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> CruiseState
     println!("{declared} drawn objects, {} after dedup", objects.len());
     city::nearest(&mut objects, at, budget);
 
+    {
+        let tier_of = |n: &str| -> Option<(String, char)> {
+            let b = n.as_bytes();
+            (0..b.len().saturating_sub(3)).find_map(|i| {
+                (b[i] == b'_' && b[i + 1] == b'1' && b[i + 2].is_ascii_uppercase() && b[i + 3] == b'_')
+                    .then(|| (n[..i].to_string(), b[i + 2] as char))
+            })
+        };
+        // `NFS_TIERS=finest` drops all but the richest member of each rack. Off by default: these
+        // are real objects at real positions, and if the reading is wrong this deletes buildings.
+        let finest_only = std::env::var("NFS_TIERS").is_ok_and(|v| v == "finest");
+        let mut drop_at: std::collections::HashSet<usize> = std::collections::HashSet::new();
+        let mut groups: std::collections::BTreeMap<String, Vec<(char, Vec3, usize, bool, usize)>> =
+            std::collections::BTreeMap::new();
+        for (idx, m) in objects.iter().enumerate() {
+            if m.positions.is_empty() {
+                continue; // the geometry-less ANM_* markers all sit at the origin
+            }
+            if let Some((stem, tier)) = tier_of(&m.header.name) {
+                let c = city::world_point(&m.header, m.header.bbox_min)
+                    .midpoint(city::world_point(&m.header, m.header.bbox_max));
+                groups.entry(stem).or_default().push((
+                    tier,
+                    c,
+                    m.positions.len(),
+                    false,
+                    idx,
+                ));
+            }
+        }
+        // A rack is not a street. Members of one design laid out at constant Y and Z, stepping only
+        // along X, are a template shelf: real buildings differ in Z and stand at their own height.
+        // Counted apart from groups that merely share a stem.
+        let mut racks = 0usize;
+        let (mut rack_members, mut rack_verts) = (0usize, 0usize);
+        let (mut other_groups, mut other_members) = (0usize, 0usize);
+        for (_stem, v) in groups.iter().filter(|(_, v)| v.len() > 1) {
+            let tiers: std::collections::BTreeSet<char> = v.iter().map(|m| m.0).collect();
+            let flat = |f: fn(&Vec3) -> f32| v.iter().all(|m| (f(&m.1) - f(&v[0].1)).abs() < 1.0);
+            let xs: Vec<f32> = v.iter().map(|m| m.1.x).collect();
+            let spread_x = xs.iter().copied().fold(f32::MIN, f32::max)
+                - xs.iter().copied().fold(f32::MAX, f32::min);
+            if tiers.len() > 1 && flat(|p| p.y) && flat(|p| p.z) && spread_x > 1.0 {
+                racks += 1;
+                rack_members += v.len();
+                rack_verts += v.iter().map(|m| m.2).sum::<usize>();
+                if finest_only {
+                    // Keep the member with the most vertices — the letter is a convention and the
+                    // count is the thing. Everything else in the rack goes.
+                    let best = v.iter().map(|m| m.2).max().unwrap_or(0);
+                    let mut kept = false;
+                    for m in v.iter() {
+                        if m.2 == best && !kept {
+                            kept = true;
+                        } else {
+                            drop_at.insert(m.4);
+                        }
+                    }
+                }
+            } else {
+                other_groups += 1;
+                other_members += v.len();
+            }
+        }
+        println!(
+            "tiers: {racks} racks ({rack_members} members, {rack_verts} vertices) · {other_groups} \
+             other multi-member groups ({other_members} members)"
+        );
+        if finest_only {
+            let before = objects.len();
+            let mut i = 0;
+            objects.retain(|_| {
+                let keep = !drop_at.contains(&i);
+                i += 1;
+                keep
+            });
+            println!("NFS_TIERS=finest: dropped {} rack members, {} objects left", before - objects.len(), objects.len());
+        }
+    }
+
     let mut phys = PhysicsWorld::new();
     phys.integrator.gravity = Vec3::new(0.0, -9.81, 0.0);
 
@@ -212,6 +292,10 @@ fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> CruiseState
         100.0 * off as f32 / objects.len() as f32,
         100.0 * off_v as f32 / total_v as f32
     );
+
+    // TEMPORARY MEASUREMENT — is a detail tier a stand-in for its siblings, or a building of its
+    // own? Group the `_1A_/_1B_/_1Z_` family by stem and report where the members actually sit.
+
     let mut stats = CityStats {
         objects: objects.len(),
         meshes: 0, // the visuals are built below
