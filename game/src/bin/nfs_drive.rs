@@ -31,6 +31,21 @@ struct DriveState {
     t: f32,
 }
 
+/// How wide the ground is, and how thick the slab under it.
+///
+/// The collider used to be a mathematical plane: infinite in the narrowphase and bounded only by
+/// the +/-10 000 m box its broadphase AABB reports (`collider.rs:109`). The mesh beside it is 400
+/// units across, so from +/-200 out to +/-10 000 the car drove on ground that was not there to
+/// see. `world::collision_cells` promises the city will never do that — *what you hit is what you
+/// see* — and there is no reason the small scenes should.
+///
+/// A slab rather than a plane, hung below the entity with `offset_box` so the entity and its mesh
+/// stay at `y = 0`: the surface the car drives on has not moved, it just has edges now. Drive off
+/// one and `CarRig::keep_in_world` catches you, which is the point — a net nothing can reach is not
+/// a net.
+const GROUND_SIZE: f32 = 400.0;
+const GROUND_THICKNESS: f32 = 4.0;
+
 fn main() {
     gizmo::app::setup_panic_hook();
     App::<DriveState>::new("Gizmo — NFSU2 240SX (drivable)", 1500, 850)
@@ -66,7 +81,7 @@ fn setup_scene(world: &mut World, renderer: &gizmo::renderer::Renderer) -> Drive
     // ── Ground ──
     let ground = world.spawn();
     add_transform(world, ground, Transform::new(Vec3::ZERO));
-    world.add_component(ground, AssetManager::create_plane(&renderer.device, 400.0));
+    world.add_component(ground, AssetManager::create_plane(&renderer.device, GROUND_SIZE));
     world.add_component(
         ground,
         Material::new(white).with_pbr(Vec4::new(0.13, 0.14, 0.16, 1.0), 0.95, 0.0).with_double_sided(true),
@@ -74,14 +89,20 @@ fn setup_scene(world: &mut World, renderer: &gizmo::renderer::Renderer) -> Drive
     world.add_component(ground, MeshRenderer::new());
     world.add_component(ground, RigidBody::new_static());
     world.add_component(ground, Velocity::default());
-    world.add_component(ground, Collider::plane(Vec3::Y, 0.0));
+    world.add_component(ground, Collider::offset_box(
+            Vec3::new(0.0, -GROUND_THICKNESS / 2.0, 0.0),
+            Vec3::new(GROUND_SIZE / 2.0, GROUND_THICKNESS / 2.0, GROUND_SIZE / 2.0),
+        ));
     world.add_component(ground, gizmo::physics::components::PhysicsMaterial::ASPHALT);
     phys.add_body(
         gizmo::physics::BodyHandle::from_id(ground.id()),
         RigidBody::new_static(),
         Transform::new(Vec3::ZERO),
         Velocity::default(),
-        Collider::plane(Vec3::Y, 0.0),
+        Collider::offset_box(
+            Vec3::new(0.0, -GROUND_THICKNESS / 2.0, 0.0),
+            Vec3::new(GROUND_SIZE / 2.0, GROUND_THICKNESS / 2.0, GROUND_SIZE / 2.0),
+        ),
     );
 
     scene::add_lights(

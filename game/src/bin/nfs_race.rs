@@ -91,6 +91,21 @@ fn build_track(a: f32, b: f32, width: f32, hill: f32, n: usize) -> Track {
     Track { visual, centerline, tangents }
 }
 
+/// How wide the ground is, and how thick the slab under it.
+///
+/// The collider used to be a mathematical plane: infinite in the narrowphase and bounded only by
+/// the +/-10 000 m box its broadphase AABB reports (`collider.rs:109`). The mesh beside it is 600
+/// units across, so from +/-300 out to +/-10 000 the car drove on ground that was not there to
+/// see. `world::collision_cells` promises the city will never do that — *what you hit is what you
+/// see* — and there is no reason the small scenes should.
+///
+/// A slab rather than a plane, hung below the entity with `offset_box` so the entity and its mesh
+/// stay at `y = 0`: the surface the car drives on has not moved, it just has edges now. Drive off
+/// one and `CarRig::keep_in_world` catches you, which is the point — a net nothing can reach is not
+/// a net.
+const GROUND_SIZE: f32 = 600.0;
+const GROUND_THICKNESS: f32 = 4.0;
+
 fn main() {
     gizmo::app::setup_panic_hook();
     App::<RaceState>::new("Gizmo — NFSU2 240SX Race", 1500, 850)
@@ -135,19 +150,25 @@ fn setup_scene(world: &mut World, renderer: &gizmo::renderer::Renderer) -> RaceS
     // world.
     let ground = world.spawn();
     add_transform(world, ground, Transform::new(Vec3::ZERO));
-    world.add_component(ground, AssetManager::create_plane(&renderer.device, 600.0));
+    world.add_component(ground, AssetManager::create_plane(&renderer.device, GROUND_SIZE));
     world.add_component(ground, mat([0.10, 0.22, 0.09], 0.95, 0.0));
     world.add_component(ground, MeshRenderer::new());
     world.add_component(ground, RigidBody::new_static());
     world.add_component(ground, Velocity::default());
-    world.add_component(ground, Collider::plane(Vec3::Y, 0.0));
+    world.add_component(ground, Collider::offset_box(
+            Vec3::new(0.0, -GROUND_THICKNESS / 2.0, 0.0),
+            Vec3::new(GROUND_SIZE / 2.0, GROUND_THICKNESS / 2.0, GROUND_SIZE / 2.0),
+        ));
     world.add_component(ground, gizmo::physics::components::PhysicsMaterial::ASPHALT);
     phys.add_body(
         gizmo::physics::BodyHandle::from_id(ground.id()),
         RigidBody::new_static(),
         Transform::new(Vec3::ZERO),
         Velocity::default(),
-        Collider::plane(Vec3::Y, 0.0),
+        Collider::offset_box(
+            Vec3::new(0.0, -GROUND_THICKNESS / 2.0, 0.0),
+            Vec3::new(GROUND_SIZE / 2.0, GROUND_THICKNESS / 2.0, GROUND_SIZE / 2.0),
+        ),
     );
 
     // ── Track ribbon: a banked oval that is actually **driven on** ──
