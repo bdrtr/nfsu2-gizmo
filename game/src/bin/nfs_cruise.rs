@@ -129,7 +129,7 @@ fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> CruiseState
     // two different reasons: the LOD proxy is a coarse stand-in that sits across the real streets
     // and has nothing to replace it with, while the sky shell and panorama panels were only ever a
     // problem because *ordinary* geometry that large is a wall across the frame. Drawn as a skybox
-    // they cannot be — `sky.wgsl` pins their depth to the far plane — so the reason to drop them
+    // they cannot be — the panorama encloses the city, so it sits behind it — so the reason to drop
     // does not apply and the world stops ending at a flat grey horizon.
     let (backdrop, rest): (Vec<_>, Vec<_>) =
         meshes.into_iter().partition(|m| city::is_backdrop(&m.header.name));
@@ -238,14 +238,30 @@ fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> CruiseState
             scene::spawn_mesh(world, m.mesh.clone(), material, Transform::new(m.origin));
         }
 
+        // `Skybox`, and it is the lesser of two wrongs rather than the right answer. What a painted
+        // backdrop needs is what the note on `is_backdrop` already says: drawn first, camera-locked,
+        // depth writes off. The pinned engine has no such path, and neither material is it:
+        //
+        //   - `MaterialType::Skybox` gets the *depth* right — `sky.wgsl` pins NDC z to the far
+        //     plane, so it can never occlude the city — but it contains no `textureSample` at all.
+        //     It discards the mesh's texture and vertex colour and returns a procedural
+        //     zenith/horizon/sun gradient computed from `scene.sun_color`. NFSU2's own painted sky
+        //     never reaches the screen; what you get is the engine's, at a pale (225,231,234).
+        //   - `MaterialType::Unlit` gets the *pixels* right (`vertex colour × albedo × texture`)
+        //     and the depth wrong: the panorama panels then draw as ordinary geometry in front of
+        //     the city, which is the "wall across the whole frame" that had them excluded in the
+        //     first place. Measured: frame median 30/255 as a skybox, 14/255 unlit, with two pale
+        //     panels sitting between the camera and the world.
+        //
+        // So: the engine's invented sky, until the engine can draw ours. It still buys the thing
+        // that was missing — a horizon, and a skyline that reads as silhouette against something.
+        // `MOTOR-NOTLARI.md` carries the gap.
+        //
         // Double-sided, because a sky shell is seen from the inside and its triangles face out —
         // single-sided it culls to nothing, which looks exactly like not drawing it at all.
         for m in &sky.meshes {
             let material = match m.texture.and_then(|k| bound.get(&k)) {
                 Some(bg) => Material::new(bg.clone()).with_skybox().with_double_sided(true),
-                // The sky shells' own keys live in `TRACKS/LOC4DYNTEX.BIN`, which this binary does
-                // not open, so most resolve nowhere. White here rather than the city's grey: the
-                // shell's baked vertex colour *is* the sky gradient, and white lets it through.
                 None => Material::new(white.clone()).with_skybox().with_double_sided(true),
             };
             scene::spawn_mesh(world, m.mesh.clone(), material, Transform::new(m.origin));
