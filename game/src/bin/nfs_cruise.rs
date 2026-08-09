@@ -195,6 +195,23 @@ fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> CruiseState
         }
     };
     println!("ground grid: {} cells of {} m, {} triangle refs", ground.cells(), city::GROUND_CELL, ground.refs());
+
+    // MEASUREMENT ONLY for now: how much of what we draw stands over a cell with no ground in it.
+    let (off, off_v): (usize, usize) = objects
+        .iter()
+        .filter(|m| {
+            let c = city::world_point(&m.header, m.header.bbox_min)
+                .midpoint(city::world_point(&m.header, m.header.bbox_max));
+            !bounds.contains(c)
+        })
+        .fold((0, 0), |(n, v), m| (n + 1, v + m.positions.len()));
+    let total_v: usize = objects.iter().map(|m| m.positions.len()).sum();
+    println!(
+        "off-map: {off} of {} objects ({:.1}%), {off_v} of {total_v} vertices ({:.1}%)",
+        objects.len(),
+        100.0 * off as f32 / objects.len() as f32,
+        100.0 * off_v as f32 / total_v as f32
+    );
     let mut stats = CityStats {
         objects: objects.len(),
         meshes: 0, // the visuals are built below
