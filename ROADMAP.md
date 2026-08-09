@@ -818,7 +818,97 @@ aldığı bir ölçüme dayanıyor.
 
 ---
 
-## Nerede kaldık (2026-08-04)
+## Nerede kaldık (2026-08-09)
+
+Bir önceki bölüm (2026-08-04) tarihsel kayıt olarak duruyor; güncel durum burası.
+
+### Motor artık sabit
+
+Oyun `gizmo-engine`'i **`4d1a8cb`** commit'ine pinli derliyor (`game/Cargo.toml`, `rev = `). Kardeş
+`Gizmo` checkout'u serbestçe ilerliyor ve oyunun derlemesini etkilemiyor. Pinin kendisi, kaçış
+kapağı, yükseltme kontrol listesi ve **motorda bulunan yedi eksik** `MOTOR-NOTLARI.md`'de.
+
+Pin ilk saatinde işini yaptı: `Gizmo` o sırada temizken on değişmiş dosyaya çıktı.
+
+### Parser: şehir artık bütün okunuyor
+
+`world/object.rs` tam-24 stride dayatıyordu; şehrin **234 solid'i 36 baytlık standart kaydı**
+kullanıyor ve hepsi sessizce boş dönüyordu — `XS_*`/`XO_*` levhalar, refüj direkleri, şevronlar.
+`world_layout` artık iki stride'ı da **tam eşitlikle** kabul ediyor (`layout_for`'un "sığıyor mu"
+kuralı değil). Dünyaya ulaşan kazanç: 65 obje, +1.070 çarpışma üçgeni, +42 çizim mesh'i.
+
+Modül belgesi "her tampon istisnasız `vertices × 24`" diyordu; iddia L4RH/L4RR/L4RC ile
+doğrulanmıştı — yani 36 baytlık solid içermeyen dört bundle'ın üçüyle, onu yanlışlayamayacak veriyle.
+
+**Ve bunu bir daha kimsenin fark etmeden kaybetmemesi için ölçü kondu:** `ug2 verify <TRACKS>` her
+solid'i çözüp kendi başlığının beyanıyla karşılaştırıyor, `golden_assets.rs` içinde
+`the_city_decodes_to_what_it_declares` olarak da koşuyor (NFSU2_ROOT yoksa atlanıyor).
+
+```
+solids 28985 · declared 3667007 v / 2544154 t · decoded 3667007 v / 2544154 t
+DROPPED 0 · SHORT 0 · runs 70548 declared, 70548 kept · RUNS UNTEXTURED 0
+```
+
+Kusuru geri koyup denendi: 234 DROPPED, çıkış kodu 1. Başarısız olduğu görülmemiş kontrol,
+çalıştığı bilinen kontrol değildir.
+
+### Oyun: sürülebilir hâle geldi
+
+- **Şehir görünür oldu.** Vertex rengi sRGB eğrisinden geçiriliyordu; bunlar radyometrik örnek
+  değil, 2004'ün sabit-fonksiyonlu boru hattının dokuya **görüntü uzayında** uyguladığı çarpan.
+  Kare medyanı **1/255 → 29/255**.
+- **Sonsuz düşme kapandı.** `CarRig::keep_in_world`, iki ölçütle: kesintisiz 2,5 sn hava, **ve** son
+  *ayakta durulan* pozun 60 m altına inmek (sürtme sayacı sıfırlıyor, derinlik sıfırlanamıyor).
+  "Ayakta durulan" = dört teker yerde, dik, 0,25 sn — tek karelik sürtme değil. Üç binary'de de var.
+- **Doğuş noktası şehir merkezine taşındı.** Eski `(1354, −11, −2457)` **havaalanının içindeydi**.
+  Yenisi `(710, 27, 888)`, tuning dükkanlarının önü.
+- **Zemin yüksekliği artık soruluyor.** `world::Ground`, 64 m hücrelerde, sürülebilir üçgenlerden.
+  Elle bilinen iki değeri doğruluyor: merkez 26,41 (elle 27,0), havaalanı −11,03 (elle −11).
+- **Harita kenarı uyarısı.** `world::Bounds` (472 hücre) + iki saniye ileriye bakan uyarı.
+- **Lastik yönü.** Görsel açı girdiden türetiliyordu ve işareti tersti; artık `Wheel::steering_angle`
+  fizikten okunuyor — Ackermann de bedava geliyor.
+- **`dedup` anahtarına matris eklendi.** Bugün sıfır maliyet (13.985 aynı), ama 16.071 `placed`
+  objenin bbox'ı **yerel**, yani anahtar dünya konumu taşımıyordu.
+
+### Sıradaki adım — LOD rafları kararı
+
+`_1A/_1B/_1Z` tek bir tasarımın kademeli detay ailesi (1.423 ardışık çiftin 1.377'sinde vertex
+düşüyor) ve **X ekseninde raflanmış**: aynı Y, aynı Z, düzenli adım.
+
+```
+514 raf · 1.444 üye · 213.366 vertex   →  objelerin %10,3'ü, vertex'lerin %12,3'ü
+```
+
+Raf olduğuna karar veren detay eğrisi: `XB_3TOWERAPARTLK` üç kardeşi 40 m arayla **258 → 176 → 27**
+vertex. Sokakta yan yana üç gerçek bina böyle kabalaşmaz.
+
+`NFS_TIERS=finest` bunları eliyor (8.161 → 7.858 çizim, 1.232.698 → 1.172.671 çarpışma üçgeni) ama
+**varsayılan değil**: bunlar dosyada gerçek konumlardaki gerçek objeler ve okuma yanlışsa bu şehirden
+bina siler. **Karar bir bakışa bakıyor** — rafları atınca şehirden bir şey eksiliyor mu?
+
+### Bilinen açıklar
+
+- **Culling yok.** 8.161 mesh her kare. Motor tarafı (`MOTOR-NOTLARI.md` 2): hücre/bölge kavramı yok,
+  `Frustum::test_aabb_masked` hâlâ çağıransız.
+- **Backdrop oyunun kendi verisi değil.** `MaterialType::Skybox` dokuyu hiç örneklemiyor, prosedürel
+  gradyan üretiyor; `Unlit` ise pikselleri doğru yapıp derinliği bozuyor (paneller şehrin önüne
+  geçiyor). Doğrusu "önce çiz, kameraya kilitle, derinlik yazma" ve motorda o yol yok (madde 7).
+- **Pozlama.** `BakedLit` çıplak çarpım zinciri, ACES toe'su karanlıkta 4,67× kısıyor, exposure
+  dışarıdan ayarlanamıyor (madde 3).
+- **Bariyerler.** Kurulumda bariyer chunk'ı yok; türetmek ROUTES parser'ına bağlı ve o yazılmadı.
+- **`nfs_drive`/`nfs_race` görsel-çarpışma uyumu.** Zemin dilimi artık sonlu ve çizilenle aynı
+  boyutta, ama ikisi ayrı sabitlerden geliyordu; `GROUND_SIZE` tek kaynak yapıldı.
+
+### Bu oturumda çürütülenler (tekrar araştırılmasın diye)
+
+- "Şehri karartan çift-gamma" — **yanlış**. sRGB üs yasası olduğu için `f(a)·f(b) = f(ab)`.
+- "`MODULATE2X` konvansiyonu" — **yanlış**. Boru hattı orta tonlarda düz gamma modulate'e eşit.
+- "Gökyüzü oyunun kendi verisi" — **yanlış**. `sky.wgsl`'de tek `textureSample` yok.
+- "Çizilen dünyanın üçte biri harita dışında" — **yanlış**. `Bounds` ile ölçüldü: %0,2.
+- "OpenUG'un 715 obje farkı bizden" — **hayır**. Sekiz hipotez elendi; 28.985'i dosyalar üç ayrı
+  chunk üzerinden beyan ediyor.
+
+## Nerede kaldık (2026-08-04) — tarihsel
 
 Bu bölüm taze bir oturumun buradan devam edebilmesi için. Ayrıntı commit mesajlarında.
 
