@@ -17,7 +17,7 @@ use gizmo::physics::world::PhysicsWorld;
 use gizmo::prelude::*;
 use gizmo::renderer::gpu_types::Vertex;
 use nfsu2::geom::add_transform;
-use nfsu2::rig::{spawn_car, CarRig, ChaseCamera, Driver, Placement};
+use nfsu2::rig::{spawn_car, CarRig, ChaseCamera, Driver, Placement, Rescue};
 use nfsu2::scene;
 
 const DEFAULT_CAR: &str =
@@ -285,6 +285,24 @@ fn update(world: &mut World, state: &mut RaceState, dt: f32, input: &Input) {
     state.driver.step_physics(world, dt);
 
     let Some(pose) = state.rig.pose(world) else { return };
+
+    // The same net the city binary has, for the same reason: `rig` is where "a car cannot fall out
+    // of the world" belongs, not one binary. It is rarely reached here — the ground is
+    // `Collider::plane`, which is a true plane in the narrowphase — but not never: its broadphase
+    // AABB is a ±10 000 m cube about the origin, so past 10 km there is nothing left to pair with.
+    match state.rig.keep_in_world(world, pose, dt) {
+        Rescue::None => {}
+        Rescue::ToLastGround => {
+            state.driver.reset();
+            println!("out of the world at {:?} — back on the last ground", pose.position);
+            return;
+        }
+        // The rig has already said why, once.
+        Rescue::NowhereSafe => {
+            state.driver.reset();
+            return;
+        }
+    }
 
     // Lap / checkpoint detection (proximity to the next expected checkpoint, in XZ).
     let car_xz = Vec3::new(pose.position.x, 0.0, pose.position.z);
