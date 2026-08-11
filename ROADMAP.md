@@ -976,9 +976,37 @@ bir kilometreden yukarıdan alınca yarım metre derinlik tamponunun gürültüs
 çizildiği hâlde yolun içinde kayboluyor.
 
 Bariyerler hâlâ bunun üstünde duruyor: kurulumda bariyer chunk'ı yok (§8, ölçülmüş olumsuz sonuç),
-yani koridoru rota grafiğinden türetmek gerekiyor. Düğümler ve mesafe artık elimizde; sıradaki
-parçalar okunmamış dört yaprak — `0x0003414D` (her dosyada 36'nın tam katı), `0x0003414C` (16),
+yani koridoru rota verisinden türetmek gerekiyor — ve en güçlü aday `0x0003414A` çıktı, aşağıda.
+Düğümler ve mesafe artık elimizde; kalan parçalar okunmamış dört yaprak — `0x0003414D` (her dosyada 36'nın tam katı), `0x0003414C` (16),
 `0x00034149` ve `0x0003414A` (4'ten büyük hiçbir şeye bölünmüyor: değişken uzunlukta ya da başlıklı).
+
+#### `0x0003414A` — yönlü poligon bölgeler, ve bariyerin en güçlü adayı
+
+Rota dosyalarının en büyük yaprağı (Paths4001'de 69.628 bayt) sabit stride taşımıyor — 8..80
+arası her stride tarandı, hiçbirinde sütun tutmuyor. Çünkü kayıtlar **değişken uzunlukta**:
+
+| offset | ne |
+|---|---|
+| `+0` | `u32` (nokta sayısı **değil** — aşağıya bak) |
+| `+4` | konum (x, y) |
+| `+12` | **birim** yön vektörü (uzunluk 1,000) |
+| `+20..+32` | sıfır |
+| `+32` | poligonun AABB'si (minx, miny, maxx, maxy) |
+| `+48..+68` | 16 bayt + bir `u32` |
+| `+68` | poligonun köşeleri (x, y çiftleri) |
+
+Kanıt kendini doğrulayan cinsten: kayıt imzasını (küçük `u32` + birim vektör + üç sıfır) tarayarak
+bulunan **11.361 kaydın 11.170'inde** `+32`'deki kutu `+68`'deki listeyi **birebir** sarıyor (%98,3).
+Yanlış hizalanmış bir okuma bu testi geçemez.
+
+Poligonlar çoğunlukla dörtgen (medyan 4 köşe, en fazla 12), medyan alan **8.073 m²**. Ve şehre
+sorulduğunda: merkezlerinin **198/200'ü (%99) sürülebilir yüzeyin üstünde**, kenarlarının %97'sinin
+iki yanında da yol var. Yani yolu kaplayan, **yönü olan**, büyük bölgeler.
+
+**Bu bariyer için bulunan en güçlü aday.** "Parkurun içinde misin" ve "doğru yöne mi gidiyorsun"
+sorularının ikisini birden taşıyor. Ama parser'a girmedi: **kayıt uzunluğu henüz türetilmedi** — ne
+`+0` ne `+68`'den önceki `u32` bir sonraki kaydın yerini öngörüyor (ilk kayıt 224 bayt, `+0` ise 3
+diyor). Sınırı tahmin eden bir okuyucu, %98,3'ü %100 sanan bir okuyucudur.
 
 #### `0x0003414D` — düzeni çıktı, **anlamı çıkmadı**
 
