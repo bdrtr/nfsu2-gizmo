@@ -17,7 +17,8 @@
 //! **R** back to the start · **T** auto-shift · hold **right mouse** to orbit · **F** print where
 //! the car is.
 //!
-//! Env: `NFS_AT="x,y,z"` where to start — downtown sits near `y ≈ 27` and the airport near
+//! Env: `NFS_ROUTE=<Paths*.bin>` load that race: its line is drawn on the road and the HUD says
+//! where you are on it and whether you are still on it · `NFS_AT="x,y,z"` where to start — downtown sits near `y ≈ 27` and the airport near
 //! `y ≈ -11`, so the height matters as much as the place · `NFS_BUDGET=<n>` caps objects,
 //! nearest-first · `NFS_DIAG=1` prints the physics' own view once a second · plus everything
 //! [`nfsu2::rig`] reads (`NFS_PAINT`, `NFS_KIT`, `NFS_ENGINE`, `NFS_SHOTCAM`, …).
@@ -94,7 +95,35 @@ struct CruiseState {
     out_for: f32,
     /// Whether where the car is *pointed* leaves the map — the warning that arrives in time.
     heading_out: bool,
+    /// The race this file describes, if `NFS_ROUTE` named one.
+    course: Option<Course>,
 }
+
+/// A route file's network, and where the car is on it.
+///
+/// The install ships no barriers (`ROADMAP.md` §M4), so "off the course" cannot be read — it is
+/// derived from the race's own paths by [`city::Corridor`]. Being outside this is a *different*
+/// question from being outside [`city::Bounds`]: the map's edge is where the world stops, and this
+/// is where the race does.
+struct Course {
+    corridor: city::Corridor,
+    /// The last fix taken, for the HUD. `None` means the network does not reach the car at all.
+    fix: Option<city::Fix>,
+    /// Seconds spent off the course, unbroken.
+    off_for: f32,
+    /// What the file called itself, so the HUD can say which race is loaded.
+    name: String,
+}
+
+/// How far off the nearest path still counts as on the course.
+///
+/// Measured rather than chosen: walking sideways from every path point until the road stops
+/// answering at that level, Bayview's carriageways reach out a median of 9-11 m across three route
+/// files. Twelve sits above that and well under the 60 m a junction opens out to.
+const COURSE_HALF_WIDTH: f32 = 12.0;
+
+/// How long the car may be off the course before the HUD stops being polite about it.
+const OFF_COURSE_GRACE: f32 = 4.0;
 
 /// What loading the city produced, kept for the HUD — the numbers that say whether the world under
 /// the car is the world in front of it.
@@ -227,8 +256,31 @@ fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> CruiseState
         100.0 * off_v as f32 / total_v as f32
     );
 
-    // TEMPORARY MEASUREMENT — is a detail tier a stand-in for its siblings, or a building of its
-    // own? Group the `_1A_/_1B_/_1Z_` family by stem and report where the members actually sit.
+    // NFS_ROUTE=<Paths*.bin>: the race being driven. Its paths are stood on the city and kept as
+    // a corridor, because "off the course" cannot be read from the install — there are no barriers
+    // in it — and the race's own network is what it has to be derived from.
+    let (course_paths, mut course) = match std::env::var("NFS_ROUTE") {
+        Err(_) => (Vec::new(), None),
+        Ok(file) => {
+            let bytes = std::fs::read(&file).unwrap_or_else(|e| panic!("read {file}: {e}"));
+            let nodes =
+                gizmo_nfs::world::routes::nodes(&bytes).expect("read the route file's nodes");
+            let paths = city::build_route(&nodes, &city::road_ground(&objects));
+            let corridor = city::Corridor::of(&paths, COURSE_HALF_WIDTH);
+            let name = std::path::Path::new(&file)
+                .file_stem()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned();
+            println!(
+                "route {name}: {} paths · {} segments · {:.0} m of line · corridor half-width {COURSE_HALF_WIDTH} m",
+                paths.len(),
+                corridor.segments(),
+                paths.iter().map(city::RoutePath::length).sum::<f32>()
+            );
+            (paths, Some(Course { corridor, fix: None, off_for: 0.0, name }))
+        }
+    };
 
     let mut stats = CityStats {
         objects: objects.len(),
@@ -308,6 +360,18 @@ fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> CruiseState
                 bound.insert(key, bg);
             }
         }
+        if !course_paths.is_empty() {
+            // Half a metre, not the three the headless overview needs: a chase camera is metres
+            // from the road, and three would float.
+            let verts = city::ribbon(&course_paths, 4.0, 0.5);
+            if !verts.is_empty() {
+                let mesh = Mesh::from_vertices(&renderer.device, &verts, String::from("course"));
+                let material =
+                    Material::new(white.clone()).with_unlit(Vec4::new(0.95, 0.15, 0.15, 1.0));
+                scene::spawn_mesh(world, mesh, material, Transform::new(Vec3::ZERO));
+            }
+        }
+
         for m in &visuals.meshes {
             // The city's lighting is baked into its vertex colours; `BakedLit` multiplies them in
             // rather than relighting a static world that was never drawn to be relit.
@@ -386,6 +450,7 @@ fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> CruiseState
         bounds,
         out_for: 0.0,
         heading_out: false,
+        course: course.take(),
     }
 }
 
@@ -434,6 +499,15 @@ fn update(world: &mut World, state: &mut CruiseState, dt: f32, input: &Input) {
     let forward = pose.rotation * Vec3::NEG_Z;
     let look = (pose.speed.abs() * OUT_OF_BOUNDS_LOOKAHEAD).clamp(40.0, 250.0);
     state.heading_out = !state.bounds.contains(pose.position + forward * look);
+
+    // Where the car is on the race, if one is loaded. Asked **under** the car rather than ahead of
+    // it, unlike the map boundary above: leaving the course is recoverable and instantaneous, so
+    // the honest thing to report is where you are, not where you are going.
+    if let Some(course) = state.course.as_mut() {
+        course.fix = course.corridor.locate(pose.position);
+        let on = course.fix.is_some_and(|f| f.distance <= COURSE_HALF_WIDTH);
+        course.off_for = if on { 0.0 } else { course.off_for + dt };
+    }
 
     // The car being outside *itself* is the rare case — 17 of the city's 489 cells have collision
     // but nothing drivable, a rooftop or a wall face — and there the wheels are down and no other
@@ -516,6 +590,35 @@ fn ui(world: &mut World, state: &mut CruiseState, ctx: &egui::Context) {
                 }
             });
     }
+    // Where the race is, when there is one. The distance is shown rather than a bare on/off,
+    // because a corridor half-width is a judgement and a number lets it be argued with.
+    if let Some(c) = &state.course {
+        egui::Area::new(egui::Id::new("course"))
+            .anchor(egui::Align2::LEFT_BOTTOM, egui::vec2(24.0, -24.0))
+            .show(ctx, |ui| {
+                ui.label(format!("rota {} · koridor ±{COURSE_HALF_WIDTH:.0} m", c.name));
+                match c.fix {
+                    None => ui.label("Bu yarışın ağı buraya ulaşmıyor · off the race network"),
+                    Some(f) => ui.label(format!(
+                        "hat {} · {:.0} m · mesafe {:.0}",
+                        f.path, f.distance, f.progress
+                    )),
+                };
+            });
+        if c.off_for > 0.0 {
+            egui::Area::new(egui::Id::new("offcourse"))
+                .anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 140.0))
+                .show(ctx, |ui| {
+                    if c.off_for >= OFF_COURSE_GRACE {
+                        ui.heading("Parkur dışındasın");
+                        ui.label("Off the course — get back on the road");
+                    } else {
+                        ui.label(format!("parkur dışı · {:.1} sn", c.off_for));
+                    }
+                });
+        }
+    }
+
     egui::Area::new(egui::Id::new("spd"))
         .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-30.0, -30.0))
         .show(ctx, |ui| {

@@ -1086,6 +1086,16 @@ Yükseklik uzaklığa **bilerek girmiyor**: köprüdeki araba köprünün güzer
 altındaki yola değil. Ağ ulaşmıyorsa `None` dönüyor, büyük bir sayı değil — "1.400 m uzakta" demek,
 birinin onu yarı-genişlikle karşılaştırmasına davetiye olurdu.
 
+`nfs_cruise NFS_ROUTE=<Paths*.bin>` artık bir yarış yükleyip hattını yola çiziyor; HUD hangi
+güzergâhta olduğunu, koridora uzaklığını ve dosyanın kendi kümülatif mesafesini gösteriyor, parkur
+dışına çıkınca da uyarıyor. Bu uyarı harita-kenarı uyarısından **ayrı bir soru**: harita kenarı
+dünyanın bittiği yer, koridor yarışın bittiği yer — ve ilki arabanın *önüne*, ikincisi *altına*
+soruluyor, çünkü haritadan çıkmak geri dönülmez, parkurdan çıkmak değil.
+
+Koridor kendini doğruluyor: bir rota dosyasının kendi düğümleri o dosyanın koridorunda **0 kaçak,
+en kötü uzaklık 0,000 m, en kötü mesafe hatası 0,000** ile bulunuyor (üç dosyada). Çerçeve dönüşümü
+ya da bir indeks kaysa bu tutmazdı.
+
 **Yarı-genişlik tahmin edilmedi, ölçüldü.** Her güzergâh noktasından enine yürüyüp yolun nerede
 bittiğine bakıldı (aynı kotta kalma koşuluyla): yol yanlara **medyan 9–11 m** uzanıyor (Paths4001
 11, Paths4021 11, Paths4061 9). p90'ın 60 m'ye dayanması kavşaklar ve meydanlar. 12 m yarı-genişlik

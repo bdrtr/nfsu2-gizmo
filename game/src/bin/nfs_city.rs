@@ -414,6 +414,26 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
                     }
                 }
             }
+            // A corridor built from these paths has to find these paths. Every node of every path
+            // must locate at ~0 m and report a progress close to the file's own — a check that
+            // costs nothing and would catch a frame conversion or an index slipping.
+            let (mut worst_d, mut worst_p, mut missed) = (0.0f32, 0.0f32, 0usize);
+            for path in &built {
+                for (p, prog) in path.points.iter().zip(&path.progress) {
+                    match corridor.locate(*p) {
+                        None => missed += 1,
+                        Some(f) => {
+                            worst_d = worst_d.max(f.distance);
+                            worst_p = worst_p.max((f.progress - prog).abs());
+                        }
+                    }
+                }
+            }
+            println!(
+                "  corridor self-check: {missed} nodes the grid missed · worst distance \
+                 {worst_d:.3} m · worst progress error {worst_p:.3}"
+            );
+
             edge.sort_by(f32::total_cmp);
             if !edge.is_empty() {
                 let q = |t: f32| edge[((edge.len() - 1) as f32 * t) as usize];
@@ -620,7 +640,7 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
     // kilometre up, and at that near:far ratio half a metre is inside the depth buffer's noise —
     // the ribbon was drawn correctly and vanished into the road.
     if !routes.is_empty() {
-        let verts = ribbon(&routes, 4.0, 3.0);
+        let verts = nfsu2::world::route::ribbon(&routes, 4.0, 3.0);
         if !verts.is_empty() {
             let mesh = Mesh::from_vertices(&renderer.device, &verts, String::from("route"));
             let material = Material::new(white.clone()).with_unlit(Vec4::new(0.95, 0.15, 0.15, 1.0));
@@ -961,35 +981,3 @@ fn probe(dir: &str, meshes: &[gizmo_nfs::world::WorldMesh]) {
     );
 }
 
-/// A route's paths as a flat ribbon: one quad per segment, `width` across and `lift` above the
-/// surface the path was placed on.
-///
-/// Quads per segment rather than a mitred strip. A mitre needs the turn angle and gets ugly at the
-/// hairpins this city has; two triangles per segment overlap slightly on a corner and that is
-/// invisible on a 3 m ribbon lying on tarmac.
-fn ribbon(routes: &[nfsu2::world::RoutePath], width: f32, lift: f32) -> Vec<gizmo::renderer::gpu_types::Vertex> {
-    use gizmo::renderer::gpu_types::Vertex;
-    let mut out = Vec::new();
-    for path in routes {
-        for pair in path.points.windows(2) {
-            let (a, b) = (pair[0] + Vec3::Y * lift, pair[1] + Vec3::Y * lift);
-            let along = (b - a).normalize_or_zero();
-            if along == Vec3::ZERO {
-                continue;
-            }
-            let side = Vec3::new(-along.z, 0.0, along.x) * (width * 0.5);
-            let quad = [a - side, a + side, b + side, b - side];
-            let v = |p: Vec3| Vertex {
-                position: [p.x, p.y, p.z],
-                color: [1.0, 1.0, 1.0],
-                normal: [0.0, 1.0, 0.0],
-                tex_coords: [0.0, 0.0],
-                ..Default::default()
-            };
-            for i in [0usize, 1, 2, 0, 2, 3] {
-                out.push(v(quad[i]));
-            }
-        }
-    }
-    out
-}

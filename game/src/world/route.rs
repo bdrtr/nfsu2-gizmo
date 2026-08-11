@@ -126,6 +126,48 @@ pub fn build(nodes: &[RouteNode], ground: &Ground) -> Vec<RoutePath> {
         .collect()
 }
 
+/// A route's paths as a flat ribbon: one quad per segment, `width` across and `lift` above the
+/// surface the path was placed on.
+///
+/// Quads per segment rather than a mitred strip. A mitre needs the turn angle and gets ugly at the
+/// hairpins this city has; two triangles per segment overlap slightly on a corner and that is
+/// invisible on a ribbon lying on tarmac.
+///
+/// **`lift` is a viewing decision, not a placement one.** Framing the whole city from a kilometre
+/// up puts half a metre inside the depth buffer's noise, and the ribbon is drawn correctly and
+/// vanishes into the road; from a chase camera half a metre is right and three metres floats.
+#[must_use]
+pub fn ribbon(
+    paths: &[RoutePath],
+    width: f32,
+    lift: f32,
+) -> Vec<gizmo::renderer::gpu_types::Vertex> {
+    use gizmo::renderer::gpu_types::Vertex;
+    let mut out = Vec::new();
+    for path in paths {
+        for pair in path.points.windows(2) {
+            let (a, b) = (pair[0] + Vec3::Y * lift, pair[1] + Vec3::Y * lift);
+            let along = (b - a).normalize_or_zero();
+            if along == Vec3::ZERO {
+                continue;
+            }
+            let side = Vec3::new(-along.z, 0.0, along.x) * (width * 0.5);
+            let quad = [a - side, a + side, b + side, b - side];
+            let v = |p: Vec3| Vertex {
+                position: [p.x, p.y, p.z],
+                color: [1.0, 1.0, 1.0],
+                normal: [0.0, 1.0, 0.0],
+                tex_coords: [0.0, 0.0],
+                ..Default::default()
+            };
+            for i in [0usize, 1, 2, 0, 2, 3] {
+                out.push(v(quad[i]));
+            }
+        }
+    }
+    out
+}
+
 /// How far a point is from the road network, and how far along it is.
 ///
 /// The answer to both questions a race needs — "am I still on the course" and "where am I on it" —
