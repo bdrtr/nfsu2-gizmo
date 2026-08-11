@@ -1017,6 +1017,32 @@ sıfır istisna. İki alanı iki bayt erken okumak ilk dosyada ilk kayıtta patl
 `+0`'daki tür kodu (14 değer) ve `+48`'deki kimlik (445 değer, 12.830 kayıtta sıfır) ham taşınıyor.
 Kimlik obje adı hash'i **değil** — 445'in hiçbiri şehrin 29.515 adıyla eşleşmiyor.
 
+**Tür kodu bir boyut hiyerarşisi.** `nfs_city NFS_REGIONS=<Paths*.bin>` poligonları türe göre
+renklendirerek çiziyor; `Paths4001`'in 671 poligonu:
+
+| tür | adet | ortalama alan | merkezi yolun üstünde |
+|---|---|---|---|
+| 3 | 1 | 7.961.881 m² | %0 |
+| 16 | 4 | 4.000.447 m² | %25 |
+| 17 | 13 | 1.048.373 m² | %38 |
+| **12** | **131** | **10.109 m²** | **%86** |
+| **5** | **39** | **4.674 m²** | **%85** |
+| 4 | 24 | 2.711 m² | %25 |
+| **6** | **79** | **939 m²** | **%91** |
+| 11 | 4 | 672 m² | %25 |
+| 7 | 42 | 241 m² | %62 |
+| 14 | 23 | 225 m² | %22 |
+| 13 | 196 | 79 m² | %44 |
+| 18 / 19 | 56 / 59 | 64 m² | %39 / %41 |
+
+Okunacak şey şu: **yola oturanlar orta boy türler** — 5, 6, 12, yani 671'in 249'u, %85-91 oranıyla.
+Koridor adayı bunlar. Devasa olanlar (3, 16, 17) alan tanımı; en küçükler (13, 18, 19 — 64-79 m²,
+311 adet) yalnız %40 oranında yolda, yani yol işaretçisi değiller. İlk bakışta "adaları dolduruyor"
+diye okunan şey buydu; sayı düzeltti.
+
+Sıradaki ölçüm: küçük türlerin **yön vektörleri** yakınındaki yol/güzergâh yönüyle hizalı mı? Hizalı
+çıkarsa yönlü işaretçi (kapı/checkpoint), çıkmazsa yön yalnız büyük bölgelerin bir özelliği.
+
 #### `0x0003414D` — düzeni çıktı, **anlamı çıkmadı**
 
 Bariyerin en olası adayı buydu ve değil. Parser'a girmedi çünkü bir alanı adlandırmak bir iddiadır

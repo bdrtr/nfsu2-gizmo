@@ -384,6 +384,71 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
         }
     };
 
+    // NFS_REGIONS=<Paths*.bin>: draw that file's `0x0003414A` polygons, coloured by their `kind`
+    // code. Fourteen codes exist across the install and nobody knows what they mean; if one of them
+    // is the course corridor and another the start grid, a picture is what will say so.
+    let regions: Vec<(u32, Vec<Vec3>)> = match std::env::var("NFS_REGIONS") {
+        Err(_) => Vec::new(),
+        Ok(file) => {
+            let bytes = std::fs::read(&file).unwrap_or_else(|e| panic!("read {file}: {e}"));
+            let raw = gizmo_nfs::world::routes::regions(&bytes).expect("read the route's regions");
+            let ground = nfsu2::world::route::road_ground(&meshes);
+            let mut kinds: std::collections::BTreeMap<u32, (usize, f32)> = Default::default();
+            let out = raw
+                .iter()
+                .filter(|r| r.points.len() >= 3)
+                .map(|r| {
+                    let flat: Vec<Vec3> =
+                        r.points.iter().map(|p| nfsu2::world::remap([p[0], p[1], 0.0])).collect();
+                    let c = flat.iter().fold(Vec3::ZERO, |a, p| a + *p) / flat.len() as f32;
+                    // One height for the whole polygon, from the road under its centre. A region is
+                    // flat in the file; giving each corner its own height would tilt it by whatever
+                    // the kerb beside it does.
+                    let y = ground
+                        .heights_at(c.x, c.z)
+                        .first()
+                        .copied()
+                        .unwrap_or_else(|| ground.heights_at(c.x, c.z).first().copied().unwrap_or(0.0));
+                    let area = flat
+                        .iter()
+                        .zip(flat.iter().cycle().skip(1))
+                        .map(|(a, b)| a.x * b.z - b.x * a.z)
+                        .sum::<f32>()
+                        .abs()
+                        / 2.0;
+                    let e = kinds.entry(r.kind).or_default();
+                    e.0 += 1;
+                    e.1 += area;
+                    (r.kind, flat.iter().map(|p| Vec3::new(p.x, y, p.z)).collect())
+                })
+                .collect();
+            // Which kinds stand on the road and which cover the blocks between roads? The
+            // picture says the small ones are on tarmac and the big ones are not; this is that,
+            // counted.
+            let mut on_road: std::collections::BTreeMap<u32, (usize, usize)> = Default::default();
+            for r in raw.iter().filter(|r| r.points.len() >= 3) {
+                let flat: Vec<Vec3> =
+                    r.points.iter().map(|p| nfsu2::world::remap([p[0], p[1], 0.0])).collect();
+                let c = flat.iter().fold(Vec3::ZERO, |a, p| a + *p) / flat.len() as f32;
+                let e = on_road.entry(r.kind).or_default();
+                e.1 += 1;
+                if !ground.heights_at(c.x, c.z).is_empty() {
+                    e.0 += 1;
+                }
+            }
+            println!("regions: {} polygons", raw.len());
+            for (k, (n, a)) in &kinds {
+                let (hit, tot) = on_road.get(k).copied().unwrap_or((0, 1));
+                println!(
+                    "  kind {k:>3}: {n:>5} polygons · mean area {:>9.0} m2 · centre over road {:>3.0} %",
+                    a / *n as f32,
+                    100.0 * hit as f32 / tot as f32
+                );
+            }
+            out
+        }
+    };
+
     let budget = std::env::var("NFS_BUDGET").ok().and_then(|s| s.parse::<usize>().ok());
     // Frame on the region's own centre so a budget takes a neighbourhood rather than an edge.
     let around = centre_of(&meshes);
@@ -464,6 +529,42 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
         spawned += 1;
     }
     println!("{spawned} entities spawned");
+
+    // The regions, as flat fans lifted clear of the road, one colour per `kind`.
+    if !regions.is_empty() {
+        let mut by_kind: std::collections::BTreeMap<u32, Vec<gizmo::renderer::gpu_types::Vertex>> =
+            Default::default();
+        for (kind, poly) in &regions {
+            let verts = by_kind.entry(*kind).or_default();
+            for i in 1..poly.len() - 1 {
+                for p in [poly[0], poly[i], poly[i + 1]] {
+                    verts.push(gizmo::renderer::gpu_types::Vertex {
+                        position: [p.x, p.y + 2.0, p.z],
+                        color: [1.0, 1.0, 1.0],
+                        normal: [0.0, 1.0, 0.0],
+                        tex_coords: [0.0, 0.0],
+                        ..Default::default()
+                    });
+                }
+            }
+        }
+        // Distinct rather than pretty: fourteen codes have to be told apart at a glance.
+        const HUES: [[f32; 3]; 8] = [
+            [0.95, 0.20, 0.20], [0.20, 0.85, 0.35], [0.25, 0.45, 0.95], [0.95, 0.85, 0.20],
+            [0.85, 0.30, 0.90], [0.20, 0.90, 0.90], [0.95, 0.55, 0.15], [0.60, 0.60, 0.60],
+        ];
+        for (n, (kind, verts)) in by_kind.iter().enumerate() {
+            if verts.is_empty() {
+                continue;
+            }
+            let mesh = Mesh::from_vertices(&renderer.device, verts, format!("region_{kind}"));
+            let c = HUES[n % HUES.len()];
+            let material =
+                Material::new(white.clone()).with_unlit(Vec4::new(c[0], c[1], c[2], 1.0));
+            scene::spawn_mesh(&mut world, mesh, material, Transform::new(Vec3::ZERO));
+            println!("  kind {kind} -> rgb({:.2},{:.2},{:.2}), {} triangles", c[0], c[1], c[2], verts.len() / 3);
+        }
+    }
 
     // The race line, as a flat ribbon lifted clear of the tarmac. Unlit and bright on purpose: the
     // city is baked-lit and dark, and a diagnostic that has to be hunted for is not one. Lifted 3 m
