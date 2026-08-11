@@ -615,7 +615,7 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
                 for p in [poly[0], poly[i], poly[i + 1]] {
                     verts.push(gizmo::renderer::gpu_types::Vertex {
                         position: [p.x, p.y + 2.0, p.z],
-                        color: [1.0, 1.0, 1.0],
+                        color: [1.0, 1.0, 1.0, 1.0],
                         normal: [0.0, 1.0, 0.0],
                         tex_coords: [0.0, 0.0],
                         ..Default::default()

@@ -11,9 +11,21 @@ tahmin değil bir liste olur.
 |---|---|
 | paket | `gizmo-engine` (kütüphane adı `gizmo`), sürüm `0.9.0` |
 | kaynak | `https://github.com/bdrtr/Gizmo` |
-| commit | `4d1a8cb7dab9df9e97b9e4c08255cbd56cef568f` — `main`, *"physics: the joint solver stops writing into sleeping mechanisms"* |
-| sabitlendi | 2026-08-09 |
+| commit | `ba969c0d881f8f93a9049988899325e9445ac3dc` — `main`, *"renderer: a spatial index for culling, and the transform system stops lying about change"* |
+| sabitlendi | 2026-08-11 (önceki: `4d1a8cb`, 2026-08-09) |
 | nerede yazılı | `game/Cargo.toml` → `rev = ...`; `Cargo.lock` aynı commit'i ayrıca kaydeder |
+
+**2026-08-11 yükseltmesi.** `4d1a8cb..main` beş commit ve ikisi doğrudan bu dosyaya cevap:
+`1dcab55` *"engine: close six gaps a game hit against a pinned build"* — 1, 3, 4, 5, 6 ve 7
+numaralı maddeleri, bizim ölçtüğümüz sayıları alıntılayarak kapatıyor; `ba969c0` madde 2 için
+uzamsal indeks getiriyor. Yükseltmenin oyun tarafına maliyeti iki satır oldu: `Vertex::color`
+artık `[f32; 4]`.
+
+Motor üç iddiamızı da **düzeltti**, ve bunlar bizim hatalarımız:
+- *"exposure dışarıdan ayarlanamıyor"* — **yanlış**, `Camera::exposure` zaten vardı;
+  `post_process.rs`'teki 1,15 yalnız tamponun ilk içeriği, her kare üzerine yazılıyor.
+- *"`gather_colliders` kendini ve trigger'ları da tarıyor"* — **yanlış**, ikisini de atlıyordu.
+- *"son cascade sınırı"* okumamız — `cascade_splits.w` gerçekten `min(cam_far, SHADOW_DISTANCE)`.
 
 Bu commit'te oyunun bugün dayandığı her şey var — doğrulandı, varsayılmadı:
 `Collider::trimesh` ve `TriMeshShape::local_aabb` (önbelleklenmiş trimesh AABB,
@@ -50,7 +62,7 @@ bu yalnız kapak açıkken ısırır.
 
 `Gizmo`'da **asla dal değiştirme.** O ağaçta başka oturumlar çalışıyor. Motorun bir commit'e sahip
 olup olmadığını öğrenmek için checkout değil git yeter:
-`git -C ../Gizmo log --oneline 4d1a8cb..main`.
+`git -C ../Gizmo log --oneline ba969c0..main`.
 
 ## Pinin neyi dondurduğu — ve neyi dondurmadığı
 
@@ -63,11 +75,11 @@ bir render farkı üretebilir. Bugün oyun `wgpu`/`naga` 29.0.4 çözüyor, Gizm
 29.0.3'te. Renderer'da açıklanamayan bir değişiklik görürsen ilk bakılacak yer motor değil,
 `Cargo.lock` diff'idir.
 
-**Pini yalnız `origin/main` tutuyor.** `4d1a8cb`'yi işaret eden bir etiket yok. `main` force-push
+**Pini yalnız `origin/main` tutuyor.** `ba969c0`'yi işaret eden bir etiket yok. `main` force-push
 ile bu commit'in gerisine alınırsa GitHub nesneyi eninde sonunda toplar ve bağımlılık, deposu
 `~/.cargo/git`'te sıcak olmayan her makinede çözülemez olur — bu makine fark etmez, kırılma önce
-temiz bir checkout'ta ya da CI'da görünür. Kalıcı çözüm `Gizmo`'da `4d1a8cb`'ye bir etiket atıp
-push etmek (ör. `nfsu2-pin-2026-08-09`); bu, motor deposuna yazmak demek olduğu için bilerek
+temiz bir checkout'ta ya da CI'da görünür. Kalıcı çözüm `Gizmo`'da `ba969c0`'ye bir etiket atıp
+push etmek (ör. `nfsu2-pin-2026-08-11`); bu, motor deposuna yazmak demek olduğu için bilerek
 yapılmadı.
 
 **Kök `[patch]` donmuş motorun içine de uzanır.** Bir `[patch]` git bağımlılığının *geçişli*
@@ -86,13 +98,13 @@ Durumlar: `açık` · `motorda düzeldi` (commit ile) · `pin yükselince doğru
 
 | # | tarih | eksik / hata | nerede çarptık | oyundaki geçici çözüm | motor tarafı | durum |
 |---|---|---|---|---|---|---|
-| 1 | 2026-08-04 | `update_vehicle` için broadphase destekli sorgu tutamacı yok: tekerlek başına tüm collider listesi doğrusal taranıyor, `gather_colliders` her çağrıda hepsini klonluyor. Şehirde adım başına ~14.000 collider kopyası | ROADMAP "Sıradaki adım" §3 — şehir + araba binary'sinin kare hızını bunun belirlemesi bekleniyor | yok (henüz ölçülmedi) | `gizmo-physics-dynamics` × `-rigid` | açık |
-| 2 | 2026-08-04 | Motorda hücre/bölge (`Cell`/`Region`) kavramı ve uzamsal indeks yok; `Frustum::test_aabb_masked` pinlenmiş commit'te hâlâ **sıfır çağıranlı** (yalnız kendi testleri çağırıyor) | 8.119 mesh her kare gönderiliyor, culling yok | culling oyun tarafında yok; `world/` kendi hücrelerini kuruyor ama render onları kullanmıyor | yeni `gizmo-world` ya da `gizmo-scene` + `gizmo-renderer` | açık |
-| 3 | 2026-08-09 | `BakedLit` **çıplak bir çarpım zinciri**: `vertexRengi × instanceAlbedo × doku`, üstüne gölge terimi. Kazanç yok, emissive yok, ambient taban yok, sis yok — karanlık içeriği kaldıracak hiçbir kolu yok. Üstüne ACES toe'su (`post_process.wgsl:108`, `x→0`'da `aces(x) ≈ 0,214·x`) karanlıkta 4,67× kısıyor ve `exposure = 1,15` (`post_process.rs:151`) bunu telafi etmiyor. **Dikkat:** orta tonlarda boru hattı düz gamma modulate'e neredeyse eşit (128×128 → 62,8'e karşı 64,3), yani sorun tonemap'in yanlışlığı değil, **ayarlanabilir olmaması** | Bayview: pencerenin medyanı **1/255**, ortalama 8,5/255. Yol ekranda 2–14/255. Uçtan uca: vcol 128 × doku 128 → 63; 96×96 → 21; **64×64 → 2,6**; vcol 128 × doku 255 → 164 (parlayan pencereler) | yok | `gizmo-renderer` | açık |
-| 4 | 2026-08-09 | `SHADOW_DISTANCE = 100` m ve son cascade'in ötesinde gölge fonksiyonu `1.0` (tam aydınlık) döndürüyor. Gölge terimi 0,55'te tabanlandığı için bu, 100 m'de **sert 1,82× parlaklık basamağı** demek — mesafeye göre yumuşayan bir geçiş yok | Bayview'da ufkun hemen altında ölçülen parlak şerit; takip kamerasından ~2,3° aşağı düşüyor | yok | `gizmo-renderer` | açık |
-| 5 | 2026-08-09 | `BakedLit`, "vertex rengi yok" ile "vertex rengi siyah"ı ayırt edemiyor: `baked_lit.wgsl:143-146`, `length(baked) < 0.0001` ise rengi **beyaza** çeviriyor. Gerekçe doğru (rengi set etmeyen importer modeli karartmasın) ama proxy yanlış — niteliğin varlığı vertex layout'undan bilinmeli, piksel değerinden tahmin edilmemeli. **Latent:** doğuş noktası çevresinde yalnız bir ışık-konisi decal'inin 12 vertex'i sıfır, yani bugün görünür bir bozulma yapmıyor | Kod okumasıyla bulundu, gözle değil — ufuktaki parlak şeridin sebebi bu **değil** (o 4 numara) | yok | `gizmo-renderer` (`src/shaders/baked_lit.wgsl`) | açık |
-| 6 | 2026-08-09 | Vertex **alfası** sessizce düşürülüyor, şehrin fren-izi ve decal katmanları yolun üstüne opak geometri olarak çiziliyor | Bayview yol yüzeyi | yok | `gizmo-renderer` | açık |
-| 7 | 2026-08-09 | **Boyalı backdrop çizecek bir yol yok.** Oyunun kendi gökyüzü/panorama geometrisini doğru çizmek için "önce çiz, kameraya kilitle, derinlik yazma" gerekiyor; motorda bu yok ve iki materyalden hiçbiri onu vermiyor. `Skybox` derinliği doğru yapıyor (`sky.wgsl` NDC z'yi uzak düzleme itiyor, hiçbir şeyi kapatamıyor) ama içinde **tek bir `textureSample` yok** — mesh'in dokusunu da vertex rengini de atıp `scene.sun_color`'dan prosedürel bir gradyan üretiyor. `Unlit` pikselleri doğru yapıyor (`vertex rengi × albedo × doku`) ama derinliği değil, paneller şehrin önüne geçiyor. `Material`'da `depth_write` kolu da yok; karar `pipelines.rs`'te veriliyor | Bayview: `Skybox` ile kare medyanı 30/255 ve NFSU2'nun 191 backdrop mesh'i ekrana hiç ulaşmıyor; `Unlit` ile medyan 14/255 ve iki soluk panel kamerayla dünya arasında | Şimdilik `Skybox` — uydurma gökyüzü, ama en azından ufuk var | `gizmo-renderer` | açık |
+| 1 | 2026-08-04 | `update_vehicle` için broadphase destekli sorgu tutamacı yok: tekerlek başına tüm collider listesi doğrusal taranıyor, `gather_colliders` her çağrıda hepsini klonluyor. Şehirde adım başına ~14.000 collider kopyası | ROADMAP "Sıradaki adım" §3 — şehir + araba binary'sinin kare hızını bunun belirlemesi bekleniyor | yok (henüz ölçülmedi) | `gizmo-physics-dynamics` × `-rigid` | **motorda düzeldi** `1dcab55` — 4.098 collider'da 0,437 ms → 0,002 ms, adım başına klon 4.098 → 0. Davranış değişikliği: tekerlek artık yalnız rigid boru hattının simüle ettiği gövdelere basıyor, `Collider`-only zemin arabayı tutmuyor. Gözle doğrulanacak: `nfs_race`'in prosedürel zemini |
+| 2 | 2026-08-04 | Motorda hücre/bölge (`Cell`/`Region`) kavramı ve uzamsal indeks yok; `Frustum::test_aabb_masked` pinlenmiş commit'te hâlâ **sıfır çağıranlı** (yalnız kendi testleri çağırıyor) | 8.119 mesh her kare gönderiliyor, culling yok | culling oyun tarafında yok; `world/` kendi hücrelerini kuruyor ama render onları kullanmıyor | yeni `gizmo-world` ya da `gizmo-scene` + `gizmo-renderer` | **yarı açık** `ba969c0` — `gizmo-renderer::visibility` (artımlı BVH, `VisibleSet`, `query_frusta`) geldi ve `test_aabb_masked` çağıranını buldu, ama motorun kendi `collect_draw_items`'ı hâlâ doğrusal tarıyor. Commit "oyun kendi render döngüsünü sürüyor" varsayıyor; bizimkiler `default_render_pass` kullanıyor, yani indeksi tüketmek **bizim işimiz** |
+| 3 | 2026-08-09 | `BakedLit` **çıplak bir çarpım zinciri**: `vertexRengi × instanceAlbedo × doku`, üstüne gölge terimi. Kazanç yok, emissive yok, ambient taban yok, sis yok — karanlık içeriği kaldıracak hiçbir kolu yok. Üstüne ACES toe'su (`post_process.wgsl:108`, `x→0`'da `aces(x) ≈ 0,214·x`) karanlıkta 4,67× kısıyor ve `exposure = 1,15` (`post_process.rs:151`) bunu telafi etmiyor. **Dikkat:** orta tonlarda boru hattı düz gamma modulate'e neredeyse eşit (128×128 → 62,8'e karşı 64,3), yani sorun tonemap'in yanlışlığı değil, **ayarlanabilir olmaması** | Bayview: pencerenin medyanı **1/255**, ortalama 8,5/255. Yol ekranda 2–14/255. Uçtan uca: vcol 128 × doku 128 → 63; 96×96 → 21; **64×64 → 2,6**; vcol 128 × doku 255 → 164 (parlayan pencereler) | yok | `gizmo-renderer` | **motorda düzeldi** `1dcab55` — `Material`'a ambient ve emissive eklendi; tonemap'e dokunulmadı (bizim orta-ton ölçümümüz sayesinde). Varsayılanlar sıfır, kare medyanı 29 → 30 ile değişmedi. Kolları **kullanmak** hâlâ oyun tarafının işi |
+| 4 | 2026-08-09 | `SHADOW_DISTANCE = 100` m ve son cascade'in ötesinde gölge fonksiyonu `1.0` (tam aydınlık) döndürüyor. Gölge terimi 0,55'te tabanlandığı için bu, 100 m'de **sert 1,82× parlaklık basamağı** demek — mesafeye göre yumuşayan bir geçiş yok | Bayview'da ufkun hemen altında ölçülen parlak şerit; takip kamerasından ~2,3° aşağı düşüyor | yok | `gizmo-renderer` | **motorda düzeldi** `1dcab55` — şekli taşıyan iki shader da düzeltildi. Gözle doğrulanacak |
+| 5 | 2026-08-09 | `BakedLit`, "vertex rengi yok" ile "vertex rengi siyah"ı ayırt edemiyor: `baked_lit.wgsl:143-146`, `length(baked) < 0.0001` ise rengi **beyaza** çeviriyor. Gerekçe doğru (rengi set etmeyen importer modeli karartmasın) ama proxy yanlış — niteliğin varlığı vertex layout'undan bilinmeli, piksel değerinden tahmin edilmemeli. **Latent:** doğuş noktası çevresinde yalnız bir ışık-konisi decal'inin 12 vertex'i sıfır, yani bugün görünür bir bozulma yapmıyor | Kod okumasıyla bulundu, gözle değil — ufuktaki parlak şeridin sebebi bu **değil** (o 4 numara) | yok | `gizmo-renderer` | **motorda düzeldi** `1dcab55` — niteliğin varlığı artık vertex layout'undan okunuyor, piksel değerinden tahmin edilmiyor |
+| 6 | 2026-08-09 | Vertex **alfası** sessizce düşürülüyor, şehrin fren-izi ve decal katmanları yolun üstüne opak geometri olarak çiziliyor | Bayview yol yüzeyi | yok | `gizmo-renderer` | **motorda düzeldi** `1dcab55` — `Vertex::color` `vec3` → `vec4`, blend state dahil uçtan uca. Oyun tarafı bağlandı (`world/build.rs`: dördüncü bayt artık taşınıyor). Gözle doğrulanacak: fren izleri ve decal'ler |
+| 7 | 2026-08-09 | **Boyalı backdrop çizecek bir yol yok.** Oyunun kendi gökyüzü/panorama geometrisini doğru çizmek için "önce çiz, kameraya kilitle, derinlik yazma" gerekiyor; motorda bu yok ve iki materyalden hiçbiri onu vermiyor. `Skybox` derinliği doğru yapıyor (`sky.wgsl` NDC z'yi uzak düzleme itiyor, hiçbir şeyi kapatamıyor) ama içinde **tek bir `textureSample` yok** — mesh'in dokusunu da vertex rengini de atıp `scene.sun_color`'dan prosedürel bir gradyan üretiyor. `Unlit` pikselleri doğru yapıyor (`vertex rengi × albedo × doku`) ama derinliği değil, paneller şehrin önüne geçiyor. `Material`'da `depth_write` kolu da yok; karar `pipelines.rs`'te veriliyor | Bayview: `Skybox` ile kare medyanı 30/255 ve NFSU2'nun 191 backdrop mesh'i ekrana hiç ulaşmıyor; `Unlit` ile medyan 14/255 ve iki soluk panel kamerayla dünya arasında | **geçici çözüm kaldırıldı** — `nfs_cruise` artık `with_backdrop` kullanıyor | `gizmo-renderer` | **motorda düzeldi** `1dcab55` — üç özelliği birlikte taşıyan `MaterialType::Backdrop` geldi (önce çiz, kameraya kilitle, derinlik yazma). Gözle doğrulanacak: 191 backdrop mesh'i ekrana ulaşıyor mu |
 | 8 | 2026-08-11 | **Mesafeye göre LOD seçimi motorda var ama oyunun geçtiği yoldan erişilmiyor.** `LodGroup` / `LodLevel` bileşenleri ve `LodGroup::select_mesh(distance)` `gizmo-renderer::components::misc` içinde duruyor (son sınırın ötesinde `None` dönüp cull de ediyor), fakat bunlara **yalnız `gizmo-studio`'nun kendi render boru hattı** bakıyor (`render_pipeline/mod.rs:232,294`). Motorun kendi `default_render_pass`'i (`gizmo/src/systems/render/mod.rs:97`) yalnız `Camera, Material, Mesh, MeshRenderer` ödünç alıyor — `LodGroup` diye bir şey görmüyor. Yani motorun hazır geçidini kullanan bir oyun için bu özellik yok hükmünde; madde 2'nin (`Frustum::test_aabb_masked` sıfır çağıranlı) aynı şekli: yetenek var, oyunun yürüdüğü yol oraya varmıyor | Bir bina için üç detay kademesi taşıyan veri elimizde; seçecek bir şey olmadığı için **üçü de** çiziliyor. 8.161 mesh'in 2.457 objesi zaten uzak kademe. Bkz. `ROADMAP.md` "Nerede kaldık (2026-08-11)" | yok — kademeler oyun tarafında ölçülüyor (`world::lod`) ama seçim yapılmıyor; `NFS_TIERS=finest` yalnız bir teşhis kolu | `gizmo` (`systems/render`) — bileşenler `gizmo-renderer`'da hazır | açık |
 
 <!--
@@ -102,7 +114,7 @@ Yeni madde eklerken şablon — boş sütun bırakma, bilmiyorsan "ölçülmedi"
 
 ## Pini yükseltme kontrol listesi
 
-1. **Ne değişmiş, gör:** `git -C ../Gizmo log --oneline 4d1a8cb..main`
+1. **Ne değişmiş, gör:** `git -C ../Gizmo log --oneline ba969c0..main`
 2. **Kuyruğu tara:** yukarıdaki `açık` maddelerden hangileri o aralıkta kapanmış? Kapananları
    `pin yükselince doğrula` yap — henüz `kapandı` değil, doğrulanmadan kapanmaz.
 3. **`rev`'i değiştir** (`game/Cargo.toml`) ve bu dosyanın Pin tablosunu güncelle. `cargo update`

@@ -170,9 +170,13 @@ pub fn build_region(
                 // byte is already the multiplier the artist chose, so it goes through untouched —
                 // white stays white, and a road at 30 dims the tarmac to 12% instead of to 1%.
                 let modulate = |b: u8| f32::from(b) / 255.0;
+                // The fourth byte is the city's own transparency, and it reaches the shader as of
+                // engine `ba969c0` — before that `Vertex::color` was a `vec3` and alpha was dropped
+                // on the floor, which drew Bayview's skid marks and decals as opaque slabs over the
+                // road. It goes through the same untouched-modulator reading as the other three.
                 verts.push(Vertex {
                     position: [gp.x, gp.y, gp.z],
-                    color: [modulate(c[0]), modulate(c[1]), modulate(c[2])],
+                    color: [modulate(c[0]), modulate(c[1]), modulate(c[2]), modulate(c[3])],
                     normal: [gn.x, gn.y, gn.z],
                     tex_coords: object.uvs.get(i).copied().unwrap_or([0.0, 0.0]),
                     ..Default::default()

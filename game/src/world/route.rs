@@ -263,7 +263,7 @@ pub fn ribbon(
             let quad = [a - side, a + side, b + side, b - side];
             let v = |p: Vec3| Vertex {
                 position: [p.x, p.y, p.z],
-                color: [1.0, 1.0, 1.0],
+                color: [1.0, 1.0, 1.0, 1.0],
                 normal: [0.0, 1.0, 0.0],
                 tex_coords: [0.0, 0.0],
                 ..Default::default()

@@ -418,8 +418,8 @@ fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> CruiseState
         // single-sided it culls to nothing, which looks exactly like not drawing it at all.
         for m in &sky.meshes {
             let material = match m.texture.and_then(|k| bound.get(&k)) {
-                Some(bg) => Material::new(bg.clone()).with_skybox().with_double_sided(true),
-                None => Material::new(white.clone()).with_skybox().with_double_sided(true),
+                Some(bg) => Material::new(bg.clone()).with_backdrop(Vec4::ONE).with_double_sided(true),
+                None => Material::new(white.clone()).with_backdrop(Vec4::ONE).with_double_sided(true),
             };
             scene::spawn_mesh(world, m.mesh.clone(), material, Transform::new(m.origin));
         }
