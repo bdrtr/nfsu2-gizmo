@@ -1040,8 +1040,24 @@ Koridor adayı bunlar. Devasa olanlar (3, 16, 17) alan tanımı; en küçükler 
 311 adet) yalnız %40 oranında yolda, yani yol işaretçisi değiller. İlk bakışta "adaları dolduruyor"
 diye okunan şey buydu; sayı düzeltti.
 
-Sıradaki ölçüm: küçük türlerin **yön vektörleri** yakınındaki yol/güzergâh yönüyle hizalı mı? Hizalı
-çıkarsa yönlü işaretçi (kapı/checkpoint), çıkmazsa yön yalnız büyük bölgelerin bir özelliği.
+**Yön vektörü ölçüldü: yolun yönü değil.** En yakın güzergâh düğümü 60 m içinde olan bölgelerde
+yerel yol yönüyle karşılaştırıldı — medyanlar 48–91°, hiçbir tür hizalanmıyor.
+
+Ama yön poligonun **kendi** şekline göre tam anlamlı, ve tür kodları keskin iki aileye ayrılıyor:
+
+**Yerleştirilmiş işaretçiler — poligonu türetilmiş.** 13, 18, 19 türleri **8,00 × 8,00 m**,
+14 türü **15,00 × 15,00 m** kare. Kurulum genelinde her birinin dört köşesi var, dördünde de dik
+açı, ve merkezi kendi `origin`'inde: **11.801 / 3.416 / 3.599 / 1.403 kayıt, dörtgenler arasında
+sıfır istisna**. Yön, kenara **10. *ve* 90. persentilde 0,0°** ile paralel — iki uçta da sıfır
+yayılım olan bir dağılım elle yazılmış veri değildir: köşeler `origin` + `heading` + boyuttan
+üretiliyor. Yani bu kayıtlar yönlü bir kare, noktalar gereksiz. 42.698 kaydın **19.000'i** bunlar.
+
+**Alanlar — poligonu asıl olan.** 3, 4, 11, 12, 16, 17 türlerinde `origin` poligonun **dışında**
+(%100), alanlar 731 m²'den tek bir 7.961.882 m²'lik örtüye kadar. 5, 6, 7 türleri arada: orijin
+içeride, ve asfalta oturanlar bunlar (merkezlerinin %85–91'i sürülebilir yolda, işaretçilerde
+bu oran ~%40).
+
+Yön, işaretçi türlerinde karenin kendi açısı; alan türlerinde hâlâ açıklanmadı.
 
 #### `0x0003414D` — düzeni çıktı, **anlamı çıkmadı**
 
