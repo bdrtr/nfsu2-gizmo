@@ -126,6 +126,129 @@ pub fn build(nodes: &[RouteNode], ground: &Ground) -> Vec<RoutePath> {
         .collect()
 }
 
+/// How far a point is from the road network, and how far along it is.
+///
+/// The answer to both questions a race needs — "am I still on the course" and "where am I on it" —
+/// and they are one lookup because the route's own `progress` travels with the geometry.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Fix {
+    /// Distance from the point to the nearest path, in plan view. Height is deliberately not in it:
+    /// a car on a bridge belongs to the bridge's path, and the road under it is not "close".
+    pub distance: f32,
+    /// The file's own cumulative distance at the nearest point, interpolated along the segment.
+    pub progress: f32,
+    /// Which path of the file the nearest segment belongs to.
+    pub path: u16,
+}
+
+/// The road network of one route file, as something to ask questions of.
+///
+/// **This is where a barrier has to come from.** A chunk census over `TRACKS/L4R*.BUN`,
+/// `GLOBAL/InGame*.bun` and every route file finds no `0x0003410B` anywhere, so the install ships
+/// none. The one candidate that looked like it might stand in — the `0x0003414A` regions, which are
+/// large, lie on the road and carry a heading — was measured and ruled out: its three road-covering
+/// kinds contain only **33 %** of the route nodes, and 12 % of the nodes are inside no region of any
+/// kind. What is left is the paths themselves, which *are* the drivable network of that race, so
+/// "off the course" is "far from every path".
+///
+/// Indexed on a grid because the question is asked once a frame.
+pub struct Corridor {
+    /// `(a, b, progress at a, progress at b, path)` in world space.
+    segments: Vec<(Vec3, Vec3, f32, f32, u16)>,
+    cells: std::collections::HashMap<(i32, i32), Vec<u32>>,
+    half_width: f32,
+}
+
+/// Grid pitch for [`Corridor`]. Nodes of a path are 29 m apart at the median, so a cell this size
+/// holds a handful of segments and a query touches nine of them.
+pub const CORRIDOR_CELL: f32 = 64.0;
+
+impl Corridor {
+    /// Build from paths already standing on the city, with the half-width that counts as "on it".
+    #[must_use]
+    pub fn of(paths: &[RoutePath], half_width: f32) -> Self {
+        let mut segments = Vec::new();
+        for p in paths {
+            for i in 0..p.points.len().saturating_sub(1) {
+                segments.push((
+                    p.points[i],
+                    p.points[i + 1],
+                    p.progress.get(i).copied().unwrap_or(0.0),
+                    p.progress.get(i + 1).copied().unwrap_or(0.0),
+                    p.index,
+                ));
+            }
+        }
+        let key = |v: f32| (v / CORRIDOR_CELL).floor() as i32;
+        let pad = (half_width / CORRIDOR_CELL).ceil() as i32;
+        let mut cells: std::collections::HashMap<(i32, i32), Vec<u32>> = Default::default();
+        for (i, (a, b, ..)) in segments.iter().enumerate() {
+            // By footprint plus a margin, so a query up to `half_width` off the side of a segment
+            // still lands in a cell that lists it.
+            for gx in key(a.x.min(b.x)) - pad..=key(a.x.max(b.x)) + pad {
+                for gz in key(a.z.min(b.z)) - pad..=key(a.z.max(b.z)) + pad {
+                    cells.entry((gx, gz)).or_default().push(i as u32);
+                }
+            }
+        }
+        Corridor { segments, cells, half_width }
+    }
+
+    /// The half-width this corridor was built with.
+    #[must_use]
+    pub fn half_width(&self) -> f32 {
+        self.half_width
+    }
+
+    /// Segments held.
+    #[must_use]
+    pub fn segments(&self) -> usize {
+        self.segments.len()
+    }
+
+    /// Where a point is relative to the network, or `None` if the grid lists nothing near it.
+    ///
+    /// `None` is not "far away", it is "this race's network does not reach here" — which for a car
+    /// that has left the map is the honest answer, and is why this is not an `f32`.
+    #[must_use]
+    pub fn locate(&self, at: Vec3) -> Option<Fix> {
+        let key = |v: f32| (v / CORRIDOR_CELL).floor() as i32;
+        let (gx, gz) = (key(at.x), key(at.z));
+        let mut best: Option<Fix> = None;
+        for dx in -1..=1 {
+            for dz in -1..=1 {
+                for i in self.cells.get(&(gx + dx, gz + dz)).into_iter().flatten() {
+                    let (a, b, pa, pb, path) = self.segments[*i as usize];
+                    let (d, t) = point_to_segment(at, a, b);
+                    if best.is_none_or(|f| d < f.distance) {
+                        best = Some(Fix { distance: d, progress: pa + (pb - pa) * t, path });
+                    }
+                }
+            }
+        }
+        best
+    }
+
+    /// Whether a point is on the course.
+    #[must_use]
+    pub fn contains(&self, at: Vec3) -> bool {
+        self.locate(at).is_some_and(|f| f.distance <= self.half_width)
+    }
+}
+
+/// Plan-view distance from a point to a segment, and how far along it the closest point lies.
+fn point_to_segment(p: Vec3, a: Vec3, b: Vec3) -> (f32, f32) {
+    let (dx, dz) = (b.x - a.x, b.z - a.z);
+    let len2 = dx * dx + dz * dz;
+    let t = if len2 <= f32::EPSILON {
+        0.0
+    } else {
+        (((p.x - a.x) * dx + (p.z - a.z) * dz) / len2).clamp(0.0, 1.0)
+    };
+    let (cx, cz) = (a.x + dx * t, a.z + dz * t);
+    ((p.x - cx).hypot(p.z - cz), t)
+}
+
 /// Choose one surface per node: the sequence that climbs least in total.
 ///
 /// This is the whole of "which surface", and it replaces every rule that tried to pick per node.
@@ -334,6 +457,54 @@ mod tests {
     fn a_node_with_no_surface_does_not_steer_the_others() {
         let picked = follow(&[vec![10.0], Vec::new(), vec![11.0, 60.0]]);
         assert_eq!(picked, vec![Some(10.0), None, Some(11.0)]);
+    }
+
+    fn straight_path(index: u16) -> RoutePath {
+        RoutePath {
+            index,
+            points: vec![Vec3::new(0.0, 5.0, 0.0), Vec3::new(0.0, 5.0, -100.0)],
+            progress: vec![200.0, 300.0],
+            filled: 0,
+        }
+    }
+
+    /// The two questions a race asks, from one lookup.
+    #[test]
+    fn a_point_on_the_path_is_on_the_course_and_says_how_far_along() {
+        let c = Corridor::of(&[straight_path(7)], 8.0);
+        let f = c.locate(Vec3::new(0.0, 5.0, -50.0)).expect("a segment is indexed here");
+        assert!(f.distance < 1e-4);
+        assert!((f.progress - 250.0).abs() < 0.01, "halfway is halfway along the progress too");
+        assert_eq!(f.path, 7);
+        assert!(c.contains(Vec3::new(0.0, 5.0, -50.0)));
+    }
+
+    /// Width is what makes it a corridor rather than a line, and height is deliberately not in it:
+    /// a car on a bridge belongs to the bridge's path, not to the road forty metres below.
+    #[test]
+    fn the_edge_of_the_corridor_is_the_half_width_and_height_is_not_in_it() {
+        let c = Corridor::of(&[straight_path(0)], 8.0);
+        assert!(c.contains(Vec3::new(7.5, 5.0, -50.0)));
+        assert!(!c.contains(Vec3::new(8.5, 5.0, -50.0)));
+        assert!(c.contains(Vec3::new(0.0, 45.0, -50.0)), "forty metres up is still over the path");
+    }
+
+    /// Past the end of a path the nearest point is its endpoint, not the infinite line.
+    #[test]
+    fn beyond_the_end_of_a_path_the_distance_is_to_its_end() {
+        let c = Corridor::of(&[straight_path(0)], 8.0);
+        let f = c.locate(Vec3::new(0.0, 5.0, -130.0)).expect("the margin indexes the end cell");
+        assert!((f.distance - 30.0).abs() < 0.01);
+        assert!((f.progress - 300.0).abs() < 0.01, "progress clamps to the path's end");
+    }
+
+    /// Off the network entirely is `None`, not a large number — the race's own roads do not reach
+    /// there, and saying "1,400 m away" would invite someone to compare it with a half-width.
+    #[test]
+    fn a_point_the_network_does_not_reach_has_no_fix() {
+        let c = Corridor::of(&[straight_path(0)], 8.0);
+        assert!(c.locate(Vec3::new(5000.0, 5.0, 5000.0)).is_none());
+        assert!(!c.contains(Vec3::new(5000.0, 5.0, 5000.0)));
     }
 
     #[test]

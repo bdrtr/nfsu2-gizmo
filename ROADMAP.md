@@ -1059,6 +1059,38 @@ bu oran ~%40).
 
 Yön, işaretçi türlerinde karenin kendi açısı; alan türlerinde hâlâ açıklanmadı.
 
+#### Ve bariyer bu değil — arama bitti
+
+Belirleyici test: bir yarışın **güzergâh düğümleri** bu poligonların içine düşüyor mu? 18.064 düğüm:
+
+| tür | düğümü kapsıyor |
+|---|---|
+| 16 | %86 |
+| 17 | %75 |
+| 3 | %49 |
+| **5 + 6 + 12 (koridor adayı)** | **%33** |
+| herhangi bir bölge | %88 |
+
+Koridor adayı türler parkurun üçte birini kapsıyor, ve düğümlerin %12'si hiçbir bölgenin içinde
+değil. **`0x0003414A` bariyer değil.** §8 zaten "hiçbir dosyada bariyer chunk'ı yok" diye ölçmüştü;
+son aday da elendi, yani koridor **türetilecek** — ve türetmek için gereken her şey artık var.
+
+### Koridor türetildi — `world::route::Corridor`
+
+Bir rota dosyasının güzergâhları o yarışın sürülebilir ağıdır, dolayısıyla "parkur dışı" =
+"her güzergâhtan uzak". `Corridor::locate(nokta)` bir sorguda iki soruyu birden cevaplıyor:
+**en yakın güzergâha uzaklık** ve **dosyanın kendi kümülatif mesafesi** o noktada (segment boyunca
+interpolasyonla). Yani "parkurda mıyım" ve "neredeyim" aynı aramadan çıkıyor.
+
+Yükseklik uzaklığa **bilerek girmiyor**: köprüdeki araba köprünün güzergâhına aittir, kırk metre
+altındaki yola değil. Ağ ulaşmıyorsa `None` dönüyor, büyük bir sayı değil — "1.400 m uzakta" demek,
+birinin onu yarı-genişlikle karşılaştırmasına davetiye olurdu.
+
+**Yarı-genişlik tahmin edilmedi, ölçüldü.** Her güzergâh noktasından enine yürüyüp yolun nerede
+bittiğine bakıldı (aynı kotta kalma koşuluyla): yol yanlara **medyan 9–11 m** uzanıyor (Paths4001
+11, Paths4021 11, Paths4061 9). p90'ın 60 m'ye dayanması kavşaklar ve meydanlar. 12 m yarı-genişlik
+bu ölçümün üstünde duruyor.
+
 #### `0x0003414D` — düzeni çıktı, **anlamı çıkmadı**
 
 Bariyerin en olası adayı buydu ve değil. Parser'a girmedi çünkü bir alanı adlandırmak bir iddiadır

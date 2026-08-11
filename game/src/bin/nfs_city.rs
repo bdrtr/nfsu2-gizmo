@@ -319,6 +319,8 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
         Ok(file) => {
             let bytes = std::fs::read(&file).unwrap_or_else(|e| panic!("read {file}: {e}"));
             let nodes = gizmo_nfs::world::routes::nodes(&bytes).expect("read the route's nodes");
+            let roads: Vec<_> =
+                meshes.iter().filter(|m| nfsu2::world::is_road(&m.header.name)).cloned().collect();
             let ground = nfsu2::world::route::road_ground(&meshes);
             // How many surfaces does the city offer at a route node, and how far apart are they?
             // The seed rule below has to choose among them, so the shape of that choice is worth
@@ -380,6 +382,54 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
                     a.x, a.y, a.z, b.x, b.y, b.z, (*b - *a).length()
                 );
             }
+            // How wide is the road the race is driven on? Not "how far is any road from a
+            // path" — that measures the city, not the course. Walk out sideways from each point of
+            // each path until the road stops answering, and the distance where it stops is the
+            // half-width a barrier should use.
+            let corridor = nfsu2::world::Corridor::of(&built, 12.0);
+            let mut edge: Vec<f32> = Vec::new();
+            for path in &built {
+                for w in path.points.windows(2) {
+                    let along = (w[1] - w[0]).normalize_or_zero();
+                    if along == Vec3::ZERO {
+                        continue;
+                    }
+                    let n = Vec3::new(-along.z, 0.0, along.x);
+                    let mid = (w[0] + w[1]) * 0.5;
+                    for side in [1.0f32, -1.0] {
+                        let mut last = 0.0f32;
+                        for step in 1..=60 {
+                            let t = step as f32;
+                            let p = mid + n * side * t;
+                            // Still road, and still *this* road: a surface more than 4 m from the
+                            // one under the path is the deck next door, not this carriageway.
+                            let here = ground
+                                .heights_at(p.x, p.z)
+                                .into_iter()
+                                .any(|y| (y - mid.y).abs() < 4.0);
+                            if !here {
+                                break;
+                            }
+                            last = t;
+                        }
+                        edge.push(last);
+                    }
+                }
+            }
+            edge.sort_by(f32::total_cmp);
+            if !edge.is_empty() {
+                let q = |t: f32| edge[((edge.len() - 1) as f32 * t) as usize];
+                println!(
+                    "  corridor: {} segments · road reaches sideways {} samples · p10 {:.0} · \
+                     p50 {:.0} · p90 {:.0} · p99 {:.0} m",
+                    corridor.segments(),
+                    edge.len(),
+                    q(0.10),
+                    q(0.50),
+                    q(0.90),
+                    q(0.99)
+                );
+            }
             built
         }
     };
@@ -392,6 +442,8 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
         Ok(file) => {
             let bytes = std::fs::read(&file).unwrap_or_else(|e| panic!("read {file}: {e}"));
             let raw = gizmo_nfs::world::routes::regions(&bytes).expect("read the route's regions");
+            let roads: Vec<_> =
+                meshes.iter().filter(|m| nfsu2::world::is_road(&m.header.name)).cloned().collect();
             let ground = nfsu2::world::route::road_ground(&meshes);
             let mut kinds: std::collections::BTreeMap<u32, (usize, f32)> = Default::default();
             let out = raw
