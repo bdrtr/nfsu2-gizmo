@@ -916,10 +916,36 @@ geçerli bir indeks olmayan bir değer taşıyor. Okuma iki bayt kaydırılınca
 yani kontrol, başarısız olduğu görülmüş bir kontrol. `ug2 track "$NFSU2_ROOT/TRACKS"` bunu koşuyor ve
 bozulduğunda sıfırdan farklı çıkıyor.
 
-`+8` ve `+10` bilerek adlandırılmadı. `+8` kurulum genelinde 0..112 ve 18.064 kaydın 18.064'ünde
-kendi tablosuna geçerli bir indeks *olurdu* — beş düğümlü dosyalar dahil, ki bu gerçek bir kısıt —
-ama herhangi bir küçük tamsayı da aynı testi geçer. Bir alanı adlandırmak bir iddiadır; bu ikisi
-henüz hak edilmedi.
+**`+8` adını hak etti: güzergâh indeksi.** Önce adlandırılmamıştı, çünkü "18.064 kaydın hepsinde
+geçerli bir indeks olurdu" testini herhangi bir küçük tamsayı da geçer. Kanıtı dosyanın kendi
+düzeni verdi: **105 tablonun 105'inde** her `+8` değeri dosya sırasında **tam olarak bir bitişik
+koşu** kaplıyor (kurulum genelinde 2.923 koşuya karşı 2.923 farklı değer, sıfır istisna) ve
+değerler boşluksuz `0..k-1`. Konumla yalnızca ilişkili bir alan, oyundaki her tabloyu tesadüfen
+temiz bölmez.
+
+Kazanç, kayıtta başka hiçbir yerde bulunmayan **sürüş sırası**:
+
+| sıralama | komşular arası 100 m üstü sıçrama |
+|---|---|
+| dosya sırası | %12,5 |
+| `+20`'ye (mesafeye) göre | %31,4 |
+| **önce `+8`'e göre böl** | **%0,9** (medyan adım 29,2 m · p95 65,9) |
+
+Yani tablo tek bir rota değil, bir **yol ağı**; her koşu sürülebilir bir polyline. Link'ler de
+kendini açıklıyor: mevcut 19.409 link'in **%94,8'i başka bir güzergâhın** düğümünü gösteriyor —
+bir güzergâh boyunca komşuluk zaten sırada olduğu için `+12/+14/+16` **kavşaklar**. Yalnız %29'unun
+karşılıklı olması da bundan: kavşak yönlü.
+
+`+10` hâlâ adsız.
+
+Yeni kontroller `ug2 track`'te ve kırılıp denendi: güzergâhı `+8` yerine `+10`'dan okuyunca 13.352
+değer 15.967 koşuya dağılıyor ve numaralandırmada delik açılıyor — çıkış kodu sıfırdan farklı.
+Yan etki olarak `+20` oranının p95'i 1,054'ten **1,027**'ye düştü: çiftleri "adım < 100 m" diye
+süzmek yerine güzergâh üyeliğine göre süzmek dağılımı kendiliğinden sıkılaştırdı, ki bu da bölmenin
+doğruluğunun ayrı bir küçük argümanı.
+
+**M4 için anlamı:** yarış hattı artık elimizde — 2.923 güzergâh, sürüş sırasıyla, kümülatif
+mesafesiyle, ve kavşaklarıyla. Düğümlerin %100'ü sürülebilir yüzeyin üstünde (yukarıdaki kontrol).
 
 Bariyerler hâlâ bunun üstünde duruyor: kurulumda bariyer chunk'ı yok (§8, ölçülmüş olumsuz sonuç),
 yani koridoru rota grafiğinden türetmek gerekiyor. Düğümler ve mesafe artık elimizde; sıradaki
