@@ -38,7 +38,7 @@ pub use collide::{
     collision_cells, surface_of, Bounds, CityCollider, Ground, Surface, GROUND_CELL,
     WALL_NORMAL_Y,
 };
-pub use load::{bundles, load, start_at, tracks_path, Bundles};
+pub use load::{bundle_for_route, bundles, load, start_at, tracks_path, Bundles};
 pub use route::{
     build as build_route, is_road, ribbon, road_ground, start_of, Checkpoints, Corridor, Fix,
     RoutePath,

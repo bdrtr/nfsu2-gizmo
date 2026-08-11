@@ -111,3 +111,31 @@ pub fn tracks_path(arg: Option<String>) -> String {
             .expect("no TRACKS directory given and NFSU2_ROOT is unset")
     })
 }
+
+/// The city bundle a route file belongs to.
+///
+/// `TRACKS/ROUTESL4RA/Paths4001.bin` → `TRACKS/STREAML4RA.BUN`. The directory name carries the
+/// region and nothing else has to be looked up.
+///
+/// **Why this matters more than it looks.** The eight `STREAM*.BUN` are not eight versions of one
+/// city and they are not adjacent tiles either: of the 13,986 distinct (object, position) pairs
+/// across them, exactly **one** appears in all eight and **5,377 appear in only one**. Two of them
+/// carry their own ground — `STREAML4RB` contributes 397 `TRN_GRASS` and 359 `TRN_RDP` pieces
+/// nobody else has, `STREAML4RG` 542 and 340, each spread over some 3.7 × 8 km — so loading all
+/// eight lays several route-specific terrain and road layers over the same map.
+///
+/// Measured under one race's 341 route nodes: with all eight loaded, 16 nodes have **three** road
+/// surfaces stacked under them and 56 have two; with that route's own bundle alone, none have three
+/// and 21 have two, and the height solve's worst step falls from 20.4 m to 13.1 m.
+///
+/// The cost is stated rather than hidden: alone, 53 of those nodes have no road-named object under
+/// them at all against 10 with everything loaded. One bundle is not a complete world — choosing
+/// *which* regions a race needs is what `ROADMAP.md` calls M5, and this is the one-line version of
+/// it that a single race can be driven on.
+#[must_use]
+pub fn bundle_for_route(route: &std::path::Path) -> Option<std::path::PathBuf> {
+    let dir = route.parent()?;
+    let region = dir.file_name()?.to_str()?.strip_prefix("ROUTES")?;
+    let bundle = dir.parent()?.join(format!("STREAM{region}.BUN"));
+    bundle.is_file().then_some(bundle)
+}

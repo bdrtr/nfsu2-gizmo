@@ -820,6 +820,38 @@ aldığı bir ölçüme dayanıyor.
 
 ## Nerede kaldık (2026-08-11)
 
+### Sekiz bundle'ı birden yüklemek bir kusurdu — bölme hiç yapılmamış
+
+Bu bölümün geri kalanı "şehir görünür oldu, sürülebilir hâle geldi" diye ilerliyor ve hepsi doğru,
+ama altında duran şey yanlıştı: **`TRACKS`'teki sekiz `STREAM*.BUN`'ın hepsi birden yükleniyordu.**
+Bu bir stopgap sanılmıştı; değil, üst üste bindirme.
+
+Ölçüm: 13.986 ayrı (obje, konum) çiftinin **sekizinin hepsinde bulunanı yalnız 1 tane**,
+**5.377'si tek bir dosyada**. Yani bunlar aynı şehrin sekiz sürümü de değil, bitişik parçalar da
+değil. İkisi kendi zeminini taşıyor: `STREAML4RB` başka hiçbir yerde olmayan 397 `TRN_GRASS` +
+359 `TRN_RDP`, `STREAML4RG` 542 + 340 — her biri ~3,7 × 8 km'ye yayılmış. Yani aynı haritanın
+üstüne birkaç rotaya özgü **arazi ve yol katmanı** seriliyordu.
+
+Bir yarışın 341 güzergâh düğümünün altındaki yol yüzeyi yığını:
+
+| | üçlü yığın | ikili yığın | hiç yol yok |
+|---|---|---|---|
+| sekiz bundle | **16** | 56 | 10 |
+| yalnız kendi bundle'ı (L4RA) | **0** | 21 | 53 |
+
+Yükseklik çözümünün en kötü basamağı da 20,4 m → **13,1 m**. `world::bundle_for_route` artık rota
+dosyasının dizin adından bölgeyi çıkarıyor (`ROUTESL4RA/Paths4001.bin` → `STREAML4RA.BUN`) ve
+`nfs_cruise` yarış yüklüyken yalnız onu okuyor.
+
+Bedeli açıkça yazılı: tek başına o bundle'da 53 düğümün altında yol adlı obje yok (sekiziyle 10).
+Bir bundle **tam bir dünya değil**; hangi bölgelerin bir yarışa yettiğini seçmek ROADMAP'in M5
+dediği iş, ve bu onun tek satırlık, tek yarış sürülebilecek hâli.
+
+**Bu ayrıca daha önceki bir ölçümü de açıklıyor.** `world::route`'un "her düğümün altında en az iki
+sürülebilir yüzey, 341'in 179'unda dört ve fazlası, tepe-taban 79 m" bulgusu çatılara ve otopark
+güvertelerine yazılmıştı; payının bir kısmı buymuş — üst üste binmiş zemin katmanları.
+
+
 Güncel durum burası; 2026-08-09 ve 2026-08-04 bölümleri tarihsel kayıt.
 
 ### DÜZELTME (2026-08-11, aynı gün): kaba kademeler **eleniyor**

@@ -170,7 +170,17 @@ fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> CruiseState
     let at = city::start_at(DEFAULT_AT);
     let budget = std::env::var("NFS_BUDGET").ok().and_then(|s| s.parse::<usize>().ok());
 
-    let city::Bundles { files, meshes, packs, shared } = city::load(&tracks);
+    // A race is driven in a region, so load that region rather than every bundle in the folder.
+    // The eight are not versions of one city — see `world::bundle_for_route` for what stacking them
+    // costs — and until something streams by position, the route names the region for us.
+    let region = std::env::var("NFS_ROUTE")
+        .ok()
+        .and_then(|r| city::bundle_for_route(std::path::Path::new(&r)));
+    if let Some(b) = &region {
+        println!("region: {} — the bundle this race is driven in", b.display());
+    }
+    let source = region.map_or_else(|| tracks.clone(), |b| b.display().to_string());
+    let city::Bundles { files, meshes, packs, shared } = city::load(&source);
     println!(
         "{} bundle(s), {} objects, {} packs, {} shared textures",
         files.len(),

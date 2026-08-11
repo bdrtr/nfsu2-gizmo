@@ -77,6 +77,86 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
     }
     println!("{} bundle(s), {} objects, {} packs", loaded.len(), meshes.len(), packs.len());
 
+    // NFS_BUNDLES=1: how much of the eight-bundle union is one city and how much is eight versions
+    // of it. The files are per-race-route supersets that share a coordinate system, so loading all
+    // of them draws objects no single race ever shows — and `dedup` only removes the *byte
+    // identical* repeats, not a bundle's own variant of the same place.
+    if std::env::var("NFS_BUNDLES").is_ok() {
+        let key = |m: &gizmo_nfs::world::WorldMesh| {
+            let t = m.header.matrix[3];
+            (m.header.hash.0, t[0].to_bits(), t[1].to_bits(), t[2].to_bits())
+        };
+        let mut per_file: Vec<(String, std::collections::HashSet<_>)> = Vec::new();
+        let mut by_hash: HashMap<u32, std::collections::HashSet<(u32, u32, u32)>> = HashMap::new();
+        for (f, bytes) in files.iter().zip(&loaded) {
+            let ms = gizmo_nfs::world::meshes(bytes).expect("read a region's meshes");
+            let mut set = std::collections::HashSet::new();
+            for m in &ms {
+                set.insert(key(m));
+                let t = m.header.matrix[3];
+                by_hash
+                    .entry(m.header.hash.0)
+                    .or_default()
+                    .insert((t[0].to_bits(), t[1].to_bits(), t[2].to_bits()));
+            }
+            per_file.push((f.file_stem().unwrap_or_default().to_string_lossy().into_owned(), set));
+        }
+        let union: std::collections::HashSet<_> =
+            per_file.iter().flat_map(|(_, s)| s.iter().copied()).collect();
+        let shared_by_all = union
+            .iter()
+            .filter(|k| per_file.iter().all(|(_, s)| s.contains(k)))
+            .count();
+        let only_one = union
+            .iter()
+            .filter(|k| per_file.iter().filter(|(_, s)| s.contains(k)).count() == 1)
+            .count();
+        let multi_placed = by_hash.values().filter(|v| v.len() > 1).count();
+        println!(
+            "bundles: union {} distinct (hash, position) · in all {} files {} · in exactly one {} \
+             · designs standing at more than one position {}",
+            union.len(),
+            per_file.len(),
+            shared_by_all,
+            only_one,
+            multi_placed
+        );
+        // What a bundle holds that no other does is the question that decides whether loading all
+        // eight is completeness or superposition: a district nobody else covers is the former, a
+        // race's own dressing is the latter.
+        for ((name, set), bytes) in per_file.iter().zip(&loaded) {
+            let own: std::collections::HashSet<_> = set
+                .iter()
+                .filter(|k| per_file.iter().filter(|(_, s)| s.contains(*k)).count() == 1)
+                .copied()
+                .collect();
+            let ms = gizmo_nfs::world::meshes(bytes).expect("read a region's meshes");
+            let mut families: HashMap<String, usize> = HashMap::new();
+            let (mut lo, mut hi) = (Vec3::splat(f32::MAX), Vec3::splat(f32::MIN));
+            for m in ms.iter().filter(|m| own.contains(&key(m))) {
+                let stem: String = m.header.name.split('_').take(2).collect::<Vec<_>>().join("_");
+                *families.entry(stem).or_default() += 1;
+                if !m.positions.is_empty() {
+                    let c = nfsu2::world::world_point(&m.header, m.header.bbox_min)
+                        .midpoint(nfsu2::world::world_point(&m.header, m.header.bbox_max));
+                    lo = lo.min(c);
+                    hi = hi.max(c);
+                }
+            }
+            let mut top: Vec<_> = families.into_iter().collect();
+            top.sort_by_key(|(_, n)| std::cmp::Reverse(*n));
+            let span = if own.is_empty() { Vec3::ZERO } else { hi - lo };
+            println!(
+                "  {name:<12} {:>6} objects · {:>5} only here, spread {:.0}x{:.0} m · {}",
+                set.len(),
+                own.len(),
+                span.x,
+                span.z,
+                top.iter().take(4).map(|(k, n)| format!("{k}×{n}")).collect::<Vec<_>>().join(" ")
+            );
+        }
+    }
+
     // Sky and panorama are drawn by nothing yet, and drawn as ordinary geometry they are a wall
     // across the frame — see `world::is_backdrop` for what they are and how they were found.
     let sky = meshes.iter().filter(|m| nfsu2::world::is_backdrop(&m.header.name)).count();
