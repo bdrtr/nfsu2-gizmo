@@ -1004,9 +1004,18 @@ sorulduğunda: merkezlerinin **198/200'ü (%99) sürülebilir yüzeyin üstünde
 iki yanında da yol var. Yani yolu kaplayan, **yönü olan**, büyük bölgeler.
 
 **Bu bariyer için bulunan en güçlü aday.** "Parkurun içinde misin" ve "doğru yöne mi gidiyorsun"
-sorularının ikisini birden taşıyor. Ama parser'a girmedi: **kayıt uzunluğu henüz türetilmedi** — ne
-`+0` ne `+68`'den önceki `u32` bir sonraki kaydın yerini öngörüyor (ilk kayıt 224 bayt, `+0` ise 3
-diyor). Sınırı tahmin eden bir okuyucu, %98,3'ü %100 sanan bir okuyucudur.
+sorularının ikisini birden taşıyor.
+
+**Kayıt sınırı bulundu ve okuyucu yazıldı** (`gizmo_nfs::world::routes::regions`). Sınır kaydın
+kendi içinde: `+64` köşe sayısı, **`+66` kaydın kendi bayt uzunluğu**. `uzunluk = 68 + 8 × sayı`
+kurulumun **42.698 kaydının hepsinde** tutuyor ve bu uzunlukla yürümek payload'ın sonuna
+**112 chunk'ın 112'sinde** tam olarak oturuyor. Böylece imza taraması gerekmiyor: 11.361 değil
+**42.698** kayıt okunuyor, ve iki değişmez daha bedava geliyor — beyan edilen kutu köşelerin
+gerçek sınırına eşit (**0** istisna) ve yön birim vektör (**0** istisna). Dört bağımsız kontrol,
+sıfır istisna. İki alanı iki bayt erken okumak ilk dosyada ilk kayıtta patlıyor.
+
+`+0`'daki tür kodu (14 değer) ve `+48`'deki kimlik (445 değer, 12.830 kayıtta sıfır) ham taşınıyor.
+Kimlik obje adı hash'i **değil** — 445'in hiçbiri şehrin 29.515 adıyla eşleşmiyor.
 
 #### `0x0003414D` — düzeni çıktı, **anlamı çıkmadı**
 
