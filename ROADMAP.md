@@ -947,6 +947,34 @@ doğruluğunun ayrı bir küçük argümanı.
 **M4 için anlamı:** yarış hattı artık elimizde — 2.923 güzergâh, sürüş sırasıyla, kümülatif
 mesafesiyle, ve kavşaklarıyla. Düğümlerin %100'ü sürülebilir yüzeyin üstünde (yukarıdaki kontrol).
 
+### Yarış hattı şehrin üstüne kondu — `world::route`
+
+Kayıtta olmayan tek şey **yükseklik**ti ve onu yalnız şehir bilir; bu yüzden bu iş parser'ın değil
+oyunun. `game/src/world/route.rs` güzergâhları Gizmo çerçevesine taşıyıp yüksekliği çarpışma
+geometrisinden örneklüyor. İki kural, ikisi de önce yanlış yapılarak bulundu:
+
+1. **Yalnız yollara sor.** `Surface` üçgeni normaline göre sınıflar, dolayısıyla **düz bir çatı
+   asfaltla aynı anlamda sürülebilir**. Tüm sürülebilir üçgenler üzerinde bir düğümün altındaki
+   yığın 79 m derin (341 düğümün 179'unda 4+ yüzey) ve "en üsttekini al" `Paths4001`'in 40
+   güzergâhından altısını **y 115–133'teki çatılara** koydu — yol 22–28'deyken. `road_ground`
+   (adında `ROAD` geçen 13.985 objeden 1.928'i) bunu çözüyor: 341 düğümün **259'unda tek aday**
+   kalıyor, kalanların açıklığı 15 m'ye iniyor — ki bu zaten üst geçit demek.
+2. **Aday kaldığı yerde en az tırmanan diziyi seç.** Üst geçitte düğüm başına bir kural güverte ile
+   altındaki yolu ayıramaz; güzergâh ayırabilir, çünkü sürekli. `follow` tüm güzergâh boyunca
+   `|Δh|` toplamını enazlıyor — tohum yok, hiçbir düğüm tek başına karar vermiyor.
+
+İkincisi yalnız **birincisi sayesinde** güvenli: tüm sürülebilir üçgenler üzerinde "en az tırmanış"
+dejenere, çünkü şehrin altındaki düz raf hiç tırmanmadan her yerde kazanıyor — denendi, hattı yolun
+altına koydu.
+
+Sonuç (`Paths4001`, 40 güzergâh / 341 nokta): komşudan yükseklik alan **10** nokta, 13,3 km hat, en
+kötü basamak 20,4 m (69 m yatay mesafede). Seçilen kotlar şehir merkezinde 24,7–32,0 — `Ground`'un
+bağımsız olarak ölçtüğü 26,4 ile aynı yerde.
+
+`nfs_city NFS_ROUTE=<Paths*.bin>` hattı şerit olarak çiziyor. Şeridi 3 m kaldırmak gerekti: kareyi
+bir kilometreden yukarıdan alınca yarım metre derinlik tamponunun gürültüsünde kalıyor ve hat doğru
+çizildiği hâlde yolun içinde kayboluyor.
+
 Bariyerler hâlâ bunun üstünde duruyor: kurulumda bariyer chunk'ı yok (§8, ölçülmüş olumsuz sonuç),
 yani koridoru rota grafiğinden türetmek gerekiyor. Düğümler ve mesafe artık elimizde; sıradaki
 parçalar okunmamış dört yaprak — `0x0003414D` (her dosyada 36'nın tam katı), `0x0003414C` (16),

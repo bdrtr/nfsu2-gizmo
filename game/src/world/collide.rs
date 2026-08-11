@@ -229,6 +229,36 @@ impl Ground {
         best
     }
 
+    /// Every drivable surface at an XZ, lowest first.
+    ///
+    /// [`Self::height_at`] answers with one of these — the highest not above the asker — which is
+    /// the right question for *placing* something. Following a line across the city is a different
+    /// question, and neither "highest" nor "lowest" answers it: [`Surface::Drivable`] classifies a
+    /// triangle by its normal, so a **flat roof is admitted exactly as a road is**, and a car park
+    /// under a building is too. What a follower wants is the surface nearest where it already was,
+    /// and it can only ask that if it can see the candidates.
+    ///
+    /// Measured need: seeding a route path from the topmost surface put six of `Paths4001`'s 40
+    /// paths on rooftops at y 115–133 with the road at 22–28 beneath them.
+    #[must_use]
+    pub fn heights_at(&self, x: f32, z: f32) -> Vec<f32> {
+        let key = |v: f32| (v / GROUND_CELL).floor() as i32;
+        let Some(&(from, to)) = self.runs.get(&(key(x), key(z))) else { return Vec::new() };
+        let mut out: Vec<f32> = self
+            .tris
+            .get(from as usize..to as usize)
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|t| surface_y(t, x, z))
+            .collect();
+        out.sort_by(f32::total_cmp);
+        // Two triangles of one quad meet along a diagonal, so a query on that line answers twice
+        // with the same height. Keeping both would let a caller mistake tessellation for a stack of
+        // surfaces.
+        out.dedup_by(|a, b| (*a - *b).abs() < 0.05);
+        out
+    }
+
     /// Cells with drivable ground in them.
     #[must_use]
     pub fn cells(&self) -> usize {

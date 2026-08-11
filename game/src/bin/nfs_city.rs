@@ -24,6 +24,11 @@
 //! - `NFS_TIERS=finest|coarse` — keep only the richest member of each detail family, or only what
 //!   that would drop. See [`nfsu2::world::lod`]; neither is a default.
 //! - `NFS_TIERS_LIST=<n>` — the detail families in numbers, and the n widest by member spread.
+//! - `NFS_ROUTE=<Paths*.bin>` — put that route file's race line on the city and draw it as a
+//!   ribbon. Prints what the placement cost: how many points took a neighbour's height, the line's
+//!   length, and the worst step up, which is the number that shows the surface choice going wrong.
+//!   `NFS_ROUTE_DUMP=1` adds the first ten nodes with every surface the city offers under them,
+//!   road-only and unfiltered, which is how the two were told apart.
 //! - `NFS_PROBE=<dir>` — ask the city's collision triangles what is under a list of world points
 //!   (`<dir>/nodes.csv`, one `x,y` per line) and beside a list of segments (`<dir>/segments.csv`,
 //!   `x1,y1,x2,y2`), both in the world's own frame. Written for one undecoded chunk and kept
@@ -306,6 +311,79 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
         _ => meshes,
     };
 
+    // NFS_ROUTE=<Paths*.bin>: put that file's race line on the city and draw it. Built here rather
+    // than at the spawn below because the height comes from the collision geometry, and `meshes` is
+    // about to be moved into `build_region`.
+    let routes: Vec<nfsu2::world::RoutePath> = match std::env::var("NFS_ROUTE") {
+        Err(_) => Vec::new(),
+        Ok(file) => {
+            let bytes = std::fs::read(&file).unwrap_or_else(|e| panic!("read {file}: {e}"));
+            let nodes = gizmo_nfs::world::routes::nodes(&bytes).expect("read the route's nodes");
+            let ground = nfsu2::world::route::road_ground(&meshes);
+            // How many surfaces does the city offer at a route node, and how far apart are they?
+            // The seed rule below has to choose among them, so the shape of that choice is worth
+            // seeing rather than assuming.
+            {
+                let mut counts = [0usize; 5];
+                let mut spans: Vec<f32> = Vec::new();
+                for n in &nodes {
+                    let p = nfsu2::world::remap([n.x, n.y, 0.0]);
+                    let c = ground.heights_at(p.x, p.z);
+                    counts[c.len().min(4)] += 1;
+                    if c.len() > 1 {
+                        spans.push(c[c.len() - 1] - c[0]);
+                    }
+                }
+                spans.sort_by(f32::total_cmp);
+                let med = spans.get(spans.len() / 2).copied().unwrap_or(0.0);
+                println!(
+                    "  surfaces under a node: 0 -> {} · 1 -> {} · 2 -> {} · 3 -> {} · 4+ -> {} \
+                     (median top-to-bottom spread {med:.1} m)",
+                    counts[0], counts[1], counts[2], counts[3], counts[4]
+                );
+            }
+            let built = nfsu2::world::build_route(&nodes, &ground);
+            if std::env::var("NFS_ROUTE_DUMP").is_ok() {
+                let all = nfsu2::world::Ground::of(&nfsu2::world::collision_cells(&meshes));
+                for (n, pt) in nodes.iter().take(10).zip(built.first().map(|r| r.points.clone()).unwrap_or_default()) {
+                    let p = nfsu2::world::remap([n.x, n.y, 0.0]);
+                    println!(
+                        "    node ({:.0},{:.0}) chose y={:.1} · road candidates {:?} · all candidates {:?}",
+                        p.x, p.z, pt.y,
+                        ground.heights_at(p.x, p.z).iter().map(|v| (v * 10.0).round() / 10.0).collect::<Vec<_>>(),
+                        all.heights_at(p.x, p.z).iter().map(|v| (v * 10.0).round() / 10.0).collect::<Vec<_>>()
+                    );
+                }
+            }
+            let (pts, filled) = built.iter().fold((0, 0), |(p, f), r| (p + r.points.len(), f + r.filled));
+            let worst = built.iter().map(nfsu2::world::RoutePath::climbed).fold(0.0, f32::max);
+            let length: f32 = built.iter().map(nfsu2::world::RoutePath::length).sum();
+            println!(
+                "route {}: {} paths · {pts} points · {filled} took a neighbour's height · \
+                 {length:.0} m of line · worst step up {worst:.1} m",
+                std::path::Path::new(&file).file_stem().unwrap_or_default().to_string_lossy(),
+                built.len()
+            );
+            let mut steps: Vec<(f32, u16, usize, Vec3, Vec3)> = built
+                .iter()
+                .flat_map(|r| {
+                    r.points.windows(2).enumerate().map(move |(i, w)| {
+                        ((w[1].y - w[0].y).abs(), r.index, i, w[0], w[1])
+                    })
+                })
+                .collect();
+            steps.sort_by(|a, b| b.0.total_cmp(&a.0));
+            for (d, path, i, a, b) in steps.iter().take(6) {
+                println!(
+                    "  step {d:>6.1} m  path {path:>3} node {i:>3}  \
+                     ({:.0},{:.0},{:.0}) -> ({:.0},{:.0},{:.0})  {:.0} m apart",
+                    a.x, a.y, a.z, b.x, b.y, b.z, (*b - *a).length()
+                );
+            }
+            built
+        }
+    };
+
     let budget = std::env::var("NFS_BUDGET").ok().and_then(|s| s.parse::<usize>().ok());
     // Frame on the region's own centre so a budget takes a neighbourhood rather than an edge.
     let around = centre_of(&meshes);
@@ -386,6 +464,21 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
         spawned += 1;
     }
     println!("{spawned} entities spawned");
+
+    // The race line, as a flat ribbon lifted clear of the tarmac. Unlit and bright on purpose: the
+    // city is baked-lit and dark, and a diagnostic that has to be hunted for is not one. Lifted 3 m
+    // rather than the half metre that would look right: this frames the whole city from over a
+    // kilometre up, and at that near:far ratio half a metre is inside the depth buffer's noise —
+    // the ribbon was drawn correctly and vanished into the road.
+    if !routes.is_empty() {
+        let verts = ribbon(&routes, 4.0, 3.0);
+        if !verts.is_empty() {
+            let mesh = Mesh::from_vertices(&renderer.device, &verts, String::from("route"));
+            let material = Material::new(white.clone()).with_unlit(Vec4::new(0.95, 0.15, 0.15, 1.0));
+            scene::spawn_mesh(&mut world, mesh, material, Transform::new(Vec3::ZERO));
+            println!("route ribbon: {} triangles", verts.len() / 3);
+        }
+    }
 
     // ── Camera: frame what actually loaded ──
     let (lo, hi) = bounds(&city);
@@ -717,4 +810,37 @@ fn probe(dir: &str, meshes: &[gizmo_nfs::world::WorldMesh]) {
         pct(ends_on),
         pct(ends_half)
     );
+}
+
+/// A route's paths as a flat ribbon: one quad per segment, `width` across and `lift` above the
+/// surface the path was placed on.
+///
+/// Quads per segment rather than a mitred strip. A mitre needs the turn angle and gets ugly at the
+/// hairpins this city has; two triangles per segment overlap slightly on a corner and that is
+/// invisible on a 3 m ribbon lying on tarmac.
+fn ribbon(routes: &[nfsu2::world::RoutePath], width: f32, lift: f32) -> Vec<gizmo::renderer::gpu_types::Vertex> {
+    use gizmo::renderer::gpu_types::Vertex;
+    let mut out = Vec::new();
+    for path in routes {
+        for pair in path.points.windows(2) {
+            let (a, b) = (pair[0] + Vec3::Y * lift, pair[1] + Vec3::Y * lift);
+            let along = (b - a).normalize_or_zero();
+            if along == Vec3::ZERO {
+                continue;
+            }
+            let side = Vec3::new(-along.z, 0.0, along.x) * (width * 0.5);
+            let quad = [a - side, a + side, b + side, b - side];
+            let v = |p: Vec3| Vertex {
+                position: [p.x, p.y, p.z],
+                color: [1.0, 1.0, 1.0],
+                normal: [0.0, 1.0, 0.0],
+                tex_coords: [0.0, 0.0],
+                ..Default::default()
+            };
+            for i in [0usize, 1, 2, 0, 2, 3] {
+                out.push(v(quad[i]));
+            }
+        }
+    }
+    out
 }
