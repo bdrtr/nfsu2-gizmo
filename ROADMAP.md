@@ -926,6 +926,40 @@ yani koridoru rota grafiğinden türetmek gerekiyor. Düğümler ve mesafe artı
 parçalar okunmamış dört yaprak — `0x0003414D` (her dosyada 36'nın tam katı), `0x0003414C` (16),
 `0x00034149` ve `0x0003414A` (4'ten büyük hiçbir şeye bölünmüyor: değişken uzunlukta ya da başlıklı).
 
+#### `0x0003414D` — düzeni çıktı, **anlamı çıkmadı**
+
+Bariyerin en olası adayı buydu ve değil. Parser'a girmedi çünkü bir alanı adlandırmak bir iddiadır
+ve burada iddia edilecek şey yok — ama ölçülenler burada dursun ki kimse baştan başlamasın.
+
+**Kayıt 36 bayt.** 8..64 arası her stride tarandı; yalnız 36'da lane'ler tutuyor (9 lane'in 4'ü
+kayıtların %98'inden fazlasında makul koordinat; diğer hiçbir stride'da tek lane bile tutmuyor).
+
+| offset | ne |
+|---|---|
+| `+0..+16` | iki 2B nokta — bir segment. Uzunluk p05 7,9 · medyan 24 · p95 68 · maks 119 m |
+| `+17` | sayaç baytı, 1..4 — `+20`'den itibaren kaç `u32` yuvasının dolu olduğuna **birebir** eşit |
+| `+20..+36` | o sayıda `u32` kimlik |
+
+**Kimlikler 159 tane** ve kurulumda **başka hiçbir yerde geçmiyorlar**: `L4RA.BUN` ve
+`STREAML4RA.BUN` içinde 4 bayt hizalı sıfır eşleşme. Değerler 33 bitişik koşu hâlinde ve koşu
+başlangıçları 33'ün katlarıyla ayrılıyor — `bStringHash` çarpanı 33 olduğu için bu, son iki
+karakteri değişen (numaralı) adların imzası. `[A-Z0-9_]` üzerinden 4 karaktere kadar hiçbir ad
+bunlardan birine hash'lenmiyor, yani adlar daha uzun.
+
+118.729 kayıt var ama **yalnız 2.406 ayrı segment** — aynı küme dosyalar arasında tekrarlanıyor.
+Bir kimlik 113 rota dosyasının medyan 61'inde görünüyor.
+
+**Elenenler** (hepsi ölçümle, tekrar denenmesin diye):
+
+- *Yarış hattı değil.* Düğümden en yakın segmente uzaklık medyan 15,6 m; yalnız %4,1'i 1 m altında.
+- *Zincirlenmiş duvar değil.* Uçların yalnız %16'sı paylaşılıyor; bir dosyanın 1.647 segmentinin
+  938'i tekil, en uzun zincir 11.
+- *Uzamsal bölge kimliği değil.* Medyan kimliğin segmentleri 4.938 m'lik haritanın 1.253 m'sine
+  yayılıyor.
+- *Rota kimliği değil.* 2.406 segmentin **sıfırında** taşıdığı kimlik sayısı, göründüğü dosya
+  sayısına eşit.
+- *Obje hash'i değil.* 29.515 dünya obje adının hash'iyle 195.561 referansın sıfırı eşleşiyor.
+
 ### Açık kalan soru — parser tarafı
 
 Bir kademe zinciri neden haritaya yayılmış duruyor? 192 baytlık solid başlığı bunu söylemiyor:
