@@ -766,8 +766,8 @@ olduğunu iddia ediyor: yanlış stride'da float'lar seve seve 1e38'e saçılır
 | Hiçbir dosyada bariyer chunk'ı yok (`0x0003410B` yok) | **Ölçülmüş olumsuz sonuç** | Güven — bariyer türetmenin tembellik değil doğru yol olmasının sebebi |
 | `0x34146 TrackPosMarkers` başlangıç gridleri, checkpoint değil | **Ölçülmüş geri çekme** | Orijinal okumaya değil geri çekmeye güven |
 | Nav BFS düğüm 0'dan 15.257'nin 9'una ulaşıyor | **Ölçülmüş** | Güven — kaynaştırılmış grafiğin neden kurulması gerektiğinin sebebi |
-| Yarış hattı `+12/+14/+16` alanları komşu indeksleri, `0xffff` = yok | **Tahmin, ve OpenUG'un kendi kodu doğrulamıyor** — `world_load_nav` bu alanları hiç okumuyor | **`ug2 track` ile doğrula**: oku ve sonuçlanan grafiği yakınlık grafiğiyle A/B'le. Referansı aşabileceğin en net yer |
-| `+20` "metre cinsinden kümülatif mesafe" | **Tahmin, ve ölçülebilir şekilde metre değil** — delta'lar XY adımının ≈0.787 katı | `progress` diye adlandır. Kimsenin sabitlemediği bir birimi etiketleme |
+| Yarış hattı `+12/+14/+16` alanları komşu indeksleri, `0xffff` = yok | **DOĞRULANDI (2026-08-11)** — `ug2 track`, kurulumun 105 düğüm tablosunda 54.192 indeks okuması yaptı ve **sıfırı** aralık dışına düştü. Kusur enjekte edildi (okuma iki bayt kaydırıldı): 15.931 aralık dışı, çıkış kodu 1 | Güven. `gizmo_nfs::world::routes` |
+| ~~`+20` "metre cinsinden kümülatif mesafe" — ölçülebilir şekilde metre değil, delta'lar XY adımının ≈0.787 katı~~ | **BU SATIR YANLIŞTI (2026-08-11).** Doğrusu: `+20` koordinatlarla **aynı birimde**. 7.277 ardışık iç-koşu çiftinde delta/XY-adımı oranı **medyan 1,0005** (p05 0,884 · p95 1,054). 0,787 rakamı, çiftleri ardışık kayıtlardan değil **indeks alanlarından** örneklemekten geliyor — o örneklemede medyan 38,7 çıkıyor, yani 0,787 de o dağılımın bir dilimi. İnandırıcı kılan şey π/4 = 0,7854'e denk düşmesi: türetme gibi okunuyor, oysa örnekleme kazası | `progress` adı yine de doğru ad — ama "birimi bilinmiyor" değil, **dünya birimi**. Bkz. `world::routes` |
 | Ana-bölge doku yedeği 8-60 MB arası dosya boyutuyla seçiliyor | **Tahmin sezgiselliği** | Üç kaynağı parser'dan aç; seçimi oyun yapsın |
 | `NAV_LINK_MAX=120`, `NAV_WELD=5`, `GATE_HALF=22`, `BAR_HALF=9`, `BAR_REACH=40`, −5 cm bias | **Yargı çağrıları**, birkaçı OpenUG'un kendi yorumlarında öyle etiketli | Yalnız oyun katmanı, her biri onu haklı çıkaran ölçümle |
 | Container testi "üst yarım bayt == 0x8" | **Yanlış** — doğrusu `ID & 0x80000000`; `0xB3300000` (TPK kökü) o testten geçemez | `nfsu2_arac_plani.md:236` baştan doğru yazmış; onu kullan |
@@ -818,9 +818,147 @@ aldığı bir ölçüme dayanıyor.
 
 ---
 
-## Nerede kaldık (2026-08-09)
+## Nerede kaldık (2026-08-11)
 
-Bir önceki bölüm (2026-08-04) tarihsel kayıt olarak duruyor; güncel durum burası.
+Güncel durum burası; 2026-08-09 ve 2026-08-04 bölümleri tarihsel kayıt.
+
+### Karar verildi: `_1A/_1B/_1Z` "raf" değil LOD kademesi — ve elenmiyorlar
+
+2026-08-09'da açık bırakılan tek karar buydu ve "bir bakışa bakıyor" diye bırakılmıştı. Bakıldı;
+ama kararı bakış değil iki ölçüm verdi.
+
+**Ne oldukları artık belli.** Harfler bir dizi değil: tüm şehirde **A (1.819), B (1.392),
+Z (1.203)**, sonrası neredeyse yok (C 41, D 3, dört tekil). Üç seviye, alfabe değil — bu, "bir
+binanın bölümleri" okumasını eler, çünkü bölümler A, B, C, D diye gider. Üstüne üç şey daha:
+
+- Ad, harf dışında birebir tekrar ediyor: `XB_3TOWERAPARTLK_1A_00`, `_1B_00`, `_1Z_00` — aynı
+  tasarım, aynı örnek numarası.
+- Vertex sayısı harfle düşüyor (1.423 ardışık çiftin 1.377'sinde).
+- 28 obje doğrudan **`LOD_<tasarım>_1Z_LL`** adını taşıyor. Dosya bunu kendisi söylüyor.
+- Bir ailenin üyelerinin kutu **boyutları birebir aynı**, vertex sayıları değil
+  (`XB_LANDMARKTOWER_RB_00`: üçü de 80×304×80, v = 323 / 258 / 32). Aynı tasarımın iki ayrı
+  yerleşimi *aynı mesh*'i kullanır; bunlar aynı silueti farklı yoğunlukta kuruyor.
+
+**Ama elenemezler.** "Öyleyse yalnız en incesini çiz" fikri ölçümle reddedildi:
+
+| ölçüm | sayı |
+|---|---|
+| aile / üye | 1.354 / 3.811 |
+| en ince olmayan üye | 2.457 obje · 286.954 vertex |
+| üst üste duran aile | **24** — kalan **1.330'u ayrı duruyor**, en genişi 651 m |
+| tek eksene paralel dizilmiş aile | 1.007 |
+| kırpık ada yaslanan aile | 166 |
+| **yere oturan üye** | kaba kademeler **%67** · en ince kademe **%70** |
+| **başka bir `XB_` binanın içinden geçen üye** | kaba kademeler **%22** · en ince kademe **%26** |
+
+Belirleyici olan son iki satır. İkisi de kaba kademeleri ayırt edemiyor: ne yerle ilişkileri ne de
+komşularıyla çakışmaları en ince kademeden farklı. (İkinci satırın taban oranının bu kadar yüksek
+olması ayrı bir gerçek — şehrin binalarının dörtte biri zaten bir başkasının kutusuna 2 m'den fazla
+giriyor; podyum/taban kompozisyonları böyle kurulmuş.) Kaba kopyalar bir kenara park edilmiş olsaydı yerle ilişkileri
+bozulurdu; bozulmuyor — dosya onları Bayview'ın sokaklarına diğer her şeyle **aynı oranda**
+oturtuyor. Yani `NFS_TIERS=finest` bir tekilleştirme değil, yerde duran 2.457 objeyi silme işi.
+**Varsayılan değişmedi: hepsi çiziliyor.** `keep_finest` bir teşhis aracı, aday bir varsayılan
+değil.
+
+> 2026-08-09'un "514 raf · 1.444 üye" sayıları bununla karşılaştırılmamalı: o sayım hem yalnız
+> tasarıma göre gruplayan bir anahtarla hem de "aynı Y/Z + X'te yayılım" filtresiyle yapılmıştı.
+
+### Kod nereye taşındı
+
+Kademe mantığı `nfs_cruise.rs` içinde gömülü 78 satırdı; artık testli bir modül:
+**`game/src/world/lod.rs`**. Taşırken üç hata çıktı:
+
+- **Aile anahtarı yanlıştı.** Eski kod yalnız *tasarıma* göre grupluyordu, dolayısıyla `_1A_00` ile
+  `_1A_01` — aynı tasarımın iki ayrı yerleşimi — tek aileye düşüyordu. Anahtar artık tasarım +
+  kuyruk.
+- **Ad alanı 27 karakterde kırpılıyor** (746 ad tam sınırda, 164'ü çıplak `_` ile bitiyor), yani
+  uzun adlı iki yerleşim *birebir aynı* adla geliyor. Kendini doğrulayan kural: bir anahtar aynı
+  harften iki üye topluyorsa bir yerleşimi tanımlamıyordur — reddediliyor. Bu kural olmadan en
+  geniş "aile" 2,3 km'ye yayılıyordu. Bugün 7 anahtar / 29 obje bu yüzden reddediliyor; kırpıklık
+  ayrıca `name_is_whole()` ile *kanıtlanarak* sayılıyor (166 aile).
+- **Eski `tier_of` sondaki alt çizgiyi zorunlu tutuyordu**, yani kuyruğu kırpılmış `ARC_BLDING_D_1A`
+  gibi adları hiç görmüyordu.
+
+### Yeni teşhis kolları (`nfs_city`, başsız tek kare)
+
+- Her koşuda kademe raporu basılıyor.
+- `NFS_TIERS=finest` — yalnız en ince üye · `NFS_TIERS=coarse` — **yalnız elenecek olanlar**.
+  İkincisi "ne kaybedilir" sorusunu bir yokluğu aratmak yerine doğrudan gösteriyor.
+- `NFS_TIERS_LIST=<n>` — yayılım histogramı, yer-ilişkisi oranları, en geniş n aile üyeleriyle
+  (harf, vertex, `placed`/`identity`, dosya sırası, merkez, boyut).
+- `NFS_ONLY=<altdizi>` — yalnız adı eşleşen objeler; `nfs_shot`'ın araba için yaptığının şehir
+  karşılığı.
+
+### Sıradaki adım — mesafeye göre seçim
+
+Kademeler bir yük değil, **zaten elimizde duran LOD verisi**. Eksik olan onları seçecek şey — ve
+orada beklenenden iyi bir haber çıktı: pinlenmiş motorda `LodGroup` / `LodLevel` bileşenleri ve
+`LodGroup::select_mesh(distance)` **var** (son sınırın ötesinde `None` dönüp cull de ediyor). Ama
+onlara yalnız `gizmo-studio`'nun kendi render boru hattı bakıyor; oyunun kullandığı
+`default_render_pass` `LodGroup`'u hiç ödünç almıyor. Yani iş "motora LOD eklemek" değil, o geçidi
+oyunun yürüdüğü yola bağlamak — `MOTOR-NOTLARI.md` madde 8, madde 2 ile aynı şekilde duruyor.
+
+Her kare 8.161 mesh gidiyor ve bunun 2.457 objesi zaten uzak kademe.
+
+### Rota dosyaları okunmaya başlandı (PryHUB)
+
+08-04 tablosundaki "Kalan: **rota dosyaları** (`ROUTES*/Paths*.bin`)" satırının ilk parçası düştü.
+`gizmo_nfs::world::routes` artık **düğüm tablosunu** okuyor — bir yarışın üstünde sürüldüğü graf:
+
+| | |
+|---|---|
+| dosya | 113 (`ROUTES*` altında 8 dizin); 105'i düğüm tablosu taşıyor, 8'i taşımıyor |
+| kayıt | `0x00034148`, **24 bayt**, 105 payload'ın hepsi tam katı · **18.064 düğüm** |
+| düzen | `+0/+4` konum (f32, dünya çerçevesi, yükseklik yok) · `+8`, `+10` **adlandırılmadı** · `+12/+14/+16` düğüm indeksi, `0xFFFF` = yok · `+18` hep 0 · `+20` kümülatif mesafe |
+
+Kanıt tahmin değil: **54.192 indeks okumasının sıfırı** ne sentinel ne de kendi dosyasının tablosuna
+geçerli bir indeks olmayan bir değer taşıyor. Okuma iki bayt kaydırılınca 15.931'i dışarı düşüyor —
+yani kontrol, başarısız olduğu görülmüş bir kontrol. `ug2 track "$NFSU2_ROOT/TRACKS"` bunu koşuyor ve
+bozulduğunda sıfırdan farklı çıkıyor.
+
+`+8` ve `+10` bilerek adlandırılmadı. `+8` kurulum genelinde 0..112 ve 18.064 kaydın 18.064'ünde
+kendi tablosuna geçerli bir indeks *olurdu* — beş düğümlü dosyalar dahil, ki bu gerçek bir kısıt —
+ama herhangi bir küçük tamsayı da aynı testi geçer. Bir alanı adlandırmak bir iddiadır; bu ikisi
+henüz hak edilmedi.
+
+Bariyerler hâlâ bunun üstünde duruyor: kurulumda bariyer chunk'ı yok (§8, ölçülmüş olumsuz sonuç),
+yani koridoru rota grafiğinden türetmek gerekiyor. Düğümler ve mesafe artık elimizde; sıradaki
+parçalar okunmamış dört yaprak — `0x0003414D` (her dosyada 36'nın tam katı), `0x0003414C` (16),
+`0x00034149` ve `0x0003414A` (4'ten büyük hiçbir şeye bölünmüyor: değişken uzunlukta ya da başlıklı).
+
+### Açık kalan soru — parser tarafı
+
+Bir kademe zinciri neden haritaya yayılmış duruyor? 192 baytlık solid başlığı bunu söylemiyor:
+`_1A`/`_1B`/`_1Z` kayıtları yalnız hash'te, sayaçlarda ve **tek bir öteleme bileşeninde** ayrılıyor
+(`XB_LANDMARKTOWER_RB_00`: 0x070 üçünde de 151,517 · 0x074 −673,474 / −381,031 / −129,160 · 0x078
+üçünde de 0). Cevap büyük olasılıkla hiç ayrıştırılmamış görünürlük verisinde:
+`TRACKS/PrecullerBooBooScript.hoo` ve `ROUTES*/Paths*.bin`. Bu bir PryHUB işi.
+
+### Bu oturumda çürütülenler (tekrar araştırılmasın diye)
+
+- "`_1A/_1B/_1Z` bir şablon rafı" — **hayır**, LOD kademesi. "Raf" okuması, doğru bir ölçümün
+  (aynı Y/Z, X'te düzenli adım) yanlış yorumuydu.
+- "Kaba kademeler bir kenara park edilmiş" — **yanlış**. Yerle ilişkileri en ince kademeyle aynı
+  (%67 / %70).
+- "Kademeler dosyada ayrı LOD bloklarında duruyor" — **hayır**, yan yanalar (`#8524`, `#8525`,
+  `#8530`).
+- "Konum farkı bizim yerleştirme hatamız (identity/yerel karışması)" — **hayır**, üçü de `placed`,
+  matrisleri gerçek ve yalnız ötelemede ayrılıyor.
+- "Kaba kademe düşük çözünürlüklü dokusundan tanınır" — **hayır**, bu bir kanıt değil: Bayview'ın
+  gerçek arka plan blokları da fotoğraf kaplı kutular.
+- "Motorda mesafeye göre mesh seçimi yok" — **yanlış**, var (`LodGroup::select_mesh`). Eksik olan
+  onu `default_render_pass`'e bağlayan yol. Motor maddesi yazmadan önce pinlenmiş kaynağa bakmak
+  bu maddeyi baştan yanlış yazmaktan kurtardı.
+- "Rota düğümlerindeki `+20` metre değil, XY adımının ≈0,787 katı" — **yanlış** (§8 satırı
+  düzeltildi). Aynı birim; medyan oran 1,0005. Ders örneklemede: çiftleri indeks alanlarından
+  seçmek ardışık kayıtlardan seçmekle aynı şey değil, ve π/4'e denk düşen bir sayı türetilmiş
+  görünüyor diye türetilmiş olmuyor.
+
+---
+
+## Nerede kaldık (2026-08-09) — tarihsel
+
+Bu bölümün açık bıraktığı tek karar (LOD rafları) yukarıda kapandı; gerisi geçerli.
 
 ### Motor artık sabit
 
@@ -870,7 +1008,11 @@ Kusuru geri koyup denendi: 234 DROPPED, çıkış kodu 1. Başarısız olduğu g
 - **`dedup` anahtarına matris eklendi.** Bugün sıfır maliyet (13.985 aynı), ama 16.071 `placed`
   objenin bbox'ı **yerel**, yani anahtar dünya konumu taşımıyordu.
 
-### Sıradaki adım — LOD rafları kararı
+### Sıradaki adım — LOD rafları kararı · **2026-08-11'de kapandı, yukarıya bak**
+
+> Bu bölümdeki "raf" okuması **yanlış çıktı**. Ölçüm doğruydu, yorumu değil: bunlar bir şablon rafı
+> değil, oyunun kendi LOD kademeleri, ve yere en ince kademeyle aynı oranda oturdukları için
+> elenmiyorlar. Aşağıdaki sayılar da farklı bir anahtarla sayılmıştı — güncel olanlar yukarıda.
 
 `_1A/_1B/_1Z` tek bir tasarımın kademeli detay ailesi (1.423 ardışık çiftin 1.377'sinde vertex
 düşüyor) ve **X ekseninde raflanmış**: aynı Y, aynı Z, düzenli adım.

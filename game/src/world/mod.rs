@@ -28,6 +28,7 @@ mod build;
 mod cell;
 mod collide;
 mod load;
+pub mod lod;
 mod tiers;
 
 pub use build::{build_region, nearest, CityMesh, CityVisuals};

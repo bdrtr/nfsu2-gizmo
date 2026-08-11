@@ -72,6 +72,14 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
     });
     let declared = meshes.len();
 
+    // NFS_ONLY=<substr>: draw nothing but the objects whose name contains it. `nfs_shot` has the
+    // same switch for a car's parts, and for the same reason — a family of objects is only really
+    // comparable with the rest of the city out of the way.
+    if let Ok(pat) = std::env::var("NFS_ONLY") {
+        meshes.retain(|m| m.header.name.contains(&pat));
+        println!("NFS_ONLY={pat:?}: {} objects", meshes.len());
+    }
+
     // NFS_TOP=<n>: name the n objects with the largest extent, which is how you find out what a
     // frame-filling surface actually is instead of guessing at it.
     if let Ok(n) = std::env::var("NFS_TOP").map(|v| v.parse::<usize>().unwrap_or(20)) {
@@ -154,6 +162,131 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
         }
     }
 
+    // Dedup here rather than leaving it to `build_region`, because the tier measurement below has
+    // to see each placement once: a byte-identical repeat of `_1A_00` would otherwise read as a
+    // second member of its own family, standing exactly where the first one does, and report the
+    // families as stacked when they are not.
+    let meshes = nfsu2::world::dedup(meshes);
+    let duplicates = declared - meshes.len();
+    println!("{}", nfsu2::world::lod::report(&meshes));
+
+    // NFS_TIERS_LIST=<n>: how far apart the families stand, and the n widest by name. A summary
+    // that says "1,330 apart" cannot tell a 40 m row of towers from a key that merged two ends of
+    // the city, and the difference decides whether a tier pass is safe.
+    if let Ok(n) = std::env::var("NFS_TIERS_LIST").map(|v| v.parse::<usize>().unwrap_or(12)) {
+        let mut fams = nfsu2::world::lod::families(&meshes);
+        let mut bands = [0usize; 5];
+        for f in &fams {
+            let s = f.spread();
+            bands[usize::from(s >= 1.0)
+                + usize::from(s >= 10.0)
+                + usize::from(s >= 50.0)
+                + usize::from(s >= 200.0)] += 1;
+        }
+        println!(
+            "  spread: <1m {} · 1-10m {} · 10-50m {} · 50-200m {} · >200m {}",
+            bands[0], bands[1], bands[2], bands[3], bands[4]
+        );
+        // Does the member stand on the ground, or is it parked? A building's underside meets the
+        // surface under it; a copy put somewhere out of the way does not. Asked of the finest tier
+        // and of the coarser ones separately, because the whole question is whether they differ.
+        let ground = nfsu2::world::Ground::of(&nfsu2::world::collision_cells(&meshes));
+        let band = |members: &mut dyn Iterator<Item = &nfsu2::world::lod::Member>, what: &str| {
+            let (mut on, mut off, mut unknown) = (0usize, 0usize, 0usize);
+            let mut worst = 0.0f32;
+            for m in members {
+                let base = m.centre.y - m.size.y * 0.5;
+                match ground.height_at(m.centre) {
+                    None => unknown += 1,
+                    Some(h) => {
+                        let d = base - h;
+                        // A building may be sunk into its terrain; 8 m either way is the tolerance
+                        // that calls a plinth "on the ground" and a buried tower "not".
+                        if d.abs() <= 8.0 {
+                            on += 1;
+                        } else {
+                            off += 1;
+                            if d.abs() > worst.abs() {
+                                worst = d;
+                            }
+                        }
+                    }
+                }
+            }
+            println!(
+                "  {what}: {on} on the ground, {off} off it (worst {worst:+.0} m), \
+                 {unknown} over no drivable ground"
+            );
+        };
+        band(&mut fams.iter().map(|f| &f.members[0]), "finest ");
+        band(&mut fams.iter().flat_map(|f| f.members.iter().skip(1)), "coarser");
+
+        // Does the member stand *through* another building? Two buildings do not interpenetrate,
+        // so a tier that does is not where the city meant it to be. Asked against `XB_*` only —
+        // roads, terrain and props legitimately pass through a building's box.
+        let blocks: Vec<(Vec3, Vec3, usize)> = meshes
+            .iter()
+            .enumerate()
+            .filter(|(_, m)| !m.positions.is_empty() && m.header.name.starts_with("XB_"))
+            .map(|(i, m)| {
+                let lo = nfsu2::world::world_point(&m.header, m.header.bbox_min);
+                let hi = nfsu2::world::world_point(&m.header, m.header.bbox_max);
+                ((lo + hi) * 0.5, (hi - lo).abs(), i)
+            })
+            .collect();
+        let family_of: std::collections::HashMap<usize, usize> = fams
+            .iter()
+            .enumerate()
+            .flat_map(|(fi, f)| f.members.iter().map(move |m| (m.index, fi)))
+            .collect();
+        let clashes = |members: &mut dyn Iterator<Item = (usize, &nfsu2::world::lod::Member)>, what: &str| {
+            let (mut hit, mut total) = (0usize, 0usize);
+            for (fi, m) in members {
+                total += 1;
+                // 2 m of mutual penetration on every axis: touching facades are not a clash.
+                let deep = blocks.iter().any(|(c, s, i)| {
+                    *i != m.index
+                        && family_of.get(i) != Some(&fi)
+                        && (*c - m.centre).abs().cmplt((*s + m.size) * 0.5 - Vec3::splat(2.0)).all()
+                });
+                if deep {
+                    hit += 1;
+                }
+            }
+            let pct = if total == 0 { 0.0 } else { 100.0 * hit as f32 / total as f32 };
+            println!("  {what}: {hit} of {total} ({pct:.0} %) stand inside another XB_ building");
+        };
+        clashes(&mut fams.iter().enumerate().map(|(fi, f)| (fi, &f.members[0])), "finest ");
+        clashes(
+            &mut fams.iter().enumerate().flat_map(|(fi, f)| f.members.iter().skip(1).map(move |m| (fi, m))),
+            "coarser",
+        );
+
+        fams.sort_by(|a, b| b.spread().total_cmp(&a.spread()));
+        for f in fams.iter().take(n) {
+            println!("  spread {:>6.0} m  {}{}", f.spread(), f.design, f.tail);
+            for m in &f.members {
+                println!(
+                    "      _1{}  v={:<6} {}  #{:<6} centre {:>7.0},{:>5.0},{:>7.0}  size {:>5.0}x{:>4.0}x{:>5.0}",
+                    m.letter,
+                    m.vertices,
+                    if m.placed { "placed  " } else { "identity" },
+                    m.index,
+                    m.centre.x, m.centre.y, m.centre.z,
+                    m.size.x, m.size.y, m.size.z
+                );
+            }
+        }
+    }
+
+    // NFS_TIERS=finest keeps only the richest member of each detail family; NFS_TIERS=coarse keeps
+    // only what `finest` would drop, which is the frame that answers "what would be lost" directly.
+    let meshes = match std::env::var("NFS_TIERS").ok().as_deref() {
+        Some("finest") => nfsu2::world::lod::keep_finest(meshes),
+        Some("coarse") => nfsu2::world::lod::keep_coarser(meshes),
+        _ => meshes,
+    };
+
     let budget = std::env::var("NFS_BUDGET").ok().and_then(|s| s.parse::<usize>().ok());
     // Frame on the region's own centre so a budget takes a neighbourhood rather than an edge.
     let around = centre_of(&meshes);
@@ -162,7 +295,7 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
     println!(
         "{declared} declared, {sky} backdrop, {lod} world-LOD, {} kept ({} duplicates), {} packs, {} merged meshes, {} unresolved runs",
         city.objects,
-        city.duplicates,
+        duplicates,
         packs.len(),
         city.meshes.len(),
         city.unresolved_runs
