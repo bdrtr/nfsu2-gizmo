@@ -21,8 +21,8 @@
 //! - `NFS_EYE="x,y,z"` — camera eye, relative to the look-at point. Default is a high
 //!   three-quarter view framing the whole of what loaded.
 //! - `NFS_ONLY=<substr>` — draw only the objects whose name contains it.
-//! - `NFS_TIERS=finest|coarse` — keep only the richest member of each detail family, or only what
-//!   that would drop. See [`nfsu2::world::lod`]; neither is a default.
+//! - `NFS_TIERS=all|coarse` — put the coarse detail tiers back, or draw *only* them. Only the
+//!   richest member of each family is drawn by default; see [`nfsu2::world::lod`].
 //! - `NFS_TIERS_LIST=<n>` — the detail families in numbers, and the n widest by member spread.
 //! - `NFS_ROUTE=<Paths*.bin>` — put that route file's race line on the city and draw it as a
 //!   ribbon. Prints what the placement cost: how many points took a neighbour's height, the line's
@@ -303,12 +303,13 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
         probe(&dir, &meshes);
     }
 
-    // NFS_TIERS=finest keeps only the richest member of each detail family; NFS_TIERS=coarse keeps
-    // only what `finest` would drop, which is the frame that answers "what would be lost" directly.
+    // Only the richest member of each detail family, by default — see [`nfsu2::world::lod`] for
+    // what the coarse ones turned out to be up close. `NFS_TIERS=all` puts them back and
+    // `NFS_TIERS=coarse` draws *only* them, which is the frame that shows what is being left out.
     let meshes = match std::env::var("NFS_TIERS").ok().as_deref() {
-        Some("finest") => nfsu2::world::lod::keep_finest(meshes),
+        Some("all") => meshes,
         Some("coarse") => nfsu2::world::lod::keep_coarser(meshes),
-        _ => meshes,
+        _ => nfsu2::world::lod::keep_finest(meshes),
     };
 
     // NFS_ROUTE=<Paths*.bin>: put that file's race line on the city and draw it. Built here rather
@@ -587,12 +588,18 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
             spawned += 1;
             continue;
         }
+        // NFS_DOUBLE=1: draw the city double-sided. The city is authored to be backface-culled —
+        // `world::remap`'s determinant is +1 so the winding survives the frame change — and this is
+        // how that claim is tested rather than trusted: if a hole fills in when the back faces are
+        // drawn, the winding is wrong somewhere and what you were seeing was a building's inside.
+        let double = std::env::var("NFS_DOUBLE").is_ok();
         let material = match m.texture.and_then(|k| bound.get(&k)) {
             Some(bg) => Material::new(bg.clone()).with_baked_lit(Vec4::new(1.0, 1.0, 1.0, 1.0)),
             // A run whose texture resolved nowhere draws in a flat grey rather than vanishing —
             // a hole in the world reads as a parser bug, and this is not one.
             None => Material::new(white.clone()).with_baked_lit(Vec4::new(0.35, 0.35, 0.38, 1.0)),
         };
+        let material = if double { material.with_double_sided(true) } else { material };
         scene::spawn_mesh(&mut world, m.mesh.clone(), material, Transform::new(m.origin));
         spawned += 1;
     }

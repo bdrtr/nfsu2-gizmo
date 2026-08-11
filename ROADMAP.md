@@ -822,7 +822,28 @@ aldığı bir ölçüme dayanıyor.
 
 Güncel durum burası; 2026-08-09 ve 2026-08-04 bölümleri tarihsel kayıt.
 
-### Karar verildi: `_1A/_1B/_1Z` "raf" değil LOD kademesi — ve elenmiyorlar
+### DÜZELTME (2026-08-11, aynı gün): kaba kademeler **eleniyor**
+
+Aşağıdaki karar yanlıştı ve nasıl yanlış olduğu asıl kayda değer olan. Ölçümler doğruydu:
+kademeler yere en ince kademeyle aynı oranda oturuyor (%67/%70) ve komşularının içinden ondan
+fazla geçmiyor (%22/%26). Bundan "yerde duran objeleri siliyoruz" sonucu çıkarıldı ve varsayılan
+"hepsini çiz" bırakıldı.
+
+Sonra biri şehirde araba sürdü. Kaba kademe bir **uzak taklidi** — fotoğraf kaplı bir kutu, beş
+yüz metreden okunmak için yapılmış — ve arabadan bakınca binasının *olmadığı* açık arazide duran
+bulanık bir levha. `XB_LANDMARKTOWER_1Z_RB_00`, temsil ettiği kuleden 544 m ötede, otoyol
+kavşağının yanındaki çimenin üstünde duruyor.
+
+Ölçümlerde yanlış olan bir şey yok. Onlar **"dosya bu objeleri bina gibi mi yerleştiriyor"** diye
+sordu, cevap evetti. Soramadıkları şey **"geometri sokaktan görülecek kadar bitmiş mi"** idi — ki
+asıl soru oydu. Bu bölüm "karar bir bakışa bakıyor" diye başlamıştı; bakış sayılarla ezildi ve
+sayılar başka bir şeyi cevaplıyordu.
+
+Varsayılan artık `keep_finest`; geri dönüş yolu `NFS_TIERS=all`.
+
+---
+
+### Karar verildi: `_1A/_1B/_1Z` "raf" değil LOD kademesi — ve elenmiyorlar (ÜSTTEKİ DÜZELTMEYE BAK)
 
 2026-08-09'da açık bırakılan tek karar buydu ve "bir bakışa bakıyor" diye bırakılmıştı. Bakıldı;
 ama kararı bakış değil iki ölçüm verdi.

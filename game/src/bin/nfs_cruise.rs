@@ -17,7 +17,8 @@
 //! **R** back to the start · **T** auto-shift · hold **right mouse** to orbit · **F** print where
 //! the car is.
 //!
-//! Env: `NFS_ROUTE=<Paths*.bin>` load that race: its line is drawn on the road and the HUD says
+//! Env: `NFS_TIERS=all` draw the coarse detail tiers too (off by default — they are distance
+//! imposters and from a car they are blurred boxes in open ground) · `NFS_ROUTE=<Paths*.bin>` load that race: its line is drawn on the road and the HUD says
 //! where you are on it and whether you are still on it · `NFS_AT="x,y,z"` where to start — downtown sits near `y ≈ 27` and the airport near
 //! `y ≈ -11`, so the height matters as much as the place · `NFS_BUDGET=<n>` caps objects,
 //! nearest-first · `NFS_DIAG=1` prints the physics' own view once a second · plus everything
@@ -196,18 +197,16 @@ fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> CruiseState
     println!("{declared} drawn objects, {} after dedup", objects.len());
     city::nearest(&mut objects, at, budget);
 
-    // The city's own detail tiers — `_1A`/`_1B`/`_1Z`, one design in three levels. What they are
-    // and how they were identified is in [`nfsu2::world::lod`]; whether to draw all of them is a
-    // decision recorded in `ROADMAP.md`, and today the answer is yes.
+    // The city's own detail tiers — `_1A`/`_1B`/`_1Z`, one design in three levels. Only the
+    // richest of each family is drawn: the coarse ones are distance imposters, and from a car they
+    // are blurred boxes standing in open ground. `NFS_TIERS=all` puts them back.
     println!("{}", city::lod::report(&objects));
-    if std::env::var("NFS_TIERS").is_ok_and(|v| v == "finest") {
+    if std::env::var("NFS_TIERS").as_deref() == Ok("all") {
+        println!("NFS_TIERS=all: the coarse detail tiers are drawn too");
+    } else {
         let before = objects.len();
         objects = city::lod::keep_finest(objects);
-        println!(
-            "NFS_TIERS=finest: dropped {} coarser members, {} objects left",
-            before - objects.len(),
-            objects.len()
-        );
+        println!("detail tiers: dropped {} coarser members, {} objects left", before - objects.len(), objects.len());
     }
 
     let mut phys = PhysicsWorld::new();

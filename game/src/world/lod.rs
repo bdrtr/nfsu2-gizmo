@@ -15,7 +15,29 @@
 //! - **The install spells it out.** 28 objects are named `LOD_<design>_1Z_LL` — the `_1Z` tier of a
 //!   design, with `LOD` in the name.
 //!
-//! ## The tiers are *placed*, so keeping only the finest is not deduplication
+//! ## Only the finest is drawn — and the measurement that said otherwise was answering a
+//! different question
+//!
+//! **This was decided the wrong way once and the correction is the useful part.** Everything in the
+//! next section is still true: the tiers are placed, they stand on the ground as often as the
+//! finest does, and they interpenetrate their neighbours no more than it does. From that it was
+//! concluded that dropping them removes objects that belong somewhere, and the default was left at
+//! "draw everything".
+//!
+//! Then someone drove through it. A coarse tier is a **distance imposter** — a box with a
+//! photographic facade, authored to be read at five hundred metres — and from a car it is a blurred
+//! slab standing in open ground where its building is not. `XB_LANDMARKTOWER_1Z_RB_00` sits on
+//! grass beside a motorway junction 544 m from the tower it stands in for.
+//!
+//! Nothing in the measurements was wrong. They asked *whether the file places these objects like
+//! buildings*, and it does. They could not ask whether the geometry is **finished enough to be
+//! seen from the street**, which is a different question and the one that mattered. `ROADMAP.md`
+//! said from the start that this decision needed an eye; it was overruled with numbers, and the
+//! numbers were answering something else.
+//!
+//! So [`keep_finest`] is the default and `NFS_TIERS=all` is the way back.
+//!
+//! ## What the measurements do establish
 //!
 //! The obvious next thought — "then draw one of them" — was measured and refused. Two numbers say
 //! why, both over the whole city (8 bundles, 13,985 objects after dedup):
@@ -30,9 +52,9 @@
 //!   scheme that puts coarse copies out of the way: the file plants them on Bayview's streets the
 //!   same way it plants everything else.
 //!
-//! So [`keep_finest`] is a **diagnostic, not a default** — `ROADMAP.md` records the decision. What
-//! the tiers really are is the input a distance-based selector wants, which the renderer does not
-//! have yet; the day it does, this module is where it asks.
+//! What the tiers really are is the input a distance-based selector wants, which the renderer does
+//! not have yet; the day it does, this module is where it asks, and the coarse tiers stop being
+//! something to drop and become something to swap in.
 //!
 //! What stays open is *why* a tier chain is spread across the map at all. That is a question about
 //! the bundle rather than about the game: the visibility data the original engine used
