@@ -319,8 +319,6 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
         Ok(file) => {
             let bytes = std::fs::read(&file).unwrap_or_else(|e| panic!("read {file}: {e}"));
             let nodes = gizmo_nfs::world::routes::nodes(&bytes).expect("read the route's nodes");
-            let roads: Vec<_> =
-                meshes.iter().filter(|m| nfsu2::world::is_road(&m.header.name)).cloned().collect();
             let ground = nfsu2::world::route::road_ground(&meshes);
             // How many surfaces does the city offer at a route node, and how far apart are they?
             // The seed rule below has to choose among them, so the shape of that choice is worth
@@ -442,8 +440,6 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
         Ok(file) => {
             let bytes = std::fs::read(&file).unwrap_or_else(|e| panic!("read {file}: {e}"));
             let raw = gizmo_nfs::world::routes::regions(&bytes).expect("read the route's regions");
-            let roads: Vec<_> =
-                meshes.iter().filter(|m| nfsu2::world::is_road(&m.header.name)).cloned().collect();
             let ground = nfsu2::world::route::road_ground(&meshes);
             let mut kinds: std::collections::BTreeMap<u32, (usize, f32)> = Default::default();
             let out = raw
