@@ -949,6 +949,21 @@ bunlardan birine hash'lenmiyor, yani adlar daha uzun.
 118.729 kayıt var ama **yalnız 2.406 ayrı segment** — aynı küme dosyalar arasında tekrarlanıyor.
 Bir kimlik 113 rota dosyasının medyan 61'inde görünüyor.
 
+**Bariyer değiller — bu artık ölçülmüş, ve kontrollü.** Segmentler şehrin çarpışma üçgenlerine
+soruldu (`nfs_city` içinde `NFS_PROBE`). Ölçümün kendisine güvenilmesini sağlayan şey pozitif
+kontrol: aynı koşuda rota **düğümleri** de soruldu ve **5.502'nin 5.501'i (%100) sürülebilir
+yüzeyin üstünde** çıktı, yani çerçeve dönüşümü doğru. Sonuç:
+
+| soru | sonuç |
+|---|---|
+| segmentin orta noktası sürülebilir mi | 2.406/2.406 — **%100** |
+| 4 m sağında *ve* solunda sürülebilir yüzey var mı | 2.401 — **%100** (birinde 5, hiçbirinde 0) |
+| iki ucunun 3 m ötesinde de sürülebilir yüzey var mı | 2.396 — **%100** |
+| segmentin üstünde duvar üçgeni var mı | 107 — %4 |
+
+Yani bu çizgiler yolun kenarında değil, **içinde**; yolu enlemesine de kesmiyorlar (uçlarının
+ötesi de yol). Bariyer okuması da, "yolu kapatan kapı" okuması da bitti.
+
 **Elenenler** (hepsi ölçümle, tekrar denenmesin diye):
 
 - *Yarış hattı değil.* Düğümden en yakın segmente uzaklık medyan 15,6 m; yalnız %4,1'i 1 m altında.
@@ -959,6 +974,15 @@ Bir kimlik 113 rota dosyasının medyan 61'inde görünüyor.
 - *Rota kimliği değil.* 2.406 segmentin **sıfırında** taşıdığı kimlik sayısı, göründüğü dosya
   sayısına eşit.
 - *Obje hash'i değil.* 29.515 dünya obje adının hash'iyle 195.561 referansın sıfırı eşleşiyor.
+- *Cadde/yol kimliği değil.* Bir kimliğin segmentleri düz bir hat oluşturmuyor: yalnız 28/159'u
+  kendi uzunluğunun %15'inden ince, medyan en/boy oranı 0,2–0,7.
+- *Uzun bir güzergâh zinciri değil.* 5 m toleransta bile 159 kimliğin yalnız 4'ü tek bir zincir
+  kuruyor; bileşen/segment oranı medyan **0,50**, yani segmentler **ikişerli** birleşiyor. Tüm
+  2.406 segment 2 m toleransta 497 bileşene ayrılıyor (bileşen başına ~4,8 segment).
+
+**Bilinen olumlu tarif** (bir sonraki hipotez bunu açıklamak zorunda): sürülebilir yüzeyin
+*içinde* duran, medyan 24 m'lik, ikişerli birleşip küçük öbekler kuran 2.406 çizgi; her biri 159
+kişilik bir kimlik uzayından 1–4 kimlik taşıyor; kimlikler kurulumda başka hiçbir yerde geçmiyor.
 
 ### Açık kalan soru — parser tarafı
 

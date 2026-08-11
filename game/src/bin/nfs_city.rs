@@ -20,6 +20,15 @@
 //!   in the middle of eight overlapping districts.
 //! - `NFS_EYE="x,y,z"` — camera eye, relative to the look-at point. Default is a high
 //!   three-quarter view framing the whole of what loaded.
+//! - `NFS_ONLY=<substr>` — draw only the objects whose name contains it.
+//! - `NFS_TIERS=finest|coarse` — keep only the richest member of each detail family, or only what
+//!   that would drop. See [`nfsu2::world::lod`]; neither is a default.
+//! - `NFS_TIERS_LIST=<n>` — the detail families in numbers, and the n widest by member spread.
+//! - `NFS_PROBE=<dir>` — ask the city's collision triangles what is under a list of world points
+//!   (`<dir>/nodes.csv`, one `x,y` per line) and beside a list of segments (`<dir>/segments.csv`,
+//!   `x1,y1,x2,y2`), both in the world's own frame. Written for one undecoded chunk and kept
+//!   because it carries its own control: the points are a set that must come out on the road, so a
+//!   run that fails there says the reading is wrong before any other row is believed.
 //!
 //! Prints one line of counts before rendering, because most of what can go wrong here is visible
 //! in them: an object count that does not match the manifest, a duplicate count of zero (dedup not
@@ -277,6 +286,16 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
                 );
             }
         }
+    }
+
+    // NFS_PROBE=<dir>: ask the city what is underneath a list of world points and segments.
+    //
+    // A throwaway for one question — whether the route files' `0x0003414D` segments are the edge
+    // of the road — and built so the answer can be trusted: `nodes.csv` is the **positive
+    // control**. Those are the race line, which must come out on drivable surface. If it does not,
+    // the frame conversion below is wrong and nothing the segment rows say means anything.
+    if let Ok(dir) = std::env::var("NFS_PROBE") {
+        probe(&dir, &meshes);
     }
 
     // NFS_TIERS=finest keeps only the richest member of each detail family; NFS_TIERS=coarse keeps
@@ -551,4 +570,151 @@ fn shoot(world: &mut World, renderer: &mut Renderer, out: &str, w: u32, h: u32) 
     std::fs::write(out, &tight).expect("write raw");
     println!("{w}x{h} format={format:?} -> {out}");
     tight
+}
+
+// ── NFS_PROBE: what is under a point, and what is beside a segment ────────────────────────────
+//
+// Deliberately self-contained and deliberately crude. It exists to answer one question about an
+// undecoded chunk and it should leave with the answer.
+
+/// A 2-D grid over the city's collision triangles, so a point query touches ~50 of 1.2 million.
+struct Soup {
+    tris: Vec<([Vec3; 3], nfsu2::world::Surface)>,
+    grid: HashMap<(i32, i32), Vec<u32>>,
+}
+
+const PROBE_CELL: f32 = 32.0;
+
+impl Soup {
+    fn of(meshes: &[gizmo_nfs::world::WorldMesh]) -> Self {
+        let mut tris = Vec::new();
+        for c in nfsu2::world::collision_cells(meshes) {
+            for (t, surface) in c.indices.chunks_exact(3).zip(c.surfaces.iter()) {
+                let v = |i: u32| c.origin + c.vertices[i as usize];
+                tris.push(([v(t[0]), v(t[1]), v(t[2])], *surface));
+            }
+        }
+        let mut grid: HashMap<(i32, i32), Vec<u32>> = HashMap::new();
+        for (i, (t, _)) in tris.iter().enumerate() {
+            let key = |p: Vec3| ((p.x / PROBE_CELL).floor() as i32, (p.z / PROBE_CELL).floor() as i32);
+            let (lo, hi) = t.iter().fold(((i32::MAX, i32::MAX), (i32::MIN, i32::MIN)), |(lo, hi), p| {
+                let k = key(*p);
+                ((lo.0.min(k.0), lo.1.min(k.1)), (hi.0.max(k.0), hi.1.max(k.1)))
+            });
+            // A triangle spanning many cells is terrain; cap the spread so one of those does not
+            // land in a thousand buckets.
+            if (hi.0 - lo.0) > 8 || (hi.1 - lo.1) > 8 {
+                continue;
+            }
+            for gx in lo.0..=hi.0 {
+                for gz in lo.1..=hi.1 {
+                    grid.entry((gx, gz)).or_default().push(i as u32);
+                }
+            }
+        }
+        Soup { tris, grid }
+    }
+
+    /// Whether a triangle's footprint contains the point, in plan view.
+    fn covers(t: &[Vec3; 3], p: Vec3) -> bool {
+        let s = |a: Vec3, b: Vec3| (b.x - a.x) * (p.z - a.z) - (b.z - a.z) * (p.x - a.x);
+        let (d1, d2, d3) = (s(t[0], t[1]), s(t[1], t[2]), s(t[2], t[0]));
+        let neg = d1 < 0.0 || d2 < 0.0 || d3 < 0.0;
+        let pos = d1 > 0.0 || d2 > 0.0 || d3 > 0.0;
+        !(neg && pos)
+    }
+
+    /// Is there a triangle of this kind standing over the point?
+    fn over(&self, p: Vec3, want: nfsu2::world::Surface) -> bool {
+        let k = ((p.x / PROBE_CELL).floor() as i32, (p.z / PROBE_CELL).floor() as i32);
+        self.grid.get(&k).is_some_and(|ids| {
+            ids.iter().any(|i| {
+                let (t, s) = &self.tris[*i as usize];
+                *s == want && Self::covers(t, p)
+            })
+        })
+    }
+}
+
+fn probe(dir: &str, meshes: &[gizmo_nfs::world::WorldMesh]) {
+    use nfsu2::world::Surface;
+    let soup = Soup::of(meshes);
+    let drivable = soup.tris.iter().filter(|(_, s)| *s == Surface::Drivable).count();
+    println!(
+        "probe: {} collision triangles ({drivable} drivable, {} wall) in {} cells",
+        soup.tris.len(),
+        soup.tris.len() - drivable,
+        soup.grid.len()
+    );
+
+    // The route frame is the world's own, so the city's own conversion applies unchanged. Height
+    // is unknown, and every test below is in plan view, so zero is honest rather than a guess.
+    let at = |x: f32, y: f32| nfsu2::world::remap([x, y, 0.0]);
+    let rows = |name: &str| -> Vec<Vec<f32>> {
+        std::fs::read_to_string(std::path::Path::new(dir).join(name))
+            .unwrap_or_else(|e| panic!("{dir}/{name}: {e}"))
+            .lines()
+            .map(|l| l.split(',').filter_map(|v| v.trim().parse().ok()).collect())
+            .filter(|v: &Vec<f32>| !v.is_empty())
+            .collect()
+    };
+
+    // ── The control ──
+    let nodes = rows("nodes.csv");
+    let on = nodes.iter().filter(|r| soup.over(at(r[0], r[1]), Surface::Drivable)).count();
+    println!(
+        "  CONTROL nodes.csv: {on}/{} ({:.0} %) stand over drivable surface",
+        nodes.len(),
+        100.0 * on as f32 / nodes.len() as f32
+    );
+
+    // ── The question ──
+    let segs = rows("segments.csv");
+    let (mut both, mut one, mut neither, mut walled) = (0usize, 0usize, 0usize, 0usize);
+    let (mut on_road, mut ends_off, mut ends_on, mut ends_half) = (0usize, 0usize, 0usize, 0usize);
+    for r in &segs {
+        let (a, b) = (at(r[0], r[1]), at(r[2], r[3]));
+        let mid = (a + b) * 0.5;
+        let dir = (b - a).normalize_or_zero();
+        let n = Vec3::new(-dir.z, 0.0, dir.x); // perpendicular, in plan
+        let l = soup.over(mid + n * 4.0, Surface::Drivable);
+        let r_ = soup.over(mid - n * 4.0, Surface::Drivable);
+        match (l, r_) {
+            (true, true) => both += 1,
+            (false, false) => neither += 1,
+            _ => one += 1,
+        }
+        // Is the segment itself standing on a wall? Sample along it rather than at the midpoint —
+        // a barrier is a line, and one sample can miss the gap in a kerb.
+        if (0..=4).any(|i| soup.over(a.lerp(b, i as f32 / 4.0), Surface::Wall)) {
+            walled += 1;
+        }
+        // Does it span the road rather than run along it? A line drawn across a carriageway has
+        // its middle on tarmac and both ends at the edge, so stepping past either end leaves it.
+        if soup.over(mid, Surface::Drivable) {
+            on_road += 1;
+        }
+        let past = |p: Vec3, d: Vec3| soup.over(p + d * 3.0, Surface::Drivable);
+        match (past(a, -dir), past(b, dir)) {
+            (false, false) => ends_off += 1,
+            (true, true) => ends_on += 1,
+            _ => ends_half += 1,
+        }
+    }
+    let pct = |v: usize| 100.0 * v as f32 / segs.len() as f32;
+    println!("  segments.csv: {} segments", segs.len());
+    println!(
+        "    4 m to each side: drivable on BOTH {both} ({:.0} %) · ONE {one} ({:.0} %) · NEITHER {neither} ({:.0} %)",
+        pct(both),
+        pct(one),
+        pct(neither)
+    );
+    println!("    a wall triangle stands on the segment itself: {walled} ({:.0} %)", pct(walled));
+    println!("    midpoint is on drivable surface: {on_road} ({:.0} %)", pct(on_road));
+    println!(
+        "    3 m past each end: off-road at BOTH {ends_off} ({:.0} %) · on-road at both {ends_on} ({:.0} %) · one each {ends_half} ({:.0} %)",
+        pct(ends_off),
+        pct(ends_on),
+        pct(ends_half)
+    );
 }
