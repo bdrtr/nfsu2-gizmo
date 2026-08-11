@@ -260,14 +260,36 @@ fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> CruiseState
         }
     };
 
-    let course_start = city::start_of(&course_paths);
+    // Where the file puts the cars, if it says. `TrackPosMarkers*.bin` sits beside the route file
+    // and holds the event's starting grids; `start_of`'s least-progress node is the fallback for
+    // when it does not, and it is a guess where this is a record.
+    let course_start = std::env::var("NFS_ROUTE")
+        .ok()
+        .and_then(|r| {
+            let route = std::path::Path::new(&r);
+            let event: u16 = route
+                .file_stem()?
+                .to_str()?
+                .trim_start_matches(|c: char| !c.is_ascii_digit())
+                .parse()
+                .ok()?;
+            let dir = route.parent()?;
+            let bytes = std::fs::read(dir.join("TrackPosMarkersAll.bin")).ok()?;
+            let m = gizmo_nfs::world::routes::markers(&bytes).ok()?;
+            let placed = city::start_grid(&m, event);
+            if placed.is_some() {
+                println!("start grid: event {event}, pole slot from TrackPosMarkersAll.bin");
+            }
+            placed
+        })
+        .or_else(|| city::start_of(&course_paths));
 
     // A race has a start line, and it is the only thing in the data that names one: the point of
     // least `progress`. It takes precedence over the downtown default, and gives the car a heading
     // as well — a grid position pointing at a wall is worse than no grid position.
     let (at, start_heading) = match (named_at, course_start) {
         (false, Some((p, dir))) => {
-            println!("starting on the race line at {p:?}");
+            println!("starting at {p:?}");
             (p, Some(dir))
         }
         _ => (at, None),

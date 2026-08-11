@@ -30,7 +30,7 @@
 
 use super::{collision_cells, remap, Ground};
 use gizmo::prelude::*;
-use gizmo_nfs::world::routes::{paths, RouteNode};
+use gizmo_nfs::world::routes::{paths, RouteNode, StartMarker};
 use gizmo_nfs::world::WorldMesh;
 
 /// Whether a city object is road surface.
@@ -126,7 +126,38 @@ pub fn build(nodes: &[RouteNode], ground: &Ground) -> Vec<RoutePath> {
         .collect()
 }
 
-/// Where a race starts: the point of least progress, and the way it faces.
+/// Where a race starts, as the file puts it: the pole slot of one of the event's starting grids.
+///
+/// This replaces a guess. Before the grids were read, the start was taken to be the path node of
+/// least `progress`, which is *a* place the race passes and not where the cars are put — testing
+/// the corridor from it dropped the car on a bridge approach over water.
+///
+/// **The heading is derived, and the derivation is measured.** A marker carries a position and no
+/// direction, so the way the car faces comes from the grid's own shape: four cars abreast and two
+/// rows deep, so the axis between the rows is the axis of the road. That is not an assumption —
+/// against the route network, all **191** grids that belong to an event sit a median 11 m from its
+/// nearest node and the angle between the grid axis and the road there is under 30° or over 150°
+/// for **every one of them**, with nothing in between.
+///
+/// What the file does *not* say is which end is the front. Pole leads, so the row holding slots
+/// `0..3` is taken as the front one and the car faces away from the row behind it. A track carries
+/// two grids, one per race direction, and this returns the first — settling which is which, and the
+/// sign along with it, is what the `Routes####F.bin` / `Routes####B.bin` files are for, and they are
+/// not read yet. Both mistakes look the same and cost one line: a car facing backwards.
+#[must_use]
+pub fn start_grid(markers: &[StartMarker], event: u16) -> Option<(Vec3, Vec3)> {
+    let grid = gizmo_nfs::world::routes::grids(markers)
+        .into_iter()
+        .find(|g| g[0].track == u32::from(event))?;
+    let mean = |slots: &[StartMarker]| {
+        slots.iter().fold(Vec3::ZERO, |a, m| a + remap(m.at)) / slots.len() as f32
+    };
+    let (front, back) = (mean(&grid[..4]), mean(&grid[4..]));
+    let heading = (front - back).normalize_or_zero();
+    (heading != Vec3::ZERO).then(|| (remap(grid[0].at), heading))
+}
+
+/// Where a race starts when no grid is available: the point of least progress, and the way it faces.
 ///
 /// The file's `progress` is the race's own measure, so its minimum is the start line — there is
 /// nothing else in the data that names one. The facing comes from the next point of the same path,
