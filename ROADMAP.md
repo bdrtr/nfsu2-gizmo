@@ -1033,6 +1033,33 @@ yani koridoru rota verisinden türetmek gerekiyor — ve en güçlü aday `0x000
 Düğümler ve mesafe artık elimizde; kalan parçalar okunmamış dört yaprak — `0x0003414D` (her dosyada 36'nın tam katı), `0x0003414C` (16),
 `0x00034149` ve `0x0003414A` (4'ten büyük hiçbir şeye bölünmüyor: değişken uzunlukta ya da başlıklı).
 
+#### `Routes####F/B.bin` — açılmadı, ama nereden devam edileceği belli
+
+`Paths####.bin`'in yanında ikinci bir aile var ve hiçbir kaynakta geçmiyor: etkinlik başına, yön
+başına bir dosya (`F`/`B`), toplam **226**. OpenUG'un `FORMATS.md`'inde yok.
+
+Ölçülenler:
+
+| chunk | dosya | boyut | gcd |
+|---|---|---|---|
+| `0x00034121` | 222 | 1.848 .. 781.844 | **28** |
+| `0x00034122` | 222 | 132 .. 120.100 | 4 |
+| `0x00034123` | 122 | **her zaman tam 10.488** | — |
+
+`0x34121` kayıtları **`11, 11` imzasıyla** başlıyor — başlangıç işaretçilerinin (`0x34146`)
+imzasının aynısı, yani bunlar tek bir aile. Her kayıt `+0x10`'da 16 baytlık bir ad taşıyor:
+`TrackRoutesA21`, `A30`, `A31`, `A32`, `A33`, `A34`, `A40`, `A43`, `A44`. `Routes4001F.bin`'de
+**136 kayıt** var ve ardışık kayıt başlangıçları arasındaki her aralık **28'in tam katı**
+(812, 1372, 1148, 700, 1540 → 29, 49, 41, 25, 55 × 28).
+
+**Çözülemeyen:** kayıt sınırı. Kaydın ilk 112 baytındaki hiçbir `u16`/`u32`, aralığı da
+aralık/28'i de öngörmüyor (135 kayıtta sıfır isabet, ±4 kaymayla da). Yani uzunluk ya daha
+ileride, ya iç içe bir yapının içinde, ya da hiç saklanmıyor.
+
+**Denenip elenen:** `0x34123`'ün indeks tablosu olması. Sabit boyutu (her dosyada 10.488) bunu
+düşündürüyor ama içeriği seyrek — 81 farklı `u32`, en sıkları `0xBF800000` (−1,0f, 1.216 kez),
+`0xFFFFFFFF` (646) ve sıfır (608). Ofset gibi duran değer yok.
+
 #### `0x0003414A` — yönlü poligon bölgeler, ve bariyerin en güçlü adayı
 
 Rota dosyalarının en büyük yaprağı (Paths4001'de 69.628 bayt) sabit stride taşımıyor — 8..80
