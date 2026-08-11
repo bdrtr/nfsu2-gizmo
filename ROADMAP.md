@@ -1070,6 +1070,20 @@ sıfır istisna. İki alanı iki bayt erken okumak ilk dosyada ilk kayıtta patl
 `+0`'daki tür kodu (14 değer) ve `+48`'deki kimlik (445 değer, 12.830 kayıtta sıfır) ham taşınıyor.
 Kimlik obje adı hash'i **değil** — 445'in hiçbiri şehrin 29.515 adıyla eşleşmiyor.
 
+**Bağımsız tanık (2026-08-11, internet araması).** `yugecin/nfsu2-re` bu chunk'ı okuyor ve
+`nfsu2-re-binfiles/main.c` içinde **aynı şekilde yürüyor**: `part_size = *(short*)(pos + 0x42);
+pos += part_size;`, kutu `0x20..0x2C`'de, ilk köşe `0x44`'te — aynı yerden sayılan aynı ofsetler.
+Uzunluk alanı burada en son ve en zor türetilen şeydi; iki okuyucunun aynı kayıt sınırına ayrı
+yollardan varması tek başına her ikisinden de değerli.
+
+Önündeki alanı ise yanlış tiplemiş — `0x40`'a `short radius` diyor. O köşe sayısı, ve
+`uzunluk = 68 + 8 × sayı`'nın 42.698 kaydın hepsinde tutması bunun tartışma değil bilgi olmasını
+sağlıyor. Ayrıca yalnız ilk baytı `0x12` olan kayıtları basıyor — on dört türden biri, üstelik
+8 m'lik işaretçi — yani chunk'ın şekli oradan hiç görünmemiş.
+
+`0x34148`, `0x34149`, `0x3414C` ve `0x3414D`'yi **hiç kimse belgelememiş**: o proje beş bölüm
+işliyor ve yalnız biri bizimki.
+
 **Tür kodu bir boyut hiyerarşisi.** `nfs_city NFS_REGIONS=<Paths*.bin>` poligonları türe göre
 renklendirerek çiziyor; `Paths4001`'in 671 poligonu:
 
