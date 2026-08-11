@@ -126,6 +126,114 @@ pub fn build(nodes: &[RouteNode], ground: &Ground) -> Vec<RoutePath> {
         .collect()
 }
 
+/// Where a race starts: the point of least progress, and the way it faces.
+///
+/// The file's `progress` is the race's own measure, so its minimum is the start line — there is
+/// nothing else in the data that names one. The facing comes from the next point of the same path,
+/// because a start position without a direction puts the car on the grid pointing at a wall.
+///
+/// `None` when no path has two points to take a direction from.
+#[must_use]
+pub fn start_of(paths: &[RoutePath]) -> Option<(Vec3, Vec3)> {
+    paths
+        .iter()
+        .filter(|p| p.points.len() >= 2)
+        .filter_map(|p| {
+            let (i, _) = p
+                .progress
+                .iter()
+                .enumerate()
+                .min_by(|a, b| a.1.total_cmp(b.1))?;
+            // The direction is taken forward, or backward at the very end of a path — a path's
+            // last point still has a direction, it is just the one it arrived on.
+            let (a, b) = if i + 1 < p.points.len() {
+                (p.points[i], p.points[i + 1])
+            } else {
+                (p.points[i - 1], p.points[i])
+            };
+            let dir = (b - a).normalize_or_zero();
+            (dir != Vec3::ZERO).then_some((p.progress[i], p.points[i], dir))
+        })
+        .min_by(|a, b| a.0.total_cmp(&b.0))
+        .map(|(_, at, dir)| (at, dir))
+}
+
+/// Gates along a race, in the file's own distance, and which one is next.
+///
+/// A route file is a **network** rather than a directed course — its cross-path links go forward
+/// and back about equally, and its paths do not tile the progress axis (`Paths4001` covers 6,820 of
+/// its 7,600 units, `Paths4021` 2,160 of 6,084). So a checkpoint cannot be a place. It can be a
+/// *distance*: whichever path the car is on, its `progress` says how far round it is, and a gate is
+/// a value of that.
+#[derive(Debug, Clone)]
+pub struct Checkpoints {
+    gates: Vec<f32>,
+    next: usize,
+}
+
+impl Checkpoints {
+    /// `count` gates spread evenly over the progress the paths actually cover, the last of them at
+    /// the finish. The start is not a gate — you are already there.
+    #[must_use]
+    pub fn along(paths: &[RoutePath], count: usize) -> Self {
+        let all: Vec<f32> = paths.iter().flat_map(|p| p.progress.iter().copied()).collect();
+        let lo = all.iter().copied().fold(f32::MAX, f32::min);
+        let hi = all.iter().copied().fold(f32::MIN, f32::max);
+        let gates = if all.is_empty() || count == 0 || hi <= lo {
+            Vec::new()
+        } else {
+            (1..=count).map(|i| lo + (hi - lo) * i as f32 / count as f32).collect()
+        };
+        Checkpoints { gates, next: 0 }
+    }
+
+    /// How many gates have been passed, and how many there are.
+    #[must_use]
+    pub fn passed(&self) -> usize {
+        self.next
+    }
+
+    #[must_use]
+    pub fn total(&self) -> usize {
+        self.gates.len()
+    }
+
+    /// The distance the next gate sits at, or `None` when the race is finished.
+    #[must_use]
+    pub fn next_gate(&self) -> Option<f32> {
+        self.gates.get(self.next).copied()
+    }
+
+    #[must_use]
+    pub fn finished(&self) -> bool {
+        !self.gates.is_empty() && self.next >= self.gates.len()
+    }
+
+    /// Offer a fix; returns whether a gate was just passed.
+    ///
+    /// **Only counts while the car is on the course**, and only ever one gate at a time. Both
+    /// matter: a fix taken from off the network can land anywhere on the progress axis, and a
+    /// single frame that jumped three gates is a car that was put back by the fall guard rather
+    /// than one that drove them.
+    pub fn offer(&mut self, fix: Option<Fix>, half_width: f32) -> bool {
+        let Some(f) = fix else { return false };
+        if f.distance > half_width {
+            return false;
+        }
+        let Some(gate) = self.next_gate() else { return false };
+        if f.progress >= gate {
+            self.next += 1;
+            return true;
+        }
+        false
+    }
+
+    /// Back to the start line.
+    pub fn reset(&mut self) {
+        self.next = 0;
+    }
+}
+
 /// A route's paths as a flat ribbon: one quad per segment, `width` across and `lift` above the
 /// surface the path was placed on.
 ///

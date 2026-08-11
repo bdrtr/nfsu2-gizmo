@@ -227,6 +227,43 @@ fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> CruiseState
     // down — including the height, which is why the airport's `y = -11` was carried downtown where
     // the ground is at `y = 27`. Asked properly, the number comes from the city.
     let ground = city::Ground::of(&colliders);
+    let named_at = std::env::var("NFS_AT").is_ok();
+    let (course_paths, mut course) = match std::env::var("NFS_ROUTE") {
+        Err(_) => (Vec::new(), None),
+        Ok(file) => {
+            let bytes = std::fs::read(&file).unwrap_or_else(|e| panic!("read {file}: {e}"));
+            let nodes =
+                gizmo_nfs::world::routes::nodes(&bytes).expect("read the route file's nodes");
+            let paths = city::build_route(&nodes, &city::road_ground(&objects));
+            let corridor = city::Corridor::of(&paths, COURSE_HALF_WIDTH);
+            let name = std::path::Path::new(&file)
+                .file_stem()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned();
+            println!(
+                "route {name}: {} paths · {} segments · {:.0} m of line · corridor half-width {COURSE_HALF_WIDTH} m",
+                paths.len(),
+                corridor.segments(),
+                paths.iter().map(city::RoutePath::length).sum::<f32>()
+            );
+            (paths, Some(Course { corridor, fix: None, off_for: 0.0, name }))
+        }
+    };
+
+    let course_start = city::start_of(&course_paths);
+
+    // A race has a start line, and it is the only thing in the data that names one: the point of
+    // least `progress`. It takes precedence over the downtown default, and gives the car a heading
+    // as well — a grid position pointing at a wall is worse than no grid position.
+    let (at, start_heading) = match (named_at, course_start) {
+        (false, Some((p, dir))) => {
+            println!("starting on the race line at {p:?}");
+            (p, Some(dir))
+        }
+        _ => (at, None),
+    };
+
     let at = match ground.height_at(at + Vec3::Y * SPAWN_PROBE) {
         Some(y) => {
             println!("ground at ({:.0},{:.0}) is y={y:.2} — asked, not guessed", at.x, at.z);
@@ -259,29 +296,6 @@ fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> CruiseState
     // NFS_ROUTE=<Paths*.bin>: the race being driven. Its paths are stood on the city and kept as
     // a corridor, because "off the course" cannot be read from the install — there are no barriers
     // in it — and the race's own network is what it has to be derived from.
-    let (course_paths, mut course) = match std::env::var("NFS_ROUTE") {
-        Err(_) => (Vec::new(), None),
-        Ok(file) => {
-            let bytes = std::fs::read(&file).unwrap_or_else(|e| panic!("read {file}: {e}"));
-            let nodes =
-                gizmo_nfs::world::routes::nodes(&bytes).expect("read the route file's nodes");
-            let paths = city::build_route(&nodes, &city::road_ground(&objects));
-            let corridor = city::Corridor::of(&paths, COURSE_HALF_WIDTH);
-            let name = std::path::Path::new(&file)
-                .file_stem()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .into_owned();
-            println!(
-                "route {name}: {} paths · {} segments · {:.0} m of line · corridor half-width {COURSE_HALF_WIDTH} m",
-                paths.len(),
-                corridor.segments(),
-                paths.iter().map(city::RoutePath::length).sum::<f32>()
-            );
-            (paths, Some(Course { corridor, fix: None, off_for: 0.0, name }))
-        }
-    };
-
     let mut stats = CityStats {
         objects: objects.len(),
         meshes: 0, // the visuals are built below
@@ -428,7 +442,10 @@ fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> CruiseState
         &mut assets,
         &mut phys,
         &car_path,
-        Placement { ground: at, yaw: 0.0, clearance: DROP },
+        match start_heading {
+            Some(h) => Placement::facing(at, h, DROP),
+            None => Placement { ground: at, yaw: 0.0, clearance: DROP },
+        },
     );
     world.insert_resource(assets);
     world.insert_resource(phys);

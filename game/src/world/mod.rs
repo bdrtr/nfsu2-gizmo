@@ -39,7 +39,10 @@ pub use collide::{
     WALL_NORMAL_Y,
 };
 pub use load::{bundles, load, start_at, tracks_path, Bundles};
-pub use route::{build as build_route, is_road, ribbon, road_ground, Corridor, Fix, RoutePath};
+pub use route::{
+    build as build_route, is_road, ribbon, road_ground, start_of, Checkpoints, Corridor, Fix,
+    RoutePath,
+};
 pub use tiers::SharedTextures;
 
 use gizmo::prelude::*;
