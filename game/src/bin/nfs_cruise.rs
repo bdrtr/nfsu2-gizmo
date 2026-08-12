@@ -613,8 +613,12 @@ fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> CruiseState
     // a ribbon that disagreed about where the road is would be very hard to read.
     let net = city::Network::of(&route_nodes, &ground);
     if !net.is_empty() {
-        let (edges, dead) = net.shape();
-        println!("network: {} nodes · {edges} links · {dead} with no way out", net.len());
+        let (edges, dead, steep) = net.shape();
+        println!(
+            "network: {} nodes · {edges} links · {dead} with no way out · {steep} too steep to \
+             drive (a deck above, not a ramp)",
+            net.len()
+        );
     }
     let course_line: Vec<Vec3> = course_event
         .as_ref()
@@ -871,6 +875,36 @@ fn diagnose(world: &World, state: &mut CruiseState, pose: nfsu2::rig::Pose) {
             }
             let moved = state.field.iter().filter(|(_, p)| p.passed() > 0).count();
             let junctions: usize = state.field.iter().map(|(_, p)| p.passed()).sum();
+            // Where each of them actually is, once a second. A field that stops in one place is an
+            // obstacle; a field that stops in seven is the driver.
+            if std::env::var("NFS_FIELD").is_ok() {
+                for (k, (rig, pl)) in state.field.iter().enumerate() {
+                    if let Some(p) = rig.pose(world) {
+                        println!(
+                            "    rival {k}: ({:>7.0},{:>7.0}) {:>4.0} km/h · node {:?} · \
+                             {} junctions · waypoint {}",
+                            p.position.x,
+                            p.position.z,
+                            p.speed * 3.6,
+                            pl.node(),
+                            pl.passed(),
+                            pl.goal()
+                        );
+                        if let Some(j) = pl.node().and_then(|i| state.net.node(i)) {
+                            println!(
+                                "        node at ({:>7.0},{:>6.1},{:>7.0}) · {:.0} m away, {:.1} m \
+                                 above · links {:?}",
+                                j.at.x,
+                                j.at.y,
+                                j.at.z,
+                                (Vec3::new(j.at.x, 0.0, j.at.z) - Vec3::new(p.position.x, 0.0, p.position.z)).length(),
+                                j.at.y - p.position.y,
+                                j.links
+                            );
+                        }
+                    }
+                }
+            }
             let lead = state.field.first().and_then(|(r, _)| r.pose(world));
             let (lp, ls) = lead.map_or((Vec3::ZERO, 0.0), |p| (p.position, p.speed));
             println!(

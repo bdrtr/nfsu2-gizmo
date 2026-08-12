@@ -58,12 +58,39 @@ impl Network {
     /// one side.
     #[must_use]
     pub fn of(nodes: &[RouteNode], ground: &Ground) -> Self {
+        // Heights the same way the drawn line gets them, and for the same reason. Asking
+        // `height_at` from two metres up answers "the highest surface at or below two metres",
+        // which on an elevated road is **nothing** — the node then falls back to zero and sits ten
+        // metres under the tarmac. Six of seven rivals drove into the ground aiming at one.
+        //
+        // `route::follow` is the fix already written: every candidate surface at the node's XZ,
+        // then the sequence over the path that climbs least. Shared rather than reimplemented, so
+        // a car and a ribbon cannot end up on different decks of the same interchange.
+        let flat: Vec<Vec3> = nodes.iter().map(|n| remap([n.x, n.y, 0.0])).collect();
+        let mut height: Vec<f32> = vec![0.0; nodes.len()];
+        let mut i = 0;
+        while i < nodes.len() {
+            let mut j = i;
+            while j + 1 < nodes.len() && nodes[j + 1].path == nodes[i].path {
+                j += 1;
+            }
+            let candidates: Vec<Vec<f32>> =
+                (i..=j).map(|k| ground.heights_at(flat[k].x, flat[k].z)).collect();
+            let mut solved = super::route::follow(&candidates);
+            super::route::fill(&mut solved);
+            for (k, h) in (i..=j).zip(&solved) {
+                height[k] = h.unwrap_or(0.0);
+            }
+            i = j + 1;
+        }
+
         let mut out: Vec<Junction> = nodes
             .iter()
-            .map(|n| {
-                let flat = remap([n.x, n.y, 0.0]);
-                let y = ground.height_at(flat + Vec3::Y * 2.0).unwrap_or(flat.y);
-                Junction { at: Vec3::new(flat.x, y, flat.z), path: n.path, links: Vec::new() }
+            .enumerate()
+            .map(|(k, n)| Junction {
+                at: Vec3::new(flat[k].x, height[k], flat[k].z),
+                path: n.path,
+                links: Vec::new(),
             })
             .collect();
 
@@ -103,14 +130,34 @@ impl Network {
         self.nodes.get(i as usize)
     }
 
-    /// The node nearest a point, in the ground plane.
+    /// How steep a link is, as rise over run.
+    ///
+    /// Reported, not enforced. Refusing steep links was tried — the idea being that Bayview stacks
+    /// and a graph measured in the ground plane would route a car onto the deck above — and it is
+    /// **refuted**: at every threshold swept the field got *less* far than with no filter at all
+    /// (0.30 → 34 junctions, 0.60 → 29, 1.00 → 33, none → the furthest, reaching the second
+    /// waypoint). The city's ramps are steeper than they look and the filter cuts them, so a
+    /// number that was meant to keep cars off bridges keeps them off roads.
+    #[must_use]
+    fn grade(&self, a: u32, b: u32) -> f32 {
+        match (self.node(a), self.node(b)) {
+            (Some(x), Some(y)) => {
+                let flat = ((y.at.x - x.at.x).powi(2) + (y.at.z - x.at.z).powi(2)).sqrt();
+                (y.at.y - x.at.y).abs() / flat.max(0.001)
+            }
+            _ => 0.0,
+        }
+    }
+
+    /// The node nearest a point — **in three dimensions**, because the ground plane is not enough
+    /// where the city has four roads above one another.
     #[must_use]
     pub fn nearest(&self, to: Vec3) -> Option<u32> {
         self.nodes
             .iter()
             .enumerate()
             .min_by(|a, b| {
-                let d = |j: &Junction| (j.at.x - to.x).powi(2) + (j.at.z - to.z).powi(2);
+                let d = |j: &Junction| (j.at - to).length_squared();
                 d(a.1).total_cmp(&d(b.1))
             })
             .map(|(i, _)| i as u32)
@@ -142,10 +189,16 @@ impl Network {
     /// Reported rather than assumed: a node with no way out is a car that stops, and the count is
     /// the difference between "the driver is bad" and "the road ends here".
     #[must_use]
-    pub fn shape(&self) -> (usize, usize) {
+    pub fn shape(&self) -> (usize, usize, usize) {
+        let steep = (0..self.nodes.len())
+            .flat_map(|i| self.nodes[i].links.iter().map(move |l| (i as u32, *l)))
+            .filter(|(a, b)| self.grade(*a, *b) > 1.0)
+            .count()
+            / 2;
         (
             self.nodes.iter().map(|n| n.links.len()).sum::<usize>() / 2,
             self.nodes.iter().filter(|n| n.links.is_empty()).count(),
+            steep,
         )
     }
 }

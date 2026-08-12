@@ -619,7 +619,7 @@ fn point_to_segment(p: Vec3, a: Vec3, b: Vec3) -> (f32, f32) {
 ///
 /// Nodes the city could not answer for are left `None` here and filled by [`fill`]; they carry no
 /// cost, so a hole does not decide anything for its neighbours.
-fn follow(candidates: &[Vec<f32>]) -> Vec<Option<f32>> {
+pub(crate) fn follow(candidates: &[Vec<f32>]) -> Vec<Option<f32>> {
     let live: Vec<usize> = (0..candidates.len()).filter(|i| !candidates[*i].is_empty()).collect();
     let mut out = vec![None; candidates.len()];
     let Some((&first, rest)) = live.split_first() else { return out };
@@ -675,7 +675,7 @@ fn follow(candidates: &[Vec<f32>]) -> Vec<Option<f32>> {
 ///
 /// All-unknown stays all-unknown: inventing a height for a path the city knows nothing about would
 /// put a race line at `y = 0` and let it look like it had been placed.
-fn fill(heights: &mut [Option<f32>]) -> usize {
+pub(crate) fn fill(heights: &mut [Option<f32>]) -> usize {
     let known: Vec<usize> = (0..heights.len()).filter(|i| heights[*i].is_some()).collect();
     if known.is_empty() || known.len() == heights.len() {
         return 0;

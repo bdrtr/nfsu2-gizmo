@@ -86,6 +86,12 @@ impl Pilot {
         self.passed
     }
 
+    /// Which node of the network it is on.
+    #[must_use]
+    pub fn node(&self) -> Option<u32> {
+        self.at
+    }
+
     /// Which waypoint it is heading for.
     #[must_use]
     pub fn goal(&self) -> usize {

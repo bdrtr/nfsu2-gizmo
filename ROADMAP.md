@@ -360,7 +360,34 @@ Sonuç: lider **89 km/h**'ye çıkıyor, **~700 m** gidiyor, yol noktası 1'den 
 
 Hâlâ duruyorlar. Ama artık durdukları yer bir teşhis sorusu, mekanizma sorusu değil.
 
-Sıradaki iş: yürüyüşün neden durduğunu bulmak. Duruş noktası ya `seen_path` koruması ya da
+### Nerede durduklarını sorduk: bir yerde, ve iki hipotez daha eledik
+
+`NFS_FIELD=1` her rakibin konumunu, düğümünü, kavşak sayısını ve yol noktasını saniyede bir
+yazıyor. Cevap net: **yedinin altısı tam olarak aynı yerde** duruyor — düğüm 132, (-85, 1075),
+hepsi 21 kavşak sonra. Yani sistemik bir sürücü sorunu değil, belirli bir engel.
+
+Orayı çizdirdim: **çok katlı otoyol kavşağı**, ve yarış çizgisi şeridi birkaç katta birden
+görünüyor. Buradan iki hipotez çıktı, ikisi de ölçüldü:
+
+**1. Ağ yüksekliğe kör (doğru çıktı, ve ciddi bir hataydı).** `Network::of` düğüm yüksekliğini
+`height_at`'e 2 m'den soruyordu. O fonksiyon "verilen noktanın altındaki en yüksek yüzey"i döndürür
+— yükseltilmiş bir yolda bu **hiçbir şey**, ve düğüm sıfıra düşüyordu. Ölçüm: düğüm 132'nin
+yüksekliği `0.0`, araba onun **10,3 m üstünde**. Pilot yer altındaki bir noktaya nişan alıyordu.
+
+Düzeltme: yükseklikler artık çizilen çizginin kullandığı yolla çözülüyor — `route::follow`, yani
+düğümün XZ'sindeki bütün aday yüzeyler ve yol boyunca en az tırmanan dizi. Paylaşıldı, yeniden
+yazılmadı; araba ile şerit aynı kavşağın farklı katlarında olamasın diye.
+
+**2. Dik bağları reddet (çürüdü).** "Şehir kat kat, düz düzlemde ölçen bir graf arabayı üst deste
+yollar" fikri makul ama yanlış. Eşiği süpürdüm ve **her eşikte filtresiz durumdan daha kötü**:
+0.30 → 34 kavşak, 0.60 → 29, 1.00 → 33, filtresiz → en uzağı, ikinci yol noktasına ulaşan.
+Şehrin rampaları göründüğünden dik; arabaları köprüden uzak tutması beklenen sayı onları yoldan
+uzak tutuyor. Filtre kaldırıldı, eğim yalnız rapor ediliyor.
+
+Düğüm 132'deki engel hâlâ orada. Ama artık yüksekliği doğru, ve tıkanma yeri bir soru olarak
+keskin: altı araba oraya varıyor, yedincisi ızgaradan hiç çıkamıyor.
+
+Sıradaki iş: düğüm 132'de ne olduğunu görmek. Duruş noktası ya `seen_path` koruması ya da
 "ilerlemeyi sürdüren bağlantı yok" — ikisi ayırt edilebilir ve ayırt edilmeli.
 
 ---
