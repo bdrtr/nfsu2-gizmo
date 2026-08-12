@@ -531,7 +531,28 @@ Parkur başına en uzağa varan araba: 4041 **1944 m**, 4061 1817 m, 4121 1624 m
 4081 746 m, 4102 640 m, 4021 358 m — ve 4002 **42 m**, tek gerçekten çakılı kalan.
 
 Sınır: sekiz parkurun yedisinde alan yola çıkıyor ve bir kısmı kilometrelerce gidiyor; 64 arabanın
-29'u sürüyor. Duruş noktası ya `seen_path` koruması ya da
+29'u sürüyor.
+
+### 4002: dosyanın çizgisi ayırıcıların üstünden geçiyor
+
+Tek gerçekten çakılı parkuru izledim. Araba kalkıyor (29,7 km/h), bir kavşak geçiyor, sonra
+(882, 462)'de duruyor ve orada kalıyor. Devrilmemiş — `up` 0,97, yani ~15° eğik — ve zeminin
+0,95 m üstünde, yani normal duruyor ama yatık.
+
+Üstten bakınca sebep göründü: geniş bir otoyol, ortasından **sarı çizgili yükseltilmiş ayırıcılar**
+geçiyor, ve yarış çizgisi keskin bir V yapıp onları kesiyor. Araba ayırıcıya tırmanıp kalıyor.
+
+Duvar filtresi bunu göremiyor ve **göremez**: bordürün üstünde sürülebilir yüzey var, yani "yol
+burada mı" sorusuna evet diyor. Basamağa bakan bir ek kural yazdım ve o da çürüdü — 4002'yi
+düzeltmiyor (hâlâ 42 m) ve çalışanları bozuyor: 4001 991 → 268 m, 4081 746 → 333 m, sekiz parkur
+toplamı 8,1 → 6,8 km, denenen her eşikte. Bordürü yakalayacak kadar keskin her kural, yol olan
+tümsek ve çukurları da kesiyor.
+
+**Bu oturumda ağ üzerine denenen dört geometrik filtrenin dördü de çürüdü** (eğim, koni, hıza bağlı
+kilit, basamak). Deseni yazıyorum çünkü beşincisini denemek cazip: bu filtreler engelleri
+kesmekten daha hızlı gerçek yolları kesiyor. Kalan açıklama, çizginin gerçekten oradan geçtiği —
+NFSU2 yarışları karşı şeridi belirli boşluklardan kullanır, ve bizim ağ + yol noktası
+yaklaşımımız o boşluğu bulmak yerine köşeyi kesiyor. Duruş noktası ya `seen_path` koruması ya da
 "ilerlemeyi sürdüren bağlantı yok" — ikisi ayırt edilebilir ve ayırt edilmeli.
 
 ---

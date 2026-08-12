@@ -146,6 +146,13 @@ impl Network {
         if tolerance <= 0.0 {
             return;
         }
+        // Only one thing is asked along a link: is the road *there*. Asking whether it is also
+        // *level* — no step from one sample to the next, which is what a raised kerb is and what
+        // `Paths4002`'s field piled into — is **refuted**. It does not fix the route it was written
+        // for (still 42 m) and it costs the ones that worked: 4001 falls from 991 m to 268 m,
+        // 4081 from 746 to 333, and the eight-route total from 8.1 km to 6.8 km at every threshold
+        // swept. A kerb has a drivable surface on top, so it passes "is there road here" — and
+        // every rule sharp enough to catch it cuts crests and dips that are road.
         let solid = |a: Vec3, b: Vec3| {
             let d = Vec3::new(b.x - a.x, 0.0, b.z - a.z);
             let n = (d.length() / STEP).ceil().max(1.0) as usize;

@@ -250,8 +250,14 @@ async fn run() {
                         let (nx, ny, nz, gap) = n.map_or((0.0, 0.0, 0.0, 0.0), |j| {
                             (j.at.x, j.at.y, j.at.z, (j.at - q.position).length())
                         });
+                        // Which way is up, and what is underneath. A car on its roof reports a
+                        // pose like any other and sits perfectly still, which from a summary is
+                        // indistinguishable from a car against a wall.
+                        let up = (q.rotation * Vec3::Y).y;
+                        let under = ground.heights_at(q.position.x, q.position.z);
                         println!(
                             "    watch {k} t={now:>5.1}s ({:>7.1},{:>6.2},{:>7.1}) {:>5.1} km/h · \
+                             up {up:>5.2} · under {under:?} · \
                              node {:?} ({:>7.1},{:>6.2},{:>7.1}) {gap:>5.1} m · {} junctions",
                             q.position.x,
                             q.position.y,
