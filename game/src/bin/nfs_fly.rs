@@ -89,11 +89,14 @@ fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> FlyState {
         }
     }
 
+    // The two arms the engine gained and nothing was pulling — `scene::city_lift`.
+    let lift = scene::city_lift();
     for m in &city.meshes {
         let material = match m.texture.and_then(|k| bound.get(&k)) {
             Some(bg) => Material::new(bg.clone()).with_baked_lit(Vec4::new(1.0, 1.0, 1.0, 1.0)),
             None => Material::new(white.clone()).with_baked_lit(Vec4::new(0.35, 0.35, 0.38, 1.0)),
         };
+        let material = material.with_ambient(lift.0).with_emissive(lift.1);
         scene::spawn_mesh(world, m.mesh.clone(), material, Transform::new(m.origin));
     }
 

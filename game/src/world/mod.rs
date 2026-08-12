@@ -38,11 +38,14 @@ pub use collide::{
     collision_cells, surface_of, Bounds, CityCollider, Ground, Surface, GROUND_CELL,
     WALL_NORMAL_Y,
 };
-pub use load::{bundle_for_route, bundles, load, start_at, tracks_path, Bundles};
+pub use load::{
+    bundle_for_route, bundles, free_roam_bundle, load, place_of, start_at, tracks_path, Bundles,
+    Place, REGIONS,
+};
 pub use route::{
-    build as build_route, is_road, ribbon, road_ground, start_grid, start_of, Checkpoints, Corridor,
-    Fix,
-    RoutePath,
+    build as build_route, free_roam_spots, free_roam_start, is_road, ribbon, road_ground,
+    start_grid, start_grid_facing, start_of, Checkpoints, Corridor, Fix, RoutePath,
+    FREE_ROAM_TRACK,
 };
 pub use tiers::SharedTextures;
 

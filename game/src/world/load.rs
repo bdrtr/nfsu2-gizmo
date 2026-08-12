@@ -139,3 +139,82 @@ pub fn bundle_for_route(route: &std::path::Path) -> Option<std::path::PathBuf> {
     let bundle = dir.parent()?.join(format!("STREAM{region}.BUN"));
     bundle.is_file().then_some(bundle)
 }
+
+/// What kind of place a region is.
+///
+/// Three things had to line up before these labels were more than a guess, and they do:
+/// which track numbers live in the region's `ROUTES` directory, how much free-roam data its
+/// `PathsFreeRoam.bin` carries, and where its terrain actually sits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Place {
+    /// Bayview itself — the free-roam city.
+    City,
+    /// The city again, near enough to be a copy, packed for a handful of its own races.
+    CityAgain,
+    /// A standalone venue: its own ground, its own patch of the coordinate system.
+    Arena,
+    /// Ships with the game, hosts no event, and is not part of the map.
+    TestTrack,
+}
+
+/// The eight `STREAM*.BUN` regions and what each one is.
+///
+/// The counts are from the install and are what the labels rest on. `tracks` is the number of
+/// `Paths####.bin` beside the bundle; `free_roam` the byte length of `PathsFreeRoam.bin`'s
+/// `0x0003414A` region chunk; `ground` the extent of the bundle's own `TRN_*` terrain, backdrop
+/// excluded, because the backdrop is fifteen kilometres wide and would drown the answer.
+///
+/// | region | tracks | numbers | free_roam | ground centre | ground |
+/// |--------|--------|---------|-----------|---------------|--------|
+/// | L4RA   | 60     | 40xx 41xx | 69,628  | (−540, 606)   | 5328 × 5188 |
+/// | L4RB   |  9     | 42xx    |  1,700    | (490, −1250)  | 3741 × 3977 |
+/// | L4RC   | 12     | 43xx    |    700    | (−157, 9)     | 1820 × 2571 |
+/// | L4RD   |  3     | 44xx    | 32,164    | (−540, 606)   | 5328 × 5188 |
+/// | L4RF   |  8     | 46xx    |    672    | (1193, 960)   | 1994 × 1507 |
+/// | L4RG   | 13     | 47xx    |  1,600    | (458, −533)   | 3708 × 5411 |
+/// | L4RH   |  0     | —       |  1,600    | (−1, 1)       |  435 × 1147 |
+/// | L4RR   |  0     | —       |      0    | (0, 0)        | 2800 × 2800 |
+///
+/// **This is why the city looked like worlds stacked inside a skydome.** Six of the eight are not
+/// parts of one map that tile together — they are separate places that share an origin. Load them
+/// at once and L4RD lands exactly on top of L4RA while four arenas and two test tracks sit through
+/// the middle of it. `L4RH` and `L4RR` give themselves away twice over: no events at all, and
+/// terrain built out of `TRN_ROADA`/`TRN_TERRAINA` in a 2800 × 2800 square centred on the origin.
+///
+/// `L4RD` is the one real ambiguity. Its ground is the city's, to the metre, and it holds *more*
+/// objects than `L4RA` (11,135 against 10,735) — but 70 of them are `ZPM_4401`/`ZPM_4402` props
+/// for its own three races, and its free-roam chunk is less than half the size. So `L4RA` is the
+/// city and `L4RD` is a race packing of it, not the other way round.
+pub const REGIONS: [(&str, Place); 8] = [
+    ("L4RA", Place::City),
+    ("L4RB", Place::Arena),
+    ("L4RC", Place::Arena),
+    ("L4RD", Place::CityAgain),
+    ("L4RF", Place::Arena),
+    ("L4RG", Place::Arena),
+    ("L4RH", Place::TestTrack),
+    ("L4RR", Place::TestTrack),
+];
+
+/// What a region is, or `None` for a name that is not one.
+#[must_use]
+pub fn place_of(region: &str) -> Option<Place> {
+    REGIONS.iter().find(|(k, _)| *k == region).map(|(_, p)| *p)
+}
+
+/// The bundle the free-roam city is made of.
+///
+/// One bundle, not a set: `STREAML4RA.BUN`. See [`REGIONS`] for what the other seven are and why
+/// loading them together is what produced a city with several grounds.
+///
+/// The `PathsFreeRoam.bin` beside it is worth knowing about but is *not* a route: all eight of them
+/// carry no node table — they are exactly the eight files in the install that don't — and hold only
+/// the `0x0003414A` region chunk and `0x0003414D`. Both are byte-identical to the copies inside
+/// every race file of the same region (60/60 in L4RA, and the same in the other five), so a race
+/// file is its region's free-roam data with the AI network and the event catalogue appended.
+/// Free roam has no path to follow, which is the point of it.
+#[must_use]
+pub fn free_roam_bundle(tracks: &std::path::Path) -> Option<std::path::PathBuf> {
+    let bundle = tracks.join("STREAML4RA.BUN");
+    bundle.is_file().then_some(bundle)
+}

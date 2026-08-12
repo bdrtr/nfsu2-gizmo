@@ -30,7 +30,7 @@
 
 use super::{collision_cells, remap, Ground};
 use gizmo::prelude::*;
-use gizmo_nfs::world::routes::{paths, RouteNode, StartMarker};
+use gizmo_nfs::world::routes::{paths, RaceEvent, RouteNode, StartMarker};
 use gizmo_nfs::world::WorldMesh;
 
 /// Whether a city object is road surface.
@@ -141,9 +141,32 @@ pub fn build(nodes: &[RouteNode], ground: &Ground) -> Vec<RoutePath> {
 ///
 /// What the file does *not* say is which end is the front. Pole leads, so the row holding slots
 /// `0..3` is taken as the front one and the car faces away from the row behind it. A track carries
-/// two grids, one per race direction, and this returns the first — settling which is which, and the
-/// sign along with it, is what the `Routes####F.bin` / `Routes####B.bin` files are for, and they are
-/// not read yet. Both mistakes look the same and cost one line: a car facing backwards.
+/// two grids, one per race direction, and this returns the first. Both mistakes look the same and
+/// cost one line: a car facing backwards.
+///
+/// **"The first" turns out to be right, and that is now measured rather than hoped.** A track's two
+/// grids really are its two race directions: of 86 tracks with exactly two, **74 have them facing
+/// opposite ways**, and in **82** exactly one of the two agrees with the direction the event's
+/// outline is drawn in. Held against that, the first grid is the agreeing one in **81 of those 82**
+/// — against the 41 a coin flip would give. So the file's own grid order carries the answer, and
+/// this function was accidentally right.
+///
+/// [`start_grid_facing`] derives it instead of assuming it and fixes the remaining one. Prefer it
+/// where the event is at hand; this stays as the fallback for when it is not.
+///
+/// What none of this settles is the global sense of the front/back rule. If slots `0..3` were the
+/// back row everywhere, the same 81 of 82 would hold with every grid's heading flipped. It is one
+/// global bit rather than a per-race coin flip, and a wrong one shows up as every car on every race
+/// facing backwards — visible in a single run.
+///
+/// **The `Routes####F.bin` / `Routes####B.bin` files were expected to settle this and do not.**
+/// They are read now — `gizmo_nfs::world::routes::lanes` — and they do say what a forward and a
+/// backward reading of a route differ by: the same blocks, same names, same order, same point
+/// counts, with only the along-route measure taken from opposite ends. But that measure runs along
+/// a *block*, and a block is a stretch of road shared between races rather than one race's line, so
+/// it does not locate a start. Asked directly, of 442 full grids the nearest lane point puts 116
+/// near a block's start, 54 near its end and 212 in the middle — no answer. The assumption stands
+/// and is still an assumption.
 #[must_use]
 pub fn start_grid(markers: &[StartMarker], event: u16) -> Option<(Vec3, Vec3)> {
     let grid = gizmo_nfs::world::routes::grids(markers)
@@ -155,6 +178,123 @@ pub fn start_grid(markers: &[StartMarker], event: u16) -> Option<(Vec3, Vec3)> {
     let (front, back) = (mean(&grid[..4]), mean(&grid[4..]));
     let heading = (front - back).normalize_or_zero();
     (heading != Vec3::ZERO).then(|| (remap(grid[0].at), heading))
+}
+
+/// Where a race starts, with the two grids told apart by the event's own outline.
+///
+/// [`start_grid`] returns the first of a track's two grids; this returns the one whose derived
+/// heading agrees with the direction [`RaceEvent::outline`] is drawn in. Measured over the install:
+/// of 86 tracks with exactly two full grids, 74 have the two facing opposite ways and **82 have
+/// exactly one of the two agreeing with the outline**, so the outline is a real selector and not a
+/// tie-break dressed up as one.
+///
+/// **It changes the answer for exactly one track.** The first grid is already the agreeing one in
+/// 81 of the 82, which is the useful finding here — the file's grid order means something — and it
+/// makes this function a derivation of a rule that was being assumed, plus one fix, rather than the
+/// correction of a coin flip. Worth having for the derivation; not worth overstating.
+///
+/// Falls back to [`start_grid`] when the event has no usable outline, so a caller never loses a
+/// spawn to a missing one.
+#[must_use]
+pub fn start_grid_facing(markers: &[StartMarker], event: &RaceEvent) -> Option<(Vec3, Vec3)> {
+    let fallback = || start_grid(markers, event.id);
+    if event.outline.len() < 2 {
+        return fallback();
+    }
+    let mean = |slots: &[StartMarker]| {
+        slots.iter().fold(Vec3::ZERO, |a, m| a + remap(m.at)) / slots.len() as f32
+    };
+    let mut best: Option<(f32, Vec3, Vec3)> = None;
+    for grid in gizmo_nfs::world::routes::grids(markers)
+        .into_iter()
+        .filter(|g| g[0].track == u32::from(event.id))
+    {
+        let (front, back) = (mean(&grid[..4]), mean(&grid[4..]));
+        let heading = (front - back).normalize_or_zero();
+        if heading == Vec3::ZERO {
+            continue;
+        }
+        let centre = (front + back) * 0.5;
+        // The outline is in the file's own 2-D frame, so bring it into ours the same way a marker
+        // comes: through `remap`, with no height to speak of.
+        let seg = event
+            .outline
+            .windows(2)
+            .map(|w| {
+                let (a, b) = (remap([w[0][0], w[0][1], 0.0]), remap([w[1][0], w[1][1], 0.0]));
+                ((a.midpoint(b) - centre).length_squared(), b - a)
+            })
+            .min_by(|x, y| x.0.total_cmp(&y.0));
+        let Some((d, dir)) = seg else { continue };
+        let along = heading.dot(dir.normalize_or_zero());
+        // Nearest segment wins the tie; among grids, the one that agrees wins outright.
+        let score = if along >= 0.0 { -d } else { f32::MIN };
+        if best.as_ref().is_none_or(|(s, _, _)| score > *s) {
+            best = Some((score, remap(grid[0].at), heading));
+        }
+    }
+    best.map(|(_, at, dir)| (at, dir)).or_else(fallback)
+}
+
+/// The track id free roam's own markers carry.
+///
+/// Not a race number: no `Paths4000.bin` exists. It is the id the free-roam markers are filed
+/// under, and it appears nowhere else.
+pub const FREE_ROAM_TRACK: u16 = 4000;
+
+/// Where free roam starts, and the way the car faces.
+///
+/// `TrackPosMarkersFreeRoam.bin` holds no route and one grid. In `ROUTESL4RA` — the only region
+/// whose copy has any content at all, the other seven being 16-byte shells — it holds 32 markers
+/// in 25 groups, every one of them `track 4000`: **one full eight-car grid** and 24 lone points.
+/// This returns the grid, through the same derivation [`start_grid`] uses, so a free-roam spawn
+/// and a race spawn are the same code and fail the same way if the front/back reading is wrong.
+///
+/// **The grid's own height is 30 m above the ground and that is not a decoding error.** At its
+/// pole, `(884, −1695)` in the engine's frame, the marker says `y = 53.5` and the only surface the
+/// city offers is `23.8` — with the coarse tiers restored, and with all eight bundles loaded, still
+/// only `23.8`. The height field is not in doubt: across the install's start markers, 140 of 141
+/// race grids that have a road under them sit within **1 m** of it (median −0.0, p05 −0.5, p95
+/// +0.3), and 22 of the 24 free-roam spots do too. This one grid floats, along with the lone marker
+/// sharing its position, and the reason is not known.
+///
+/// So the caller must put the car down rather than trust the number — which `nfs_cruise` already
+/// does for every spawn, and the car lands on four wheels and drives. The grid is still worth
+/// having over a spot because it carries a *heading*, and a spawn without one faces a wall.
+#[must_use]
+pub fn free_roam_start(markers: &[StartMarker]) -> Option<(Vec3, Vec3)> {
+    start_grid(markers, FREE_ROAM_TRACK)
+}
+
+/// The lone free-roam markers, nearest-first from a point — places in the city the file names.
+///
+/// The 24 are not a grid and are not a route: each is its own group, each holds one slot, and they
+/// are spread over the whole map (x −1929..1698, y −1885..1167 in the file's frame). Their group
+/// ids give the rest away — `540257916`/`540257917`, `931508017`/`931508018`,
+/// `1608732748`/`1608732749`, `3585301327`/`3585301328` are consecutive, and consecutive is what
+/// [`gizmo_nfs::hash`]'s `h * 33 + byte` produces for two names differing in their last character.
+/// So the id is a name hash and these are *named* places — shops, safe houses, the things a free
+/// roam has — not anonymous spawn points.
+///
+/// Which name is which is not answered here; recovering it means hashing candidates against these
+/// ids, the same way a truncated part name is recovered. What is offered is the position, which is
+/// enough to stand somewhere the game itself considers a place.
+///
+/// **They stand on the city.** Asked what surface is under each, 22 of the 24 answer within 1 m of
+/// the marker's own height — which is the check that says both this reading and `remap` are right,
+/// because 24 numbers do not land on a city's surface by accident. The two that do not are 29.7 m
+/// and 180 m up; the first is the one sharing the free-roam grid's position (see
+/// [`free_roam_start`]), and the second is alone.
+///
+/// The order is the group id's, so an index means the same place from one run to the next.
+#[must_use]
+pub fn free_roam_spots(markers: &[StartMarker]) -> Vec<Vec3> {
+    let mut by: std::collections::BTreeMap<u32, Vec<&StartMarker>> =
+        std::collections::BTreeMap::new();
+    for m in markers.iter().filter(|m| m.track == u32::from(FREE_ROAM_TRACK)) {
+        by.entry(m.group).or_default().push(m);
+    }
+    by.into_values().filter(|g| g.len() == 1).map(|g| remap(g[0].at)).collect()
 }
 
 /// Where a race starts when no grid is available: the point of least progress, and the way it faces.

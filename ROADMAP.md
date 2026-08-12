@@ -45,6 +45,202 @@ Kendi kurulumumuza karşı sayıldı (crawl + resync yürüyüşüyle, §1.1):
 Her bölgede mesh sayısı = vertex buffer sayısı = materyal sayısı, tam olarak. Yürüyüşün
 doğru olduğunun kanıtı bu.
 
+### Bu sekizi bir şehrin sekiz parçası değil
+
+Uzun süre "aynı haritanın yarışa özel sürümleri" diye çalıştık. Değiller. Hepsini birlikte
+yükleyince ortaya çıkan şey — bir gök kubbenin içinde üst üste binmiş dünyalar — bir hata değil,
+verinin kendisi: **altısı ayrı yerler ve hepsi aynı orijini paylaşıyor.**
+
+Üç ölçüm aynı yere çıkıyor (`NFS_BUNDLES=1`, ve `PathsFreeRoam.bin`'in `0x3414A` boyutu):
+
+| bölge | parkur | numaralar | free-roam verisi | zemin merkezi | zemin | ne |
+|---|---:|---|---:|---|---|---|
+| `L4RA` | 60 | 40xx 41xx | **69.628 B** | (−540, 606) | 5328 × 5188 | **şehir — free roam** |
+| `L4RD` | 3 | 44xx | 32.164 B | (−540, 606) | 5328 × 5188 | şehir, yeniden paketlenmiş |
+| `L4RB` | 9 | 42xx | 1.700 B | (490, −1250) | 3741 × 3977 | ayrı mekân |
+| `L4RC` | 12 | 43xx | 700 B | (−157, 9) | 1820 × 2571 | ayrı mekân |
+| `L4RF` | 8 | 46xx | 672 B | (1193, 960) | 1994 × 1507 | ayrı mekân |
+| `L4RG` | 13 | 47xx | 1.600 B | (458, −533) | 3708 × 5411 | ayrı mekân |
+| `L4RH` | 0 | — | 1.600 B | (−1, 1) | 435 × 1147 | test pisti |
+| `L4RR` | 0 | — | 0 B | (0, 0) | 2800 × 2800 | test pisti |
+
+Zemin ölçüsü yalnız `TRN_*` üzerinden; arka fon 15 km genişliğinde ve cevabı boğuyor.
+
+- **Bayview `STREAML4RA.BUN`'dur.** Oyunun 105 parkurunun 60'ı orada, ve free-roam bölge verisi
+  ötekilerin 40 katı.
+- `L4RD` tek gerçek belirsizlik: zemini metresine kadar şehrin aynısı ve *daha fazla* nesne
+  taşıyor (11.135'e 10.735). Ama fazlalığın 70'i kendi üç yarışının `ZPM_4401/4402` propları ve
+  free-roam chunk'ı yarıdan küçük. Yani şehir A, D onun yarış paketlemesi.
+- `L4RH` ve `L4RR` kendilerini iki kez ele veriyor: hiç etkinlik yok, ve zemin orijine oturmuş
+  `TRN_ROADA`/`TRN_TERRAINA` karesi. Haritanın parçası değiller, oyunla gelen test pistleri.
+
+**`PathsFreeRoam.bin` bir rota değil.** Sekizinin de düğüm tablosu yok — kurulumdaki tablosuz
+sekiz dosya tam olarak bunlar — sadece `0x3414A` ile `0x3414D` taşıyorlar, ve ikisi de aynı
+bölgenin her yarış dosyasındaki kopyalarıyla bayt-özdeş (L4RA'da 60/60). Yani bir yarış dosyası =
+bölgenin free-roam verisi + AI ağı + etkinlik kataloğu. Free roam'da takip edilecek yol yok.
+
+Tablo `nfsu2::world::REGIONS`'ta, `free_roam_bundle()` ile birlikte.
+
+### Serbest dolaşım sürülebilir durumda
+
+`NFS_FREEROAM=1` (`nfs_cruise`): `STREAML4RA.BUN` yüklenir, araba oyunun kendi free-roam
+ızgarasında doğar, çizgi çizilmez ve "parkur dışı" uyarısı hiç çıkmaz. `NFS_SPOT=<n>` ile
+şehrin 24 adlandırılmış noktasından birine gidilir.
+
+Marker verisi (`ROUTESL4RA/TrackPosMarkersFreeRoam.bin` — içi dolu tek kopya, öbür yedisi 16
+baytlık kabuk): **32 marker, 25 grup, hepsi track 4000.** Bir tam sekiz kişilik ızgara ve 24
+tekil nokta. Grup numaraları hash: `540257916`/`…917`, `931508017`/`…018`,
+`1608732748`/`…749`, `3585301327`/`…328` ardışık, ve `h*33 + byte` son harfi bir artan iki ad
+için tam bunu üretir. Yani bunlar *adlandırılmış* yerler — dükkânlar, evler — anonim doğma
+noktaları değil. Hangi ad hangisi, henüz çözülmedi; kırpılmış parça adı gibi aday hash'leyerek
+çıkar.
+
+**Marker yüksekliği ilk kez sınandı** (`NFS_GRIDS=1`). Bu dosyalarda yükseklik taşıyan tek kayıt
+o ve bugüne kadar hiçbir şey onu kontrol etmemişti:
+
+- altında yol olan **141 yarış ızgarasının 140'ı 1 m içinde** (medyan −0.0, p05 −0.5, p95 +0.3),
+- free roam'un **24 tekil noktasının 22'si 1 m içinde**.
+
+Alanın yükseklik olduğunu ve `remap`'in doğru olduğunu söyleyen ölçüm bu — 24 sayı bir şehrin
+yüzeyine tesadüfen oturmaz. İstisnalar: tek yarış ızgarası (track 4301, kendi bölgesi yüklü
+değilken 10.6 m) ve free roam'un **kendi ızgarası, 29.7 m havada**. O noktada — motor
+çerçevesinde (884, −1695) — şehrin sunduğu tek yüzey 23.8; kaba kademeler geri açılsa da, sekiz
+bundle birden yüklense de hâlâ 23.8. Nedeni bilinmiyor. Çağıran taraf sayıya güvenmek yerine
+arabayı yere indiriyor (`nfs_cruise` zaten her doğuşta bunu yapıyor) ve araba dört tekerlek üstüne
+inip sürüyor. Izgara yine de tekil noktalara tercih ediliyor, çünkü tek o bir **yön** taşıyor.
+
+### `Routes####F/B.bin` çözüldü
+
+226 dosya, ileri/geri çiftler hâlinde. Üç yaprak: `0x34121` 226'sında, `0x34122` 222'sinde (test
+pistleri hariç), `0x34123` yalnız `ROUTESL4RA`'nın 122 dosyasında — hep tam 10.488 bayt ve
+**122'sinde bayt-özdeş**.
+
+**`0x34121` şeritlerdir, ve yürüyüş kendini bildiriyor:** blok = **84 baytlık başlık + (sayaç+1) ×
+56 baytlık kayıt**, sayaç `+52`'deki `u16` — `+54`'te tekrar ediyor ve ikisi 17.226 blokta da
+uyuşuyor. Bu yürüyüş 222 dosyanın **hepsinde** ödemeyi tam tüketiyor. Komşu okumaların hiçbiri
+tüketmiyor: 80 ya da 88 baytlık başlık, 52 ya da 60 baytlık kayıt, `+50` ya da `+56`'dan sayaç —
+altısı da 222 dosyanın 222'sinde uçtan sapıyor. `read_lanes` altısını da reddediyor.
+
+| alan | ne |
+|---|---|
+| `+0`, `+4` | `11, 11` — biçimin imzası, marker kaydındakiyle aynı |
+| `+10` `u16` | bloğun dosya içindeki numarası |
+| `+16`, 16 B | ad: `TrackRoutesA10`…`A64`, 30 tane, `A{grup}{çeşit}` |
+| `+52`, `+54` `u16` | nokta sayısı, iki kez |
+| `+56`, `+60` `f32` | noktaların `along` değerlerinin min/max'ı (17.222'de 16.358, medyan hata 0) |
+| `+68`…`+83` | 16 bayt `0xFF` |
+| kayıt 0 `+12`…`+27` | bloğun kutusu — **17.222'de 17.222 blokta bütün noktalar içinde**, medyan pay tam 10 m |
+| kayıt 1+ `+0`,`+4`,`+8` | x, y, ve yol boyu koordinat |
+
+Ad her zaman `A` ile başlıyor, bölge harfiyle ilgisi yok: `ROUTESL4RG` de `TrackRoutesA50`
+taşıyor, `ROUTESL4RB` de. Grup bir bölgeye değil bölge kümesine ait (`A30` sekizin altısında,
+`A6x` yalnız `ROUTESL4RB`'de), yani bir yer değil bir şerit türü.
+
+**F ile B'nin farkı.** Çiftin üç chunk'ından `0x34123` 60 çiftin 60'ında bayt-özdeş; `0x34121` ve
+`0x34122` 105'inin hepsinde farklı ama 104'ünde aynı uzunlukta. `0x34121` içinde iki dosya **aynı
+blokları, aynı adlarla, aynı sırada, aynı nokta sayılarıyla** taşıyor — ve sıra kesinlikle ters
+değil: F'nin `i`. bloğunu B'nin `n−1−i`. bloğuyla eşleştirmek 7.399 denemede 9, düz eşleştirmek
+5.912 tutuyor. Yalnız iki şey değişiyor: başlığın `+56`/`+60` aralığı ve her noktanın `+8`'i.
+Toplamları blok içinde 7.399'un 5.912'sinde sabit. Yani çift, tek bir geometrinin ölçüsünün iki
+uçtan alınmış hâli.
+
+**Beklediğimizi vermedi, bunu böyle yazıyorum.** Bu dosyaların bir parkurun iki ızgarasından
+hangisini kullandığını ve ızgaranın hangi ucunun ön olduğunu söylemesini bekliyorduk. Söylemiyor:
+`+8` bir *blok* boyunca ilerliyor, blok ise yarışlar arasında paylaşılan bir yol parçası, bir
+yarışın çizgisi değil. Doğrudan sorulduğunda 442 tam ızgaranın en yakın şerit noktası 116'sını
+blok başına, 54'ünü sonuna, 212'sini ortaya koyuyor — cevap yok. `route::start_grid`'deki varsayım
+duruyor ve hâlâ varsayım.
+
+### Izgara sorusu: hangi ızgara çözüldü, ön/arka çözülmedi
+
+Yön sorusunu `0x34122`'nin çözmesini bekledim; çözmüyor. Kayıt düzeni çıktı — **4 baytlık başlık +
+32 baytlık kayıt, 222 dosyanın 222'sinde**, dört alternatif başlık boyu (0/8/12/16) 222'de 0 — ama
+F ile B'de neredeyse her alan değişiyor (%93–99) ve `+8/+10` ne aynı ne takas (25.595 kayıtta
+%0.4/%0.5). İki dosya bu tabloyu baştan kuruyor, sıra eşleşmiyor.
+
+`0x34123` de çözmez, çünkü bölgenin 122 dosyasında bayt-özdeş — yarışa özel hiçbir şey taşıyamaz.
+(Bir önceki turda "en umut verici yer" demiştim, yanlıştı.) Sabit adımlı bir dizi de değil: 16'daki
+otokorelasyon zirvesi `FFFFFFFF, −1, −1, 0` dolgusundan geliyor, kalanlar hiçbir adımda toplanmıyor.
+
+Cevap zaten elimizdeki **etkinlik anahattında** çıktı. Izgaraları anahatla karşılaştırınca:
+
+- İki ızgarası olan **86 parkurun 74'ünde ikisi zıt yöne bakıyor** — yani bir parkurun iki ızgarası
+  gerçekten iki yarış yönü.
+- **82'sinde tam olarak biri** anahattın çizildiği yönle uyuşuyor.
+- Ve o uyuşan, **82'nin 81'inde zaten ilk ızgara** — yazı tura 41 verirdi. Dosyadaki ızgara sırası
+  kendi başına anlamlı; `start_grid`'in "ilkini al" kuralı kazara doğruymuş.
+
+`start_grid_facing` bunu varsaymak yerine türetiyor ve kalan 1 parkuru düzeltiyor. Kazanç küçük;
+değerli olan kuralın artık ölçülmüş olması. **Ön/arka yönünün küresel işareti hâlâ varsayım** —
+slot `0..3` her yerde arka sıra olsaydı aynı 81/82 çıkardı. Ama bu tek bir küresel bit ve yanlışsa
+her yarışta her araba ters bakar, yani bir koşuda görülür.
+
+### `0x3414D` okundu, ama isimlendirilemedi
+
+Paths dosyalarının en büyük okunmamış yaprağıydı; artık okunuyor. **36 baytlık kayıt, 111 dosyada
+118.729 tane**, ve yaprak bölge geneli — bölgenin her dosyasında bayt-özdeş, `PathsFreeRoam.bin`
+dahil.
+
+Kayıt kendi tutarlılığıyla sabitleniyor: `+17`, `+20`'deki sıfır olmayan kelimelerin sayısı ve
+**118.729'un 118.729'unda** öyle; sayacın ötesi hep sıfır, `+16` ve `+19` hep sıfır. 24 baytlık
+okumada bu kural kayıtların %47.3'ünde, 48 baytlıkta %33.5'inde tutuyor; 32 ve 40 tek bir ödemeyi
+bile bölmüyor.
+
+İçerik: medyan **24.4 m** aralıklı iki nokta (p05 7.9, p95 75.1, en uzun 792.6) — kutu değil bir
+**doğru parçası**, çünkü 118.729'un hiçbiri sıfır uzunlukta değil; bir bayrak (115.984 set,
+2.745 clear); ve 1–4 adet 32-bit referans.
+
+**Referanslar isimlendirilemedi, ama üç tahmin öldürüldü:** bölgenin nesne hash'leri değil, doku
+yuvası anahtarları değil, `0x3414A` bölge kimlikleri değil — üçünde de 3.032'de 0. Bütün kurulum
+**159 farklı değer** kullanıyor, dört sıkı kümede (93 · 60 · 5 · 1), küme içinde ardışık koşularla
+— `h*33 + byte`'ın son harfi bir farklı iki ad için verdiği şey. Yani dört aileden ad hash'i gibi
+duruyorlar. Hangi adlar, aday ad listesi olmadan çıkmaz.
+
+`0x34122`'nin alan anlamları, `0x34123` ve `0x34149` okunmadı.
+
+### Kare bütçesi — projenin hiç sahip olmadığı sayı
+
+**Bayview'da serbest dolaşım, araba dahil: medyan 8,0 ms, p95 ~9 ms, en kötü 14,2 ms — 100–126 fps.**
+(`nfs_cruise` artık `NFS_DIAG=1` ile ve HUD'da kare süresini yazıyor; pencere 60 kare.)
+
+Bugüne kadar culling, detay kademesi ve streaming hakkındaki her tartışma **nesne sayısı** üzerinden
+yürüdü, ve nesne sayısı kare süresi değil. Motorun kendi uzamsal indeksi bile belgesinde "BVH 8k
+renderable'ın altında doğrusal taramaya kaybeder, kendi sahneni ölç" diyor. Ölçtük:
+
+| ne | mesh | medyan kare |
+|---|---:|---:|
+| `NFS_TIERS` varsayılan (en ince kademe) | 5.672 | **8,0 ms** |
+| `NFS_TIERS=all` (üç kademe birden) | 6.406 | **9,1 ms** |
+
+%13 daha fazla mesh, %14 daha fazla süre — doğrusal ve küçük. p95 medyanın ~1,5 ms üstünde, yani
+fizik kaynaklı ani sıçrama yok.
+
+**Sonuç:** uzamsal indeks (MOTOR-NOTLARI 2) bu ölçekte alacak bir şey vermiyor ve kapandı; mesafeye
+göre LOD seçimi (madde 8) en fazla 1,1 ms kazandırır, önceliksiz. Bu, M5'i gereksiz kılmaz — M5
+bellek ve birden çok bölge meselesi, bu kare hızı meselesi değil.
+
+### Gökyüzü geldi, ve iki belirtinin tek sebebi çıktı
+
+`nfs_cruise` artık NFSU2'nun kendi boyalı backdrop'unu **varsayılan olarak** çiziyor
+(`NFS_BACKDROP=0` kapatır). Buraya iki hatayı üst üste düzelterek gelindi:
+
+1. **Kameraya kilit.** Motorun `MaterialType::Backdrop`'u üç davranışı ayrılamaz paketliyordu ve
+   biri kameraya kilitti — bir birim-küp skybox için doğru, 12–18 km genişliğindeki dünya konumlu
+   geometri için yıkıcı. Motora `BackdropPlaced` eklendi (`48ac99e`). Ölçüm: kamerayı 1.000 m
+   kaydır, panelin ekranda aynı kalan piksel oranı **%45,4 → %0,0**.
+2. **Dokular hiç yüklenmiyordu.** `nfs_city`'nin yükleme döngüsü yalnız şehrin mesh'lerini
+   geziyordu; backdrop ondan sonra kuruluyordu, yani anahtarları hiç GPU'ya çıkmıyordu ve beyaza
+   düşüyorlardı. Backdrop'un çoğu dokusu şehrin paketlerinde değil, paylaşılan katmanda
+   (`TRACKS/LOC4DYNTEX.BIN`). Düzeltince **85/153 → 153/153** bağlandı, backdrop-only karenin
+   medyanı **199 → 30**. (`nfs_cruise`'da bu hata yoktu, zaten zincirliyordu.)
+
+Ve buradan beklenmedik bir kazanç çıktı: **zemindeki büyük beyaz düz yamalar ayrı bir hata
+değilmiş.** Onlar yansıtıcı yüzeyler — ıslak asfalt, su — ve göğü aynalıyorlar. Beyaz bir
+backdrop'u aynalayınca beyaz görünüyorlardı; gerçek gece silüetini aynalayınca doğru görünüyorlar.
+Bir sebep, iki belirti.
+
+Maliyeti ölçüldü: kare medyanı **8,0 → 8,6 ms**.
+
 ---
 
 ## 1. Ana fikir

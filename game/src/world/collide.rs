@@ -286,7 +286,7 @@ fn surface_y(t: &[Vec3; 3], x: f32, z: f32) -> Option<f32> {
     let l2 = ((c.z - a.z) * (x - c.x) + (a.x - c.x) * (z - c.z)) / det;
     let l3 = 1.0 - l1 - l2;
     let inside = |v: f32| (-1e-4..=1.0 + 1e-4).contains(&v);
-    (inside(l1) && inside(l2) && inside(l3)).then(|| l1 * a.y + l2 * b.y + l3 * c.y)
+    (inside(l1) && inside(l2) && inside(l3)).then_some(l1 * a.y + l2 * b.y + l3 * c.y)
 }
 
 /// Bucket the city's triangles into per-cell collision meshes.

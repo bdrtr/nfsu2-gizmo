@@ -13,6 +13,59 @@ use gizmo::wgpu;
 use gizmo_nfs::CarTypeInfo;
 use std::sync::Arc;
 
+/// How much light the city gets with the sun out of the picture, and how much it makes itself.
+///
+/// The engine's baked-lit path computes `(baked · shadow + ambient) · albedo · texture + emissive`,
+/// and both new terms default to zero — so the arms exist and nothing was pulling them. Bayview
+/// needs them pulled: it is a **night** map whose lighting is baked into vertex colours, and
+/// multiplied straight through, a surface with vertex colour 64 and texture 64 lands at **2.6/255**.
+/// Measured on the street, the frame's 5th percentile sat at 24/255 with the tower reading as a
+/// silhouette with lit windows and nothing in between.
+///
+/// `ambient` goes *inside* the multiply, so it lifts the black end while the texture still decides
+/// what the surface looks like — a dark-albedo wall stays darker than a pale one, which is the
+/// property that makes this a lift rather than a fog. `emissive` is added *after* and is not
+/// touched by the texture, so it is the wrong knob for a city and stays at zero unless asked.
+///
+/// Both are overridable — `NFS_AMBIENT="r,g,b"` or a single number for grey, same for
+/// `NFS_EMISSIVE` — because the right value is a judgement about how a night map should read, and
+/// a judgement left in a constant is one nobody can argue with.
+#[must_use]
+pub fn city_lift() -> (Vec3, Vec3) {
+    fn read(key: &str, fallback: Vec3) -> Vec3 {
+        let Ok(v) = std::env::var(key) else { return fallback };
+        let parts: Vec<f32> = v.split(',').filter_map(|p| p.trim().parse().ok()).collect();
+        match parts[..] {
+            [a] => Vec3::splat(a),
+            [r, g, b] => Vec3::new(r, g, b),
+            _ => fallback,
+        }
+    }
+    (read("NFS_AMBIENT", CITY_AMBIENT), read("NFS_EMISSIVE", Vec3::ZERO))
+}
+
+/// The ambient the city is drawn with by default.
+///
+/// Slightly blue because Bayview's key light is street lighting and sky, not sun, and a neutral
+/// grey lift reads as haze.
+///
+/// The magnitude comes from a sweep rather than from taste. Measured on a street-level frame of
+/// `STREAML4RA`, luminance over the whole frame:
+///
+/// | ambient | median | p05 | p25 | p95 |
+/// |---|---|---|---|---|
+/// | 0.00 | 54 | 24 | 41 | 155 |
+/// | 0.08 | 63 | 28 | 49 | 155 |
+/// | **0.12** | **68** | **30** | **52** | **155** |
+/// | 0.24 | 81 | 35 | 62 | 155 |
+///
+/// **p95 does not move at any setting**, which is the property that makes this safe: the bright end
+/// is texture-dominated and the lift is proportionally nothing there, so neon and lit windows keep
+/// their separation from the dark they sit against. 0.24 was rejected by eye — the frame reads as
+/// overcast rather than as night — and 0.12 is where the road surface and the wall's relief become
+/// legible without the sky-to-ground contrast collapsing.
+pub const CITY_AMBIENT: Vec3 = Vec3::new(0.10, 0.11, 0.14);
+
 /// The four handles every texture upload needs, bundled so call sites stay one line.
 pub struct Textures<'a> {
     /// The asset manager owning the GPU texture cache.
