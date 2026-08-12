@@ -269,6 +269,39 @@ fn pick_grid(markers: &[StartMarker], event: &RaceEvent) -> Option<(Vec<Vec3>, V
     best.map(|(_, slots, dir)| (slots, dir))
 }
 
+/// Split a course outline into steps no longer than `step`, in order.
+///
+/// **An outline is a description, not a line to drive.** `0x3414C` gives 17 corners over 6 km — a
+/// median step of 425 m — so the nearest corner to a starting grid can be 200 m away simply
+/// because the grid is in the middle of one. Measured over eight races, the nearest corner was
+/// 10 and 13 m on two of them and 133 and 197 m on two others, and a pilot aiming that far off
+/// drives that far off.
+///
+/// Subdividing costs nothing and removes the whole class of problem: the course becomes a sequence
+/// of points a car is never far from, and "the waypoint nearest the grid" means what it sounds
+/// like. It adds no information — the corners are still the only thing the file said — it just
+/// stops the gaps between them being places a driver can get lost in.
+///
+/// **40 m came from a sweep over eight races**, counting cars that got away and how far the field
+/// reached: 25 m gave 29 cars and 6.3 km, **40 m gave 29 and 8.1 km**, 80 m gave 27 and 7.8 km,
+/// 200 m gave 24 and 6.8 km, and leaving the outline alone gave 20 and 6.7 km. Too fine and the
+/// pilot chases a point under its own bumper; too coarse and the gaps come back.
+#[must_use]
+pub fn densify(outline: &[Vec3], step: f32) -> Vec<Vec3> {
+    let mut out = Vec::new();
+    for w in outline.windows(2) {
+        let (a, b) = (w[0], w[1]);
+        let n = ((b - a).length() / step).ceil().max(1.0) as usize;
+        for k in 0..n {
+            out.push(a.lerp(b, k as f32 / n as f32));
+        }
+    }
+    if let Some(last) = outline.last() {
+        out.push(*last);
+    }
+    out
+}
+
 /// The track id free roam's own markers carry.
 ///
 /// Not a race number: no `Paths4000.bin` exists. It is the id the free-roam markers are filed

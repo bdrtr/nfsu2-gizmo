@@ -503,8 +503,35 @@ Sonuç: 4021 **0/8 → 5/8** (0 → 109 kavşak, wp0 → wp11), 4061 0 → 12 ka
 wp2, 4002 wp0 → wp9. **Artık sekiz parkurun sekizinde de yol noktası ilerliyor**, hiçbiri 0'da
 kalmıyor. 4102 8/8'den 7/8'e indi, tek kayıp.
 
-Kalan: dört parkurda arabalar hareket ediyor ama hâlâ uzağa gidemiyor. Sınır artık "ölü" değil
-"zayıf". Duruş noktası ya `seen_path` koruması ya da
+### Anahattı sıklaştır: 20 araba → 29, 6,7 km → 8,1 km
+
+Kalan zayıflığın sebebi aynı ailedendi. Anahat kaba: 6 km'de 17 köşe, medyan adım 425 m. Izgara iki
+köşenin ortasına düşerse **en yakın** yol noktası bile yüzlerce metre uzakta oluyor — 4002'de 133 m,
+4061'de 197 m. Pilot oraya nişan alıyor ve parkurdan sapıyor.
+
+`route::densify` anahattı 40 m'lik adımlara bölüyor. Bilgi eklemiyor — köşeler dosyanın söylediği
+tek şey olarak kalıyor — sadece aralarındaki boşlukları sürücünün kaybolabileceği yer olmaktan
+çıkarıyor.
+
+Adım süpürmeyle seçildi, sekiz yarış üzerinden, iki ölçütle:
+
+| adım | hareket eden araba | toplam mesafe |
+|---|---:|---:|
+| 25 m | 29/64 | 6,3 km |
+| **40 m** | **29/64** | **8,1 km** |
+| 80 m | 27/64 | 7,8 km |
+| 200 m | 24/64 | 6,8 km |
+| sıklaştırma yok | 20/64 | 6,7 km |
+
+Ve `nfs_sim` artık **ızgaradan uzaklığı** da yazıyor. Kavşak sayısı parkura göre değişiyor ve yol
+noktası sayısı sıklaştırmayla değişti; mesafe ikisinden de bağımsız, yani karşılaştırma yapılabilen
+tek ölçüt o.
+
+Parkur başına en uzağa varan araba: 4041 **1944 m**, 4061 1817 m, 4121 1624 m, 4001 991 m,
+4081 746 m, 4102 640 m, 4021 358 m — ve 4002 **42 m**, tek gerçekten çakılı kalan.
+
+Sınır: sekiz parkurun yedisinde alan yola çıkıyor ve bir kısmı kilometrelerce gidiyor; 64 arabanın
+29'u sürüyor. Duruş noktası ya `seen_path` koruması ya da
 "ilerlemeyi sürdüren bağlantı yok" — ikisi ayırt edilebilir ve ayırt edilmeli.
 
 ---

@@ -45,7 +45,7 @@ pub use load::{
     Place, REGIONS,
 };
 pub use route::{
-    build as build_route, free_roam_spots, free_roam_start, is_road, ribbon, road_ground,
+    build as build_route, densify, free_roam_spots, free_roam_start, is_road, ribbon, road_ground,
     start_grid, start_grid_facing, start_of, start_slots, Checkpoints, Corridor, Fix, RoutePath,
     FREE_ROAM_TRACK,
 };

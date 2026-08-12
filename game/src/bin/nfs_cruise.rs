@@ -39,6 +39,12 @@ use nfsu2::scene::{self, Textures};
 use nfsu2::world as city;
 use std::collections::HashMap;
 
+/// How far apart the driven waypoints are after the outline is subdivided.
+///
+/// Short enough that a grid is never far from one and long enough that a pilot is not chasing a
+/// point under its own bumper.
+const WAYPOINT_STEP: f32 = 40.0;
+
 const DEFAULT_CAR: &str =
     "/home/bedir/Games/need-for-speed-underground-2/drive_c/Need for Speed Underground 2/CARS/240SX/GEOMETRY.BIN";
 
@@ -620,10 +626,12 @@ fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> CruiseState
             net.len()
         );
     }
-    let course_line: Vec<Vec3> = course_event
+    // Subdivided, because the outline's own corners are up to 425 m apart — see `route::densify`.
+    let coarse: Vec<Vec3> = course_event
         .as_ref()
         .map(|e| e.outline.iter().map(|p| city::remap([p[0], p[1], 0.0])).collect())
         .unwrap_or_default();
+    let course_line = city::densify(&coarse, WAYPOINT_STEP);
     if !course_line.is_empty() {
         println!("course: {} waypoints from the event outline", course_line.len());
     }

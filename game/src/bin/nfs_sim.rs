@@ -31,6 +31,12 @@ use nfsu2::rig::{spawn_car, CarRig, Pilot, Placement, FIXED_DT};
 use nfsu2::scene;
 use nfsu2::world as city;
 
+/// How far apart the driven waypoints are after the outline is subdivided.
+///
+/// Short enough that a grid is never far from one and long enough that a pilot is not chasing a
+/// point under its own bumper.
+const WAYPOINT_STEP: f32 = 40.0;
+
 const DEFAULT_CAR: &str =
     "/home/bedir/Games/need-for-speed-underground-2/drive_c/Need for Speed Underground 2/CARS/240SX/GEOMETRY.BIN";
 
@@ -79,9 +85,13 @@ async fn run() {
          {walled} dropped because the road does not continue along them",
         net.len()
     );
-    let waypoints: Vec<Vec3> = ev
+    // Subdivided, because the outline's own corners are up to 425 m apart — see `route::densify`.
+    let coarse: Vec<Vec3> = ev
         .map(|e| e.outline.iter().map(|p| city::remap([p[0], p[1], 0.0])).collect())
         .unwrap_or_default();
+    let step: f32 =
+        std::env::var("NFS_WPSTEP").ok().and_then(|v| v.parse().ok()).unwrap_or(WAYPOINT_STEP);
+    let waypoints = city::densify(&coarse, step);
 
     // The grid, through the same choice the game makes.
     let dir = std::path::Path::new(&route).parent().expect("route has a directory");
@@ -274,11 +284,17 @@ async fn run() {
     println!("\nafter {seconds:.0} s:");
     let mut junctions = 0;
     let mut best_waypoint = 0;
+    // How far the field actually got, which is the one measure that survives a change to how the
+    // waypoints are counted or how many junctions a route happens to have. Straight-line from the
+    // grid: crude, and crude in the same way for every run, which is what a comparison needs.
+    let mut furthest = 0.0f32;
+    let line = slots[0];
     for (k, (rig, pilot)) in field.iter().enumerate() {
         let p = rig.pose(&world);
         let (at, speed) = p.map_or((Vec3::ZERO, 0.0), |p| (p.position, p.speed));
         junctions += pilot.passed();
         best_waypoint = best_waypoint.max(pilot.goal());
+        furthest = furthest.max((Vec3::new(at.x, 0.0, at.z) - Vec3::new(line.x, 0.0, line.z)).length());
         println!(
             "  car {k}: ({:>7.0},{:>7.0}) {:>4.0} km/h · {:>4} junctions · waypoint {}",
             at.x,
@@ -289,7 +305,7 @@ async fn run() {
         );
     }
     println!(
-        "SUMMARY junctions={junctions} waypoint={best_waypoint} cars={} seconds={seconds:.0}",
+        "SUMMARY junctions={junctions} waypoint={best_waypoint} furthest={furthest:.0}          cars={} seconds={seconds:.0}",
         field.len()
     );
 }
