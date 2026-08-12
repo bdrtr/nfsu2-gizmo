@@ -577,6 +577,29 @@ kazanç değil; ama yarışın anlamlı olması için ilerlemenin doğru ölçü
 
 `nfs_sim` artık bitiş sırasını yazıyor. Henüz kimse bitirmiyor: bir devre 5 km, üç turu 15 km, ve
 alan en iyi ihtimalle 2 km'ye ulaşıyor.
+### Tahmin etme, gözlemle: sürücülerin en büyük kazancı
+
+Çürüyen dört geometrik filtrenin ortak kusuru şuydu — hepsi bir bağın sürülebilir olup olmadığını
+**önceden** söylemeye çalışıyordu, ve yarım metrelik bir bordürü yakalayacak kadar keskin her test
+yol olan her tümseği de kesiyordu.
+
+Pilot artık tahmin etmiyor, hatırlıyor. Takıldığında (1,5 sn hareketsizlik) gitmeye çalıştığı
+düğümü **kara listeye alıyor**, geri viteste kaçıyor, ve geldiği yerden başka bir dal seçiyor.
+Gerçekten bir yere gidemeyen bir arabanın elinde hiçbir geometrik testin sahip olmadığı kanıt var.
+
+Sekiz parkurda ölçüm, sürücülerin şimdiye kadarki en büyük tek kazancı:
+
+| | önce | sonra |
+|---|---:|---:|
+| hareket eden araba | 32/64 | **41/64** |
+| toplam mesafe | 6,5 km | **7,9 km** |
+
+Ve en çok, geometrik kuralların beceremediği yerde: hiç kimsenin kıpırdamadığı 4002 **2/8 40 m →
+5/8 170 m**, 4081 **0/8 29 m → 2/8 264 m**, 4121 5/8 → 7/8, 4021 1481 → 1917 m. Yalnız 4061 hafif
+geriledi.
+
+Kara liste pilotun kendi deneyimi, grafın özelliği değil — o yüzden `step_avoiding`'e parametre
+olarak geçiyor: aynı yolda iki araba farklı şeylere çarpmış olabilir.
 ---
 
 ## 1. Ana fikir

@@ -232,6 +232,21 @@ impl Network {
     /// oscillates, and with it a dead end is driven out of rather than rattled in.
     #[must_use]
     pub fn step(&self, here: u32, came_from: Option<u32>, toward: Vec3) -> Option<u32> {
+        self.step_avoiding(here, came_from, toward, &[])
+    }
+
+    /// The same, skipping nodes a caller has already failed to reach.
+    ///
+    /// The list is a driver's own experience and not a property of the graph, which is why it is a
+    /// parameter rather than state here: two cars on the same road can have hit different things.
+    #[must_use]
+    pub fn step_avoiding(
+        &self,
+        here: u32,
+        came_from: Option<u32>,
+        toward: Vec3,
+        blocked: &[u32],
+    ) -> Option<u32> {
         let node = self.node(here)?;
         let dist = |i: &u32| {
             self.node(*i).map_or(f32::MAX, |j| {
@@ -240,8 +255,11 @@ impl Network {
         };
         node.links
             .iter()
-            .filter(|l| Some(**l) != came_from)
+            .filter(|l| Some(**l) != came_from && !blocked.contains(l))
             .min_by(|a, b| dist(a).total_cmp(&dist(b)))
+            // Falling back past its own memory: a car with nowhere left it has not given up on has
+            // to go somewhere, and standing still is not somewhere.
+            .or_else(|| node.links.iter().find(|l| Some(**l) != came_from))
             .or_else(|| node.links.first())
             .copied()
     }
