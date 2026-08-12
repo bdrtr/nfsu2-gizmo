@@ -130,11 +130,36 @@ async fn run() {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(slots.len());
+    // NFS_SLOT_FROM=<k>: leave the first k places empty. The one way to ask whether a car that
+    // stops is stopping because of where it starts or because of the car in front of it.
+    let from: usize =
+        std::env::var("NFS_SLOT_FROM").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
     let mut field: Vec<(CarRig, Pilot)> = Vec::new();
-    for slot in slots.iter().take(rivals) {
+    // NFS_SPREAD=<x>: push the grid apart by this factor about its own centre. Not a feature —
+    // the one experiment that separates "the driver cannot drive here" from "the driver cannot
+    // drive next to another driver", which is a real distinction because the pilot has no traffic
+    // model at all.
+    let spread: f32 = std::env::var("NFS_SPREAD").ok().and_then(|v| v.parse().ok()).unwrap_or(1.0);
+    let centre = slots.iter().fold(Vec3::ZERO, |a, s| a + *s) / slots.len() as f32;
+    let slots: Vec<Vec3> = slots.iter().map(|s| centre + (*s - centre) * spread).collect();
+    for (k, slot) in slots.iter().enumerate().skip(from).take(rivals) {
+        // What the grid place actually offers. A slot whose marker floats, or that has no road
+        // under it at all, is a car that starts in trouble — and that is a different failure from
+        // a car that gets going and hits something.
+        let surfaces = ground.heights_at(slot.x, slot.z);
         let stand = ground
             .height_at(*slot + Vec3::Y * 2.0)
             .map_or(*slot, |y| Vec3::new(slot.x, y, slot.z));
+        println!(
+            "  slot {k}: ({:>7.1},{:>7.1}) marker y={:>6.2} · stands at {:>6.2} ({:+.2}) · \
+             surfaces {:?}",
+            slot.x,
+            slot.z,
+            slot.y,
+            stand.y,
+            stand.y - slot.y,
+            surfaces.iter().map(|v| (v * 10.0).round() / 10.0).collect::<Vec<_>>()
+        );
         let rig = spawn_car(
             &mut world,
             &renderer,
@@ -145,6 +170,21 @@ async fn run() {
         );
         let mut pilot = Pilot::new();
         pilot.place(stand, &net);
+        // NFS_STAGGER=<s>: seconds between one car pulling away and the next.
+        let stagger: f32 =
+            std::env::var("NFS_STAGGER").ok().and_then(|v| v.parse().ok()).unwrap_or(0.0);
+        pilot.hold_for(stagger * k as f32);
+        if let Some(j) = pilot.node().and_then(|i| net.node(i)) {
+            println!(
+                "           -> node {:?} at ({:>7.1},{:>6.1},{:>7.1}), {:.1} m away, {} links",
+                pilot.node().unwrap_or(0),
+                j.at.x,
+                j.at.y,
+                j.at.z,
+                (j.at - stand).length(),
+                j.links.len()
+            );
+        }
         field.push((rig, pilot));
     }
     world.insert_resource(assets);
@@ -154,8 +194,24 @@ async fn run() {
 
     // Fixed steps, not frames: a simulation has no reason to pretend it is being watched, and a
     // fixed step is what makes two runs of the same parameters give the same answer.
+    // NFS_TRACE=<n>: print the field every n simulated seconds. A summary says where everyone
+    // ended; this says when they stopped, which is a different question and usually the useful one.
+    let trace: f32 = std::env::var("NFS_TRACE").ok().and_then(|v| v.parse().ok()).unwrap_or(0.0);
+    let mut next_trace = trace;
     let steps = (seconds / FIXED_DT) as usize;
-    for _ in 0..steps {
+    for step in 0..steps {
+        let now = step as f32 * FIXED_DT;
+        if trace > 0.0 && now >= next_trace {
+            next_trace += trace;
+            let line: Vec<String> = field
+                .iter()
+                .map(|(r, p)| {
+                    let s = r.pose(&world).map_or(0.0, |q| q.speed * 3.6);
+                    format!("{:>3.0}/{:<2}", s, p.passed())
+                })
+                .collect();
+            println!("  t={now:>5.0}s  km/h·junctions: {}", line.join(" "));
+        }
         // Controls first for the whole field, then one physics step: every car sees the same
         // world state, which a loop that stepped physics per car would not give.
         for (rig, pilot) in &mut field {

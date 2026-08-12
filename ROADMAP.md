@@ -422,7 +422,31 @@ Sonunda makinece okunabilir tek satır bırakıyor (`SUMMARY junctions=… waypo
 döngüye girebilsin. Ölçüt olarak metre değil **kavşak ve yol noktası** seçildi: duvara sürtünen bir
 araba da metre biriktirir.
 
-Sıradaki iş: sekiz arabanın üçü ızgaradan hiç çıkamıyor. Duruş noktası ya `seen_path` koruması ya da
+### Üçü neden çıkamıyor: elenenler ve kalan sınır
+
+Simülatör deterministik — üç koşu birebir aynı özet veriyor — yani aşağıdakiler gürültü değil.
+
+**Elenen sebepler:**
+
+- *Kötü slot.* Hayır: sekiz slotun sekizi de aynı marker yüksekliğinde (9.98), aynı zeminde (10.0),
+  aynı iki yüzeyin üstünde.
+- *Kötü yerleşim.* Hayır: sekiz pilotun sekizi de **aynı düğüme** (287) yerleşiyor.
+- *Kalkışta birbirlerine çarpma.* Hayır. Izgarayı açtım (1×, 2×, 4×): 5/8, 6/8, 5/8 — düzelmiyor,
+  ve 4×'te dıştaki arabalar yoldan çıkıp düşüyor. Aralıklı kalkış denedim (0 / 0,5 / 1 / 2 sn):
+  5/8, 4/8, 3/8, 6/8 — gürültü.
+- *Sabit bir slot.* Hayır: başarısız olan üçlü yapılandırmaya göre değişiyor.
+
+**Kalan:** pilotun kurtulma davranışı yoktu — bir şeye sürtünen araba tam kilit ve %15 gazla orada
+kalıyor. Ekledim (1,5 sn hareketsizlik → 1,2 sn geri vites, direksiyon ters). İlk hâli her şeyi
+bozdu: kalkışta zaten duran arabaya "takıldı" dedi ve `|hız|` kullandığım için geri giderken de
+takılı saydı — bütün alan altmış metre geriye, ters yöne gitti. Düzeltilmiş hâli **sayıyı
+oynatmıyor**: kurtulmasız 166 kavşak, kurtulmalı 165, aynı beş araba gidiyor aynı üçü kalıyor.
+
+Duruyor, çünkü sürtündüğü şeyden geri kaçan bir sürücü sürücüdür, sonsuza kadar öğüten değildir —
+ama düzeltmediğini yazıyorum.
+
+**Sınır, dürüstçe: sekiz rakibin beşi parkuru yol noktası 6'ya kadar, ızgaradan ~1,5 km sürüyor.
+Üçü çıkamıyor ve nedeni henüz bilinmiyor.** Duruş noktası ya `seen_path` koruması ya da
 "ilerlemeyi sürdüren bağlantı yok" — ikisi ayırt edilebilir ve ayırt edilmeli.
 
 ---
