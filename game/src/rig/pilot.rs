@@ -112,11 +112,24 @@ impl Pilot {
         Self::default()
     }
 
-    /// Put the pilot on the network at the node nearest a point.
-    pub fn place(&mut self, at: Vec3, net: &Network) {
+    /// Put the pilot on the network at the node nearest the car.
+    ///
+    /// `facing` is taken and not used, and that is deliberate. Every car on a starting grid is
+    /// within a few metres of every other, so nearest puts all eight pilots on the **same** node —
+    /// and that node is off to one side of a grid four cars wide. The five that got away were 4.5
+    /// to 11.0 m from it and the three that did not were 13.5, 14.3 and 16.4: the failure sorts
+    /// perfectly by distance, which looks like a diagnosis and is not one.
+    ///
+    /// Restricting the choice to a cone in front of the car was the obvious cure and is **refuted**
+    /// — swept over half-angles from 90° to 25°, it took the field from five cars away to three,
+    /// three, two and two. The correlation is real and the intervention it suggests is wrong, so
+    /// the parameter is gone rather than left at a value that reads as tuned.
+    pub fn place(&mut self, at: Vec3, facing: Vec3, net: &Network) {
+        let _ = facing;
         self.at = net.nearest(at);
         self.from = None;
         self.passed = 0;
+        self.age = 0.0;
     }
 
     /// Hold this pilot on the line for `seconds` before it pulls away.
@@ -254,6 +267,13 @@ impl Pilot {
         let to = flat(aim - at).normalize_or_zero();
         let f = flat(facing * Vec3::NEG_Z).normalize_or_zero();
         let angle = f.cross(to).y.atan2(f.dot(to));
+        // A lock that grows with speed was tried here and is **refuted across routes**. The
+        // reasoning was good — a raycast vehicle turns by generating lateral force and there is
+        // none at rest, and the trace showed stuck cars sitting on full lock — and on the route it
+        // was found on it worked: five cars away became six, 165 junctions became 198. On four
+        // routes it is not an improvement but a trade: 4041 went 2/8 to 6/8 and 4102 went **8/8 to
+        // 5/8**, 275 junctions down to 111. So it is gone rather than kept at a value that reads
+        // as tuned.
         let want = (angle * 2.0 / std::f32::consts::PI).clamp(-1.0, 1.0) * STEER_LIMIT;
         self.steer += (want - self.steer) * 0.35;
         let throttle = (1.0 - self.steer.abs() * CORNER_LIFT).max(0.15);

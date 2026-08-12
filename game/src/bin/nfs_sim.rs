@@ -169,7 +169,7 @@ async fn run() {
             Placement::facing(stand, heading, 1.5),
         );
         let mut pilot = Pilot::new();
-        pilot.place(stand, &net);
+        pilot.place(stand, heading, &net);
         // NFS_STAGGER=<s>: seconds between one car pulling away and the next.
         let stagger: f32 =
             std::env::var("NFS_STAGGER").ok().and_then(|v| v.parse().ok()).unwrap_or(0.0);
@@ -198,6 +198,7 @@ async fn run() {
     // ended; this says when they stopped, which is a different question and usually the useful one.
     let trace: f32 = std::env::var("NFS_TRACE").ok().and_then(|v| v.parse().ok()).unwrap_or(0.0);
     let mut next_trace = trace;
+    let watch: Option<usize> = std::env::var("NFS_WATCH").ok().and_then(|v| v.parse().ok());
     let steps = (seconds / FIXED_DT) as usize;
     for step in 0..steps {
         let now = step as f32 * FIXED_DT;
@@ -210,7 +211,35 @@ async fn run() {
                     format!("{:>3.0}/{:<2}", s, p.passed())
                 })
                 .collect();
-            println!("  t={now:>5.0}s  km/h·junctions: {}", line.join(" "));
+            println!("  t={now:>5.1}s  km/h·junctions: {}", line.join(" "));
+        }
+        // NFS_WATCH=<k>: one car, in detail, at the trace interval. Where it is, where its pilot
+        // is on the network, and how far apart those two are — a car that is not moving and a node
+        // that is not advancing look the same in a summary and are different failures.
+        if let Some(k) = watch {
+            if trace > 0.0 && (now / trace).fract() < FIXED_DT / trace {
+                if let Some((rig, pilot)) = field.get(k) {
+                    if let Some(q) = rig.pose(&world) {
+                        let n = pilot.node().and_then(|i| net.node(i));
+                        let (nx, ny, nz, gap) = n.map_or((0.0, 0.0, 0.0, 0.0), |j| {
+                            (j.at.x, j.at.y, j.at.z, (j.at - q.position).length())
+                        });
+                        println!(
+                            "    watch {k} t={now:>5.1}s ({:>7.1},{:>6.2},{:>7.1}) {:>5.1} km/h · \
+                             node {:?} ({:>7.1},{:>6.2},{:>7.1}) {gap:>5.1} m · {} junctions",
+                            q.position.x,
+                            q.position.y,
+                            q.position.z,
+                            q.speed * 3.6,
+                            pilot.node(),
+                            nx,
+                            ny,
+                            nz,
+                            pilot.passed()
+                        );
+                    }
+                }
+            }
         }
         // Controls first for the whole field, then one physics step: every car sees the same
         // world state, which a loop that stepped physics per car would not give.

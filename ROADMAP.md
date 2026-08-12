@@ -445,8 +445,38 @@ oynatmıyor**: kurtulmasız 166 kavşak, kurtulmalı 165, aynı beş araba gidiy
 Duruyor, çünkü sürtündüğü şeyden geri kaçan bir sürücü sürücüdür, sonsuza kadar öğüten değildir —
 ama düzeltmediğini yazıyorum.
 
-**Sınır, dürüstçe: sekiz rakibin beşi parkuru yol noktası 6'ya kadar, ızgaradan ~1,5 km sürüyor.
-Üçü çıkamıyor ve nedeni henüz bilinmiyor.** Duruş noktası ya `seen_path` koruması ya da
+### O sınır yanlıştı: "sekizde beş" bir pilot gerçeği değil, tek parkur gerçeğiymiş
+
+Aynı ölçümü sekiz parkurda koştum ve tablo tamamen değişti:
+
+| parkur | giden | kavşak | yol noktası |
+|---|---:|---:|---:|
+| 4001 | 5/8 | 165 | 6 |
+| 4002 | 0/8 | 4 | 0 |
+| 4021 | 0/8 | 0 | 0 |
+| 4041 | 2/8 | 47 | 2 |
+| 4061 | 0/8 | 0 | 0 |
+| 4081 | 1/8 | 21 | 2 |
+| **4102** | **8/8** | **275** | 4 |
+| 4121 | 0/8 | 0 | 0 |
+
+**Dört parkurda hiç kimse kıpırdamıyor**, birinde sekizde sekiz gidiyor. Bütün ayarlarımı bu turda
+tek bir şanslı parkurda (4001) yapmışım — ve o yüzden iki müdahalem de "işe yaradı" sonra
+genellenmedi:
+
+- **Yerleşimi öne koni ile sınırla.** 4001'de sebep mükemmel eşleşiyordu: giden beş araba düğüme
+  4,5–11,0 m, takılan üçü 13,5–16,4 m uzaktaydı, yani başarısızlık mesafeye göre kusursuz
+  sıralanıyordu. Koniyi süpürdüm (90°→25°): 5/8 → 3/8, 3/8, 2/8, 2/8. Korelasyon gerçek,
+  önerdiği müdahale yanlış. Parametre silindi.
+- **Direksiyon kilidini hıza bağla.** Gerekçe sağlam (raycast araç duruşta yanal kuvvet üretmez, ve
+  iz takılan arabaları tam kilitte gösteriyordu) ve 4001'de işe yaradı: 5/8 → 6/8, 165 → 198.
+  Dört parkurda takas: 4041 2/8 → 6/8 ama **4102 8/8 → 5/8**, 275 → 111 kavşak. Silindi.
+
+Ağların şekli farkı açıklamıyor: 4001/4021/4102/4121 karşılaştırıldığında düğüm sayısı, bağ sayısı,
+çıkışsız düğüm ve ilk arabanın düğüme uzaklığı hepsi benzer.
+
+**Sınır, dürüstçe: pilot sekiz parkurun ikisinde çalışıyor, dördünde hiç çalışmıyor.** Bir sonraki
+soru bu — tek parkurdaki üç araba değil, hiç kimsenin kıpırdamadığı dört parkur. Duruş noktası ya `seen_path` koruması ya da
 "ilerlemeyi sürdüren bağlantı yok" — ikisi ayırt edilebilir ve ayırt edilmeli.
 
 ---
