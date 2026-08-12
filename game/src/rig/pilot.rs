@@ -42,10 +42,6 @@ const LOOKAHEAD_PER_SPEED: f32 = 0.9;
 const LOOKAHEAD_MIN: f32 = 12.0;
 const LOOKAHEAD_MAX: f32 = 40.0;
 
-/// How near a waypoint counts as taken. Larger than [`REACHED`] because a waypoint is a corner of
-/// a 6 km outline, not a place on the road.
-const WAYPOINT_REACHED: f32 = 60.0;
-
 /// Steering lock the pilot will ask for, as a fraction of the controller's own.
 const STEER_LIMIT: f32 = 0.85;
 
@@ -73,6 +69,13 @@ pub struct Pilot {
     from: Option<u32>,
     /// Which waypoint of the course it is heading for.
     goal: usize,
+    /// Completed laps. Counted where the waypoint index wraps, which is the only place a closed
+    /// course says a lap ended.
+    laps: u32,
+    /// Where the pilot started, so a lap is measured from the grid rather than from waypoint zero
+    /// — those are different points, and using the wrong one credits a lap before the first is
+    /// driven.
+    line: usize,
     /// Smoothed steering, the same field [`Driver`](super::Driver) keeps and for the same reason.
     steer: f32,
     /// How many junctions it has taken. The one number that says a pilot is getting somewhere.
@@ -152,6 +155,8 @@ impl Pilot {
         if !course.is_empty() {
             self.goal = (self.goal + 1) % course.len();
         }
+        self.line = self.goal;
+        self.laps = 0;
     }
 
     /// Hold this pilot on the line for `seconds` before it pulls away.
@@ -175,6 +180,26 @@ impl Pilot {
     #[must_use]
     pub fn goal(&self) -> usize {
         self.goal
+    }
+
+    /// Completed laps.
+    #[must_use]
+    pub fn laps(&self) -> u32 {
+        self.laps
+    }
+
+    /// How far round the course it is, as waypoints driven since the line — the number a running
+    /// order is sorted on.
+    ///
+    /// Counted from the start rather than from waypoint zero, and added to the lap count, so it
+    /// rises monotonically through a race instead of falling back to zero at every lap.
+    #[must_use]
+    pub fn along(&self, course: usize) -> usize {
+        if course == 0 {
+            return 0;
+        }
+        let round = (self.goal + course - self.line) % course;
+        self.laps as usize * course + round
     }
 
     /// This frame's controls. `None` when it has not been placed or the network is empty.
@@ -204,9 +229,25 @@ impl Pilot {
         // The waypoint being driven to. With no course, the pilot still drives — it just has
         // nothing to prefer at a junction, and takes whatever is not backwards.
         let target = course.get(self.goal).copied();
-        if let Some(t) = target {
-            if flat(t - at).length() < WAYPOINT_REACHED {
-                self.goal = (self.goal + 1) % course.len().max(1);
+        // Advance while the **next** waypoint is nearer than the one held — the same self-limiting
+        // rule the network walk uses, and for the same reason.
+        //
+        // Proximity was the first rule and it is wrong in a way that hides: a car that strays from
+        // the course never comes within the radius, so its counter stops while the car keeps
+        // driving. Measured, one field covered 1,843 m with the counter reading five waypoints of
+        // forty metres — the standings said it had gone 200 m. A running order built on that is
+        // fiction.
+        if !course.is_empty() {
+            let d = |i: usize| flat(course[i % course.len()] - at).length();
+            for _ in 0..3 {
+                let next = (self.goal + 1) % course.len();
+                if d(next) >= d(self.goal) {
+                    break;
+                }
+                if next == self.line {
+                    self.laps += 1;
+                }
+                self.goal = next;
             }
         }
         let toward = target.unwrap_or(at + facing * Vec3::NEG_Z * 1000.0);

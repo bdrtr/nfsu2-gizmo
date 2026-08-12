@@ -218,6 +218,20 @@ async fn run() {
     scene::add_lights(&mut world, Transform::new(slots[0] + Vec3::Y * 60.0), 2.0, slots[0]);
     println!("field: {} cars", field.len());
 
+    // The race itself: a countdown, laps if the event says it is a circuit, and a running order.
+    let mut race = nfsu2::race::Race::new(waypoints.len(), ev.is_some_and(|e| e.circuit));
+    println!(
+        "race: {} · {} waypoints · finish at {} driven · {:.0} s countdown",
+        if ev.is_some_and(|e| e.circuit) {
+            format!("{} laps", nfsu2::race::Race::LAPS)
+        } else {
+            "sprint".to_string()
+        },
+        waypoints.len(),
+        race.distance(),
+        race.countdown()
+    );
+
     // Fixed steps, not frames: a simulation has no reason to pretend it is being watched, and a
     // fixed step is what makes two runs of the same parameters give the same answer.
     // NFS_TRACE=<n>: print the field every n simulated seconds. A summary says where everyone
@@ -273,9 +287,22 @@ async fn run() {
                 }
             }
         }
+        race.tick(FIXED_DT);
         // Controls first for the whole field, then one physics step: every car sees the same
         // world state, which a loop that stepped physics per car would not give.
         for (rig, pilot) in &mut field {
+            if race.holding() {
+                rig.drive(
+                    &mut world,
+                    &nfsu2::rig::Controls {
+                        throttle: 0.0,
+                        brake: 1.0,
+                        steer: 0.0,
+                        toggle_auto_shift: false,
+                    },
+                );
+                continue;
+            }
             let Some(pose) = rig.pose(&world) else { continue };
             if let Some(c) =
                 pilot.drive(pose.position, pose.rotation, pose.speed, &net, &waypoints)
@@ -286,6 +313,21 @@ async fn run() {
         gizmo::physics::vehicle_controller_system(&world, FIXED_DT);
         gizmo::physics::physics_step_system(&world, FIXED_DT);
     }
+
+    let pilots: Vec<Pilot> = field.iter().map(|(_, p)| p.clone()).collect();
+    let order = race.standings(&pilots);
+    println!("\nfinishing order after {seconds:.0} s:");
+    for (place, s) in order.iter().enumerate() {
+        println!(
+            "  {}. car {} · {} laps · {} waypoints driven{}",
+            place + 1,
+            s.car,
+            s.laps,
+            s.along,
+            if s.done { " · FINISHED" } else { "" }
+        );
+    }
+    println!("  {} of {} finished", race.finishers().len(), field.len());
 
     println!("\nafter {seconds:.0} s:");
     let mut junctions = 0;

@@ -555,6 +555,28 @@ NFSU2 yarışları karşı şeridi belirli boşluklardan kullanır, ve bizim ağ
 yaklaşımımız o boşluğu bulmak yerine köşeyi kesiyor. Duruş noktası ya `seen_path` koruması ya da
 "ilerlemeyi sürdüren bağlantı yok" — ikisi ayırt edilebilir ve ayırt edilmeli.
 
+### M4: yarış artık yarış
+
+`nfsu2::race` — geri sayım, tur sayımı, sıralama, bitiş. Hiç araba tutmuyor, fizik adımlamıyor,
+kumanda üretmiyor: pilotların zaten izlediği şeyler üzerine aritmetik. Sonucuna güvenilmesi
+gereken bir yarışın arabayı itebilmesi olmaz.
+
+İki şekil dosyanın kendisinden: `0x3414C`'nin `circuit` bayrağı (4.067 kayıtta anlaşmazlık yok)
+kapalı devreyi açık sprintten ayırıyor. **Tur sayısı hiçbir yerde çözülü değil** — `Race::LAPS = 3`
+bir seçim, okuma değil, ve sabit olarak duruyor ki bir sonraki kişi varsayımla karşılaşsın, onu
+miras almasın.
+
+Bağlarken bir ölçüt hatası çıktı ve ciddiydi. İlerleme "yol noktasına 60 m'den yakınsan geçtin
+say" diye ölçülüyordu. Çizgiden sapan bir araba o yarıçapa hiç girmiyor, yani **sayaç duruyor ama
+araba sürmeye devam ediyor**: bir alan 1.843 m kat ederken sayaç 5 yol noktası (200 m) okuyordu.
+Onun üstüne kurulan sıralama uydurmadır.
+
+Ölçüt ağda işe yarayan kurala geçti — bir sonraki yol noktası daha yakınsa ilerle. Sekiz parkurda
+etkisi: hareket eden araba **29/64 → 32/64**, toplam mesafe **8,1 → 6,5 km**. Sürüşe net bir
+kazanç değil; ama yarışın anlamlı olması için ilerlemenin doğru ölçülmesi pazarlık konusu değil.
+
+`nfs_sim` artık bitiş sırasını yazıyor. Henüz kimse bitirmiyor: bir devre 5 km, üç turu 15 km, ve
+alan en iyi ihtimalle 2 km'ye ulaşıyor.
 ---
 
 ## 1. Ana fikir

@@ -23,6 +23,7 @@
 pub mod assets;
 pub mod car;
 pub mod geom;
+pub mod race;
 pub mod rig;
 pub mod scene;
 pub mod world;
