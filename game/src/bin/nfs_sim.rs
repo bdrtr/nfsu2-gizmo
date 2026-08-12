@@ -105,7 +105,7 @@ async fn run() {
             .map(|(i, w)| (i, d(w)));
         println!(
             "  waypoint 0 is {:.0} m from the grid · nearest is {:?}",
-            waypoints.first().map_or(f32::NAN, |w| d(w)),
+            waypoints.first().map_or(f32::NAN, d),
             near.map(|(i, m)| format!("#{i} at {m:.0} m"))
         );
     }
