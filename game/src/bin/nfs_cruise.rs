@@ -114,8 +114,10 @@ struct CruiseState {
     /// How many pilots produced controls last frame — zero means they are not being driven at all,
     /// which looks exactly like being driven badly.
     driving: usize,
-    /// The race line the rivals follow. Empty in free roam and when no route is loaded.
-    line: Vec<city::RoutePath>,
+    /// The road network the rivals drive. Empty in free roam and when no route is loaded.
+    net: city::Network,
+    /// The event outline, in lap order: the waypoints the rivals steer between junctions by.
+    waypoints: Vec<Vec3>,
     /// Recent frame times, in milliseconds, newest last.
     ///
     /// **The number the project has never had.** Every decision about culling, detail tiers and
@@ -283,6 +285,10 @@ fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> CruiseState
     //
     // Free roam takes the `Err` arm on purpose even if `NFS_ROUTE` is set: there is nothing to
     // follow, no line to draw and no corridor to be outside of. That is what free roam is.
+    // The raw table and the event, kept beside the built line so the network and the waypoints can
+    // be made from them without reading the file twice.
+    let mut route_nodes: Vec<gizmo_nfs::world::routes::RouteNode> = Vec::new();
+    let mut course_event: Option<gizmo_nfs::world::routes::RaceEvent> = None;
     let (course_paths, mut course) = match std::env::var("NFS_ROUTE") {
         _ if free_roam => (Vec::new(), None),
         Err(_) => (Vec::new(), None),
@@ -290,6 +296,7 @@ fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> CruiseState
             let bytes = std::fs::read(&file).unwrap_or_else(|e| panic!("read {file}: {e}"));
             let nodes =
                 gizmo_nfs::world::routes::nodes(&bytes).expect("read the route file's nodes");
+            route_nodes = nodes.clone();
             let paths = city::build_route(&nodes, &city::road_ground(&objects));
             let corridor = city::Corridor::of(&paths, COURSE_HALF_WIDTH);
             let name = std::path::Path::new(&file)
@@ -366,6 +373,7 @@ fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> CruiseState
             // flip; see `city::start_grid_facing` for what the outline is worth in numbers.
             let route_bytes = std::fs::read(route).ok()?;
             let catalogue = gizmo_nfs::world::routes::events(&route_bytes).unwrap_or_default();
+            course_event = catalogue.iter().find(|e| e.id == event).cloned();
             let placed = match catalogue.iter().find(|e| e.id == event) {
                 Some(e) => {
                     if let Some((slots, _)) = city::start_slots(&m, e) {
@@ -600,6 +608,22 @@ fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> CruiseState
             None => Placement { ground: at, yaw: 0.0, clearance: DROP },
         },
     );
+    // The graph the rivals drive, and the waypoints they steer between junctions by. Built here
+    // because both want `ground`, which is the same surface the drawn line stands on — a driver and
+    // a ribbon that disagreed about where the road is would be very hard to read.
+    let net = city::Network::of(&route_nodes, &ground);
+    if !net.is_empty() {
+        let (edges, dead) = net.shape();
+        println!("network: {} nodes · {edges} links · {dead} with no way out", net.len());
+    }
+    let course_line: Vec<Vec3> = course_event
+        .as_ref()
+        .map(|e| e.outline.iter().map(|p| city::remap([p[0], p[1], 0.0])).collect())
+        .unwrap_or_default();
+    if !course_line.is_empty() {
+        println!("course: {} waypoints from the event outline", course_line.len());
+    }
+
     // NFS_RIVALS=<n>: fill the rest of the grid. A starting grid has eight places and the file
     // names all eight; until now seven of them stood empty, which is the one thing that makes a
     // race look like a drive. They have no driver yet — they stand on their marks — so this is the
@@ -633,7 +657,7 @@ fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> CruiseState
             },
         );
         let mut pilot = Pilot::new();
-        pilot.relocate(stand, start_heading.unwrap_or(Vec3::NEG_Z), &course_paths);
+        pilot.place(stand, &net);
         field.push((rig, pilot));
     }
     if !field.is_empty() {
@@ -690,7 +714,8 @@ fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> CruiseState
         spots: spot_count,
         field,
         driving: 0,
-        line: course_paths,
+        net,
+        waypoints: course_line,
         frames: Vec::with_capacity(FRAME_WINDOW),
     }
 }
@@ -723,9 +748,11 @@ fn update(world: &mut World, state: &mut CruiseState, dt: f32, input: &Input) {
     state.driving = 0;
     for i in 0..state.field.len() {
         let Some(pose) = state.field[i].0.pose(world) else { continue };
-        let line = std::mem::take(&mut state.line);
-        let c = state.field[i].1.drive(pose.position, pose.rotation, pose.speed, &line);
-        state.line = line;
+        let net = std::mem::take(&mut state.net);
+        let way = std::mem::take(&mut state.waypoints);
+        let c = state.field[i].1.drive(pose.position, pose.rotation, pose.speed, &net, &way);
+        state.net = net;
+        state.waypoints = way;
         if let Some(c) = c {
             state.field[i].0.drive(world, &c);
             state.driving += 1;
@@ -842,23 +869,20 @@ fn diagnose(world: &World, state: &mut CruiseState, pose: nfsu2::rig::Pose) {
                     None => worst = f32::INFINITY,
                 }
             }
-            let moved = state
-                .field
-                .iter()
-                .filter(|(_, pilot)| pilot.progress(&state.line).is_some_and(|v| v > 1.0))
-                .count();
+            let moved = state.field.iter().filter(|(_, p)| p.passed() > 0).count();
+            let junctions: usize = state.field.iter().map(|(_, p)| p.passed()).sum();
             let lead = state.field.first().and_then(|(r, _)| r.pose(world));
             let (lp, ls) = lead.map_or((Vec3::ZERO, 0.0), |p| (p.position, p.speed));
             println!(
                 "field  {} rivals · {inside} inside the corridor · furthest {worst:.0} m · \
-                 {moved} past the line's start · {} driving · lead at ({:.0},{:.0}) {:.0} km/h, \
-                 progress {:.0} m",
+                 {moved} moving · {} driving · {junctions} junctions taken · lead at \
+                 ({:.0},{:.0}) {:.0} km/h, waypoint {}",
                 state.field.len(),
                 state.driving,
                 lp.x,
                 lp.z,
                 ls * 3.6,
-                state.field.first().and_then(|(_, pl)| pl.progress(&state.line)).unwrap_or(-1.0),
+                state.field.first().map_or(0, |(_, p)| p.goal()),
             );
         }
     }

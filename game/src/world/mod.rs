@@ -28,6 +28,7 @@ mod build;
 mod cell;
 mod collide;
 mod load;
+mod network;
 pub mod lod;
 pub mod route;
 mod tiers;
@@ -38,6 +39,7 @@ pub use collide::{
     collision_cells, surface_of, Bounds, CityCollider, Ground, Surface, GROUND_CELL,
     WALL_NORMAL_Y,
 };
+pub use network::{Junction, Network};
 pub use load::{
     bundle_for_route, bundles, free_roam_bundle, load, place_of, start_at, tracks_path, Bundles,
     Place, REGIONS,

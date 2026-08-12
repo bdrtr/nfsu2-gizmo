@@ -332,6 +332,34 @@ Oyun tarafında `build_route` artık yolları ilerlemeye göre çeviriyor. Bu bi
 yedisi de koridorda kalıyor — ama hâlâ duruyorlar, yani asıl sorun (yarış çizgisinin ağdan nasıl
 çıkarılacağı) açık.
 
+### Rakipler ağı sürüyor: 100 m → 700 m
+
+Yarış çizgisini veriden çıkarma denemelerini bıraktım — üçüncüsü de (`0x34149`'un `+36` ardılı)
+%95'i ancak 105 parkurun 43'ünde tutturuyor. Bunun yerine **elimizde çözülü olanı** kullandım.
+
+İki parça: `world::Network` düğüm tablosunu sürülebilir bir grafa çeviriyor (yol içi komşuluklar +
+kayıt bağlantıları, ikisi de çift yönlü), ve **yol noktaları etkinlik anahattından** geliyor.
+Anahat sürülemez — 6 km'de 17 nokta, medyan adım 425 m — ama **17 köşesinin 14'ünün altında yol
+var** ve tur sırasında. Yani sürüş çizgisi değil, ama yol noktası listesi.
+
+Pilot artık grafı yürüyor ve her kavşakta bir sonraki yol noktasına yaklaştıran dalı seçiyor. Bu,
+"bu yarış çizgisidir"den daha zayıf bir iddia ve verinin desteklediği iddia bu.
+
+Sonuç: lider **89 km/h**'ye çıkıyor, **~700 m** gidiyor, yol noktası 1'den 2'ye geçiyor. Başlangıçtaki
+100 m'nin yedi katı. `network: 341 düğüm · 810 bağ · çıkışı olmayan 0`.
+
+**İlerleme kuralı üç denemede oturdu ve ikisi ölçümle elendi:**
+
+- *"Yeterince yakınsa ilerle"* — kaçak. Adım attığı düğüm de genelde yeterince yakın, o yüzden pilot
+  grafı kare hızında yürüyor: rakip başına yüz saniyede **6.600 kavşak**, oysa 96 km/h'de 29 m'lik
+  düğümlerle saniyede bir tane sürülebilir.
+- *"Yalnız düğüm arkada kalınca ilerle"* — tersi. Arabanın ulaşamadığı bir düğüm hiç arkada
+  kalmıyor, pilot ilk ulaşamadığında duruyor: **65 m**.
+- *"Bir sonraki düğüm arabaya daha yakınsa ilerle"* — yapısı gereği kendini sınırlıyor: duran araba
+  ilerlemeyi durduruyor, hızlı olan yetişiyor. **106 kavşak, ~700 m.**
+
+Hâlâ duruyorlar. Ama artık durdukları yer bir teşhis sorusu, mekanizma sorusu değil.
+
 Sıradaki iş: yürüyüşün neden durduğunu bulmak. Duruş noktası ya `seen_path` koruması ya da
 "ilerlemeyi sürdüren bağlantı yok" — ikisi ayırt edilebilir ve ayırt edilmeli.
 

@@ -650,6 +650,7 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
     let routes: Vec<nfsu2::world::RoutePath> = match std::env::var("NFS_ROUTE") {
         Err(_) => Vec::new(),
         Ok(file) => {
+            let path_of_route = file.clone();
             let bytes = std::fs::read(&file).unwrap_or_else(|e| panic!("read {file}: {e}"));
             let nodes = gizmo_nfs::world::routes::nodes(&bytes).expect("read the route's nodes");
             let ground = nfsu2::world::route::road_ground(&meshes);
@@ -688,6 +689,55 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
                     );
                 }
             }
+            // The event outline as a driving line. It is the one course description already
+            // decoded — `0x3414C`, in lap order, closed exactly when the event is a circuit — and
+            // it was good enough to pick a starting grid. The question here is whether it is good
+            // enough to *drive*: how coarse are its steps, and does it stay on the road.
+            if std::env::var("NFS_LINE").is_ok() {
+                let file = std::path::Path::new(&path_of_route);
+                if let Ok(bytes) = std::fs::read(file) {
+                    let event: u16 = file
+                        .file_stem()
+                        .and_then(|s| s.to_str())
+                        .map(|s| s.trim_start_matches(|c: char| !c.is_ascii_digit()))
+                        .and_then(|s| s.parse().ok())
+                        .unwrap_or(0);
+                    if let Ok(evs) = gizmo_nfs::world::routes::events(&bytes) {
+                        if let Some(e) = evs.iter().find(|e| e.id == event) {
+                            let pts: Vec<Vec3> = e
+                                .outline
+                                .iter()
+                                .map(|p| nfsu2::world::remap([p[0], p[1], 0.0]))
+                                .collect();
+                            let mut steps: Vec<f32> =
+                                pts.windows(2).map(|w| (w[1] - w[0]).length()).collect();
+                            let perimeter: f32 = steps.iter().sum();
+                            steps.sort_by(f32::total_cmp);
+                            let q = |f: f64| {
+                                steps.get((steps.len() as f64 * f) as usize).copied().unwrap_or(0.0)
+                            };
+                            // How much of it is over road at all: the same question `road_ground`
+                            // answers for a route node, asked of the outline's own corners.
+                            let on_road = pts
+                                .iter()
+                                .filter(|p| !ground.heights_at(p.x, p.z).is_empty())
+                                .count();
+                            println!(
+                                "  event {event} outline: {} points · {perimeter:.0} m · \
+                                 circuit {} · step p05 {:.0} median {:.0} p95 {:.0} m · \
+                                 {on_road} of {} corners have road under them",
+                                pts.len(),
+                                e.circuit,
+                                q(0.05),
+                                q(0.5),
+                                q(0.95),
+                                pts.len()
+                            );
+                        }
+                    }
+                }
+            }
+
             // NFS_LINE=1: can the race line be walked out of the network's own junctions?
             //
             // The nodes carry `links` — up to three indices into the same table, 94.8 % of them
