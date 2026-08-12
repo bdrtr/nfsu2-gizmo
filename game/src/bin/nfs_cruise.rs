@@ -57,6 +57,10 @@ const DEFAULT_CAR: &str =
 /// not flat, and `y ≈ −11` is true of the airport, not of downtown.
 const DEFAULT_AT: Vec3 = Vec3::new(710.0, 27.0, 888.0);
 
+/// How many places a starting grid has. The file's own number: every full grid in the install is
+/// eight markers numbered `0..7`, and `gizmo_nfs::world::routes::grids` returns nothing else.
+const GRID_SLOTS: usize = 8;
+
 /// How far above the named point the car is dropped.
 ///
 /// The city's surface height at a given XZ is not known without querying it — the point above is a
@@ -300,6 +304,10 @@ fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> CruiseState
     // and holds the event's starting grids; `start_of`'s least-progress node is the fallback for
     // when it does not, and it is a guess where this is a record.
     let mut spot_count = 0usize;
+    // The other seven places on the grid, if this is a race and the file names them. Kept beside
+    // the pole rather than derived twice: `city::start_slots` and `city::start_grid_facing` share
+    // the choice of grid, so these are the same eight the pole came from.
+    let mut grid_slots: Vec<Vec3> = Vec::new();
     let course_start = if free_roam {
         // The city's own free-roam grid, and the places it names around it. Only `ROUTESL4RA`
         // carries any: the other seven `TrackPosMarkersFreeRoam.bin` are 16-byte shells.
@@ -352,7 +360,12 @@ fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> CruiseState
             let route_bytes = std::fs::read(route).ok()?;
             let catalogue = gizmo_nfs::world::routes::events(&route_bytes).unwrap_or_default();
             let placed = match catalogue.iter().find(|e| e.id == event) {
-                Some(e) => city::start_grid_facing(&m, e),
+                Some(e) => {
+                    if let Some((slots, _)) = city::start_slots(&m, e) {
+                        grid_slots = slots;
+                    }
+                    city::start_grid_facing(&m, e)
+                }
                 None => city::start_grid(&m, event),
             };
             if placed.is_some() {
@@ -580,6 +593,68 @@ fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> CruiseState
             None => Placement { ground: at, yaw: 0.0, clearance: DROP },
         },
     );
+    // NFS_RIVALS=<n>: fill the rest of the grid. A starting grid has eight places and the file
+    // names all eight; until now seven of them stood empty, which is the one thing that makes a
+    // race look like a drive. They have no driver yet — they stand on their marks — so this is the
+    // formation, not the field.
+    //
+    // Each is its own `spawn_car`, which re-reads and re-parses the model per car. Wasteful and
+    // left that way on purpose: the cost is measured below and it is not where the frame goes, and
+    // a shared-geometry path is a change to `rig` that should be made when something needs it.
+    let rivals: usize = std::env::var("NFS_RIVALS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(if grid_slots.is_empty() { 0 } else { GRID_SLOTS - 1 })
+        .min(grid_slots.len().saturating_sub(1));
+    let mut field = Vec::new();
+    for slot in grid_slots.iter().skip(1).take(rivals) {
+        // The marker's own height is within a metre of the ground almost everywhere, but "almost"
+        // is what drops a car through the road — ask the city, the same as for the player.
+        let stand = match ground.height_at(*slot + Vec3::Y * SPAWN_PROBE) {
+            Some(y) => Vec3::new(slot.x, y, slot.z),
+            None => *slot,
+        };
+        field.push(spawn_car(
+            world,
+            renderer,
+            &mut assets,
+            &mut phys,
+            &car_path,
+            match start_heading {
+                Some(h) => Placement::facing(stand, h, DROP),
+                None => Placement { ground: stand, yaw: 0.0, clearance: DROP },
+            },
+        ));
+    }
+    if !field.is_empty() {
+        // The formation, in its own terms: how far apart the cars are across a row and between the
+        // rows. A grid that came out as eight cars in a heap, or in one line, says the slot order
+        // or the heading was read wrong, and both are cheap to state and expensive to eyeball.
+        let h = start_heading.unwrap_or(Vec3::Z);
+        let side = Vec3::new(-h.z, 0.0, h.x).normalize_or_zero();
+        let along = |p: &Vec3| (*p - grid_slots[0]).dot(h);
+        let across = |p: &Vec3| (*p - grid_slots[0]).dot(side);
+        let rows: Vec<f32> = grid_slots.iter().map(along).collect();
+        let cols: Vec<f32> = grid_slots.iter().map(across).collect();
+        let gap = |v: &[f32]| {
+            let mut u = v.to_vec();
+            u.sort_by(f32::total_cmp);
+            u.windows(2).map(|w| w[1] - w[0]).filter(|d| *d > 0.5).fold(f32::MAX, f32::min)
+        };
+        println!(
+            "grid: {} rivals on their marks, {} places · rows {:.1}..{:.1} m, columns {:.1}..{:.1} m \
+             · closest row gap {:.1} m, closest column gap {:.1} m",
+            field.len(),
+            grid_slots.len(),
+            rows.iter().copied().fold(f32::MAX, f32::min),
+            rows.iter().copied().fold(f32::MIN, f32::max),
+            cols.iter().copied().fold(f32::MAX, f32::min),
+            cols.iter().copied().fold(f32::MIN, f32::max),
+            gap(&rows),
+            gap(&cols),
+        );
+    }
+
     world.insert_resource(assets);
     world.insert_resource(phys);
 

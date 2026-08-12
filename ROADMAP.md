@@ -263,6 +263,23 @@ uzayda ~0,44. Parlama geçidi her kare koşuyor ve hiçbir şey çıkarmıyordu.
 küçük sayı, çünkü kıpırdayan tek şey yanan pencereler ve neon. **Medyan hiç oynamıyor**, yani bu
 bir parlaklık kolu değil parlama kolu; parlaklık kolu `city_lift`. Kare maliyeti değişmedi.
 
+### Izgara doldu
+
+`nfs_cruise` bir yarış yüklediğinde ızgaranın sekiz yerinin hepsine araba koyuyor
+(`NFS_RIVALS=<n>` sayıyı değiştirir, `0` eski davranış). Şoförleri yok — yerlerinde duruyorlar —
+yani bu henüz saha değil, formasyon.
+
+Maliyeti ölçüldü ve yok sayılır: yedi rakip kare medyanını **8,0 → 8,1 ms** yapıyor. Her biri
+kendi `spawn_car`'ı, yani model dosyası araba başına yeniden ayrıştırılıyor; israf, ve bilerek
+öyle bırakıldı — ölçüm karenin oraya gitmediğini söylüyor, ortak geometri yolu ise `rig`'de bir
+değişiklik ve ona ihtiyaç doğunca yapılmalı.
+
+Formasyonun kendisi dört ayrı yarışta ölçüldü ve dördünde de aynı: **4 yan yana × 2 sıra**,
+yanal 3,5 m, derinlik 5,7 m. Araba 1,64 × 4,39 m, yani sığıyor. Ve pole en önde — satırlar
+`0.0` ile `−5.7` arasında ve slot 0 `0.0`'da — yani `start_grid`'in "slot 0..3 ön sıradır"
+varsayımı artık geometriyle doğrulandı, kalan tek belirsizlik olan küresel ön/arka işareti de
+kapandı.
+
 ---
 
 ## 1. Ana fikir

@@ -197,14 +197,38 @@ pub fn start_grid(markers: &[StartMarker], event: u16) -> Option<(Vec3, Vec3)> {
 /// spawn to a missing one.
 #[must_use]
 pub fn start_grid_facing(markers: &[StartMarker], event: &RaceEvent) -> Option<(Vec3, Vec3)> {
-    let fallback = || start_grid(markers, event.id);
+    match pick_grid(markers, event) {
+        Some((slots, heading)) => Some((slots[0], heading)),
+        None => start_grid(markers, event.id),
+    }
+}
+
+/// The whole grid the race uses: all eight places, in slot order, and the way they face.
+///
+/// Same choice of grid as [`start_grid_facing`] — they share [`pick_grid`], so the pole this
+/// returns and the pole that returns cannot drift apart. Slot 0 is pole.
+///
+/// The heading is one vector for the eight, because a starting grid is a formation: the file gives
+/// eight positions and no directions, and the direction is a property of the formation rather than
+/// of any car in it.
+#[must_use]
+pub fn start_slots(markers: &[StartMarker], event: &RaceEvent) -> Option<(Vec<Vec3>, Vec3)> {
+    pick_grid(markers, event)
+}
+
+/// The grid a race uses, as eight world positions in slot order plus the shared heading.
+///
+/// Picks between a track's two grids by the direction its event outline is drawn in — see
+/// [`start_grid_facing`] for what that is worth in numbers. `None` when the event has no usable
+/// outline or no full grid of its own.
+fn pick_grid(markers: &[StartMarker], event: &RaceEvent) -> Option<(Vec<Vec3>, Vec3)> {
     if event.outline.len() < 2 {
-        return fallback();
+        return None;
     }
     let mean = |slots: &[StartMarker]| {
         slots.iter().fold(Vec3::ZERO, |a, m| a + remap(m.at)) / slots.len() as f32
     };
-    let mut best: Option<(f32, Vec3, Vec3)> = None;
+    let mut best: Option<(f32, Vec<Vec3>, Vec3)> = None;
     for grid in gizmo_nfs::world::routes::grids(markers)
         .into_iter()
         .filter(|g| g[0].track == u32::from(event.id))
@@ -230,10 +254,10 @@ pub fn start_grid_facing(markers: &[StartMarker], event: &RaceEvent) -> Option<(
         // Nearest segment wins the tie; among grids, the one that agrees wins outright.
         let score = if along >= 0.0 { -d } else { f32::MIN };
         if best.as_ref().is_none_or(|(s, _, _)| score > *s) {
-            best = Some((score, remap(grid[0].at), heading));
+            best = Some((score, grid.iter().map(|m| remap(m.at)).collect(), heading));
         }
     }
-    best.map(|(_, at, dir)| (at, dir)).or_else(fallback)
+    best.map(|(_, slots, dir)| (slots, dir))
 }
 
 /// The track id free roam's own markers carry.
