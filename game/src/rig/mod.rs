@@ -29,9 +29,11 @@
 
 mod chase;
 mod drive;
+mod pilot;
 
 pub use chase::ChaseCamera;
 pub use drive::{Controls, Driver, FIXED_DT};
+pub use pilot::Pilot;
 
 use crate::car::tune::{steering_lock, tune_from_record, CarTune, Upgrades};
 use crate::car::{build_car_visuals, PbrLook, WheelFit};

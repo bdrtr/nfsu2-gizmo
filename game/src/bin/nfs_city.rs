@@ -688,6 +688,119 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
                     );
                 }
             }
+            // NFS_LINE=1: can the race line be walked out of the network's own junctions?
+            //
+            // The nodes carry `links` — up to three indices into the same table, 94.8 % of them
+            // pointing at a *different* path — so the network is paths joined at junctions, and a
+            // race is a walk over it. The walk needs a rule for which link to take, and `progress`
+            // is the candidate: it rises along a path, so the continuation should be the linked
+            // node whose progress carries on from where the walk is.
+            //
+            // Judged the way a driveable line has to be judged: how far it covers against the
+            // route's own stated length, and whether consecutive points are a car's distance apart
+            // rather than a jump across the map.
+            if std::env::var("NFS_LINE").is_ok() {
+                let by_index: Vec<&gizmo_nfs::world::routes::RouteNode> = nodes.iter().collect();
+                let start = nodes
+                    .iter()
+                    .enumerate()
+                    .min_by(|a, b| a.1.progress.total_cmp(&b.1.progress))
+                    .map(|(i, _)| i);
+                // A path's extent in file order, so it can be run either way.
+                let span = |i: usize| {
+                    let path = by_index[i].path;
+                    let mut lo = i;
+                    while lo > 0 && by_index[lo - 1].path == path {
+                        lo -= 1;
+                    }
+                    let mut hi = i;
+                    while by_index.get(hi + 1).is_some_and(|m| m.path == path) {
+                        hi += 1;
+                    }
+                    (lo, hi)
+                };
+                let mut walk: Vec<usize> = Vec::new();
+                let mut seen_path = std::collections::HashSet::new();
+                let mut cur = start;
+                while let Some(i) = cur {
+                    if !seen_path.insert(by_index[i].path) {
+                        break;
+                    }
+                    // **File order is not driving order.** A third of the paths are stored with
+                    // progress falling along the file — 14 of 40 here, 20 of 51 elsewhere — so the
+                    // direction to run a path is the one its own progress rises in, and running it
+                    // by index leaves most of it behind or walks it backwards.
+                    let (lo, hi) = span(i);
+                    let forward = by_index[hi].progress >= by_index[lo].progress;
+                    let end = if forward { hi } else { lo };
+                    if forward {
+                        walk.extend(i..=hi);
+                    } else {
+                        walk.extend((lo..=i).rev());
+                    }
+                    let here = by_index[end].progress;
+                    cur = by_index[end]
+                        .linked()
+                        .map(|l| l as usize)
+                        .filter(|l| *l < by_index.len())
+                        .filter(|l| by_index[*l].progress > here)
+                        .min_by(|a, b| by_index[*a].progress.total_cmp(&by_index[*b].progress));
+                }
+                let pts: Vec<Vec3> =
+                    walk.iter().map(|i| nfsu2::world::remap([by_index[*i].x, by_index[*i].y, 0.0])).collect();
+                let mut steps: Vec<f32> = pts.windows(2).map(|w| (w[1] - w[0]).length()).collect();
+                let covered: f32 = steps.iter().sum();
+                let jumps = steps.iter().filter(|d| **d > 100.0).count();
+                steps.sort_by(f32::total_cmp);
+                let q = |f: f64| steps.get((steps.len() as f64 * f) as usize).copied().unwrap_or(0.0);
+                let stated = nodes.iter().map(|n| n.progress).fold(0.0_f32, f32::max);
+                // Why the walk stops where it does. Two candidates and they are cheap to separate:
+                // a path whose progress falls along file order breaks the "carry on" rule, and a
+                // start that is not at the head of its own path leaves most of the path behind.
+                let mut falling = 0;
+                for run in gizmo_nfs::world::routes::paths(&nodes) {
+                    if run.windows(2).any(|w| w[1].progress < w[0].progress) {
+                        falling += 1;
+                    }
+                }
+                let head = start.is_some_and(|i| i == 0 || by_index[i - 1].path != by_index[i].path);
+                println!(
+                    "  of {} paths, {falling} have progress falling along file order · the \
+                     least-progress node is at the head of its path: {head}",
+                    gizmo_nfs::world::routes::paths(&nodes).len()
+                );
+                println!(
+                    "  walked line: {} of {} nodes over {} paths · {covered:.0} m against the \
+                     file's {stated:.0} m ({:.0}%) · step p05 {:.1} median {:.1} p95 {:.1} m · \
+                     over 100 m: {jumps}",
+                    walk.len(), nodes.len(), seen_path.len(),
+                    100.0 * covered / stated.max(1.0), q(0.05), q(0.5), q(0.95)
+                );
+            }
+
+            // Is the race line just "every node in progress order"? `progress` is the file's own
+            // cumulative distance along the route, and `start_of` already trusts its minimum to be
+            // the start. If it orders the whole network into something driveable, a pilot has a
+            // line to follow instead of one street of a graph — which is the difference between
+            // driving the race and driving into the barrier beside it.
+            {
+                let mut all: Vec<(f32, Vec3)> = built
+                    .iter()
+                    .flat_map(|r| r.progress.iter().copied().zip(r.points.iter().copied()))
+                    .collect();
+                all.sort_by(|a, b| a.0.total_cmp(&b.0));
+                let mut steps: Vec<f32> = all.windows(2).map(|w| (w[1].1 - w[0].1).length()).collect();
+                let jumps = steps.iter().filter(|d| **d > 100.0).count();
+                let ties = all.windows(2).filter(|w| (w[1].0 - w[0].0).abs() < 0.01).count();
+                steps.sort_by(f32::total_cmp);
+                let q = |f: f64| steps.get((steps.len() as f64 * f) as usize).copied().unwrap_or(0.0);
+                println!(
+                    "  in progress order: {} points · step p05 {:.1} · median {:.1} · p95 {:.1} m · \
+                     over 100 m: {jumps} ({:.1}%) · shared progress values: {ties}",
+                    all.len(), q(0.05), q(0.5), q(0.95),
+                    100.0 * jumps as f64 / steps.len().max(1) as f64
+                );
+            }
             let (pts, filled) = built.iter().fold((0, 0), |(p, f), r| (p + r.points.len(), f + r.filled));
             let worst = built.iter().map(nfsu2::world::RoutePath::climbed).fold(0.0, f32::max);
             let length: f32 = built.iter().map(nfsu2::world::RoutePath::length).sum();

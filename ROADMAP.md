@@ -280,6 +280,39 @@ yanal 3,5 m, derinlik 5,7 m. Araba 1,64 × 4,39 m, yani sığıyor. Ve pole en �
 varsayımı artık geometriyle doğrulandı, kalan tek belirsizlik olan küresel ön/arka işareti de
 kapandı.
 
+### Rakiplere şoför — çalışıyor, ama 100 m sürüyor
+
+`rig::Pilot` saf takip (pure pursuit): çizgide ileride bir noktaya nişan al, ona doğru dön. Oyuncunun
+kullandığı `CarRig::drive`'ın aynısından geçiyor — fiziğe uzanan bir pilot, yarışılan arabadan başka
+bir araba sürüyor olurdu.
+
+Çalışan kısım ölçüldü: yedi rakip ızgarada doğuyor, gaz veriyor, 30 km/h'ye çıkıyor, direksiyon
+kırıyor ve ilerleme sayacı ilerliyor. Kare maliyeti 8,0 → 8,1 ms.
+
+**Sonra takılıyorlar, ~100 m'de.** Takıldıkları yeri çizdirdim: bir otoyol kavşağı, şeritlerin
+arasında çarpışma bariyerleri. Sebep pilot değil, ona verdiğimiz çizgi: elimizde **yarış çizgisi
+yok, bir yol ağı var** — 40 yol, aralarında kavşaklar — ve pilot ağın bir yolunu takip ediyor.
+Nişan noktası bariyerin öbür tarafına düşebiliyor.
+
+`relocate` artık yalnız arabanın baktığı yönle uyuşan yolları seçiyor (karşı şerit birkaç metre
+ötede ve bariyerin arkasında), bu biraz uzattı ama kökten çözmedi.
+
+**Çizgiyi ağdan yürüyerek çıkarmayı denedim, iki hipotez de yetmedi:**
+
+1. *İlerleme sırasına diz.* Çürüdü: bütün düğümleri `progress`'e göre sıralayınca adımların
+   %44'ü 100 m'nin üstünde. O ölçü yol-içi, ağ geneli değil.
+2. *Kavşakları yürü.* Kısmen: düğümlerin `links`'ini takip edip her kavşakta ilerlemeyi sürdüren
+   bağlantıyı seçmek **geometrik olarak sürekli** bir çizgi veriyor (üç yarışta da 100 m üstü
+   sıçrama sıfır) — ama yalnız %1–16'sını kaplıyor, sonra duruyor.
+
+Yolda çıkan asıl bulgu bu ikincisini ararken geldi ve parsere yazıldı: **dosya sırası sürüş sırası
+değil.** Kurulumdaki 2.923 yolun **1.361'i** dosya sırasında `progress` düşerek bitiyor, yani
+neredeyse yarısı sürüldüğü yönün tersine saklanmış. Bir yolun başı `+20`'nin sorusu, indeksin
+değil.
+
+Sıradaki iş: yürüyüşün neden durduğunu bulmak. Duruş noktası ya `seen_path` koruması ya da
+"ilerlemeyi sürdüren bağlantı yok" — ikisi ayırt edilebilir ve ayırt edilmeli.
+
 ---
 
 ## 1. Ana fikir

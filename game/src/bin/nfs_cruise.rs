@@ -32,7 +32,7 @@ use gizmo::physics::world::PhysicsWorld;
 use gizmo::prelude::*;
 use gizmo_nfs::types::AssetHash;
 use nfsu2::geom::add_transform;
-use nfsu2::rig::{spawn_car, CarRig, ChaseCamera, Driver, Placement, Rescue};
+use nfsu2::rig::{spawn_car, CarRig, ChaseCamera, Driver, Pilot, Placement, Rescue};
 use nfsu2::scene::{self, Textures};
 // Aliased: `world` is the ECS `World` in every function here, and a module by the same name three
 // characters from a variable of another type is a re-read waiting to happen.
@@ -109,6 +109,13 @@ struct CruiseState {
     free_roam: bool,
     /// The lone free-roam markers, so the HUD can say how many places there are to jump to.
     spots: usize,
+    /// The rivals, and the driver each one has.
+    field: Vec<(CarRig, Pilot)>,
+    /// How many pilots produced controls last frame — zero means they are not being driven at all,
+    /// which looks exactly like being driven badly.
+    driving: usize,
+    /// The race line the rivals follow. Empty in free roam and when no route is loaded.
+    line: Vec<city::RoutePath>,
     /// Recent frame times, in milliseconds, newest last.
     ///
     /// **The number the project has never had.** Every decision about culling, detail tiers and
@@ -614,7 +621,7 @@ fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> CruiseState
             Some(y) => Vec3::new(slot.x, y, slot.z),
             None => *slot,
         };
-        field.push(spawn_car(
+        let rig = spawn_car(
             world,
             renderer,
             &mut assets,
@@ -624,7 +631,10 @@ fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> CruiseState
                 Some(h) => Placement::facing(stand, h, DROP),
                 None => Placement { ground: stand, yaw: 0.0, clearance: DROP },
             },
-        ));
+        );
+        let mut pilot = Pilot::new();
+        pilot.relocate(stand, start_heading.unwrap_or(Vec3::NEG_Z), &course_paths);
+        field.push((rig, pilot));
     }
     if !field.is_empty() {
         // The formation, in its own terms: how far apart the cars are across a row and between the
@@ -678,6 +688,9 @@ fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> CruiseState
         course: course.take(),
         free_roam,
         spots: spot_count,
+        field,
+        driving: 0,
+        line: course_paths,
         frames: Vec::with_capacity(FRAME_WINDOW),
     }
 }
@@ -704,6 +717,20 @@ fn update(world: &mut World, state: &mut CruiseState, dt: f32, input: &Input) {
 
     let controls = state.driver.read(input, dt);
     state.rig.drive(world, &controls);
+
+    // The rivals. Same `drive` the player's controls go through — a pilot that reached past it
+    // into physics would be racing a different car from the one on screen.
+    state.driving = 0;
+    for i in 0..state.field.len() {
+        let Some(pose) = state.field[i].0.pose(world) else { continue };
+        let line = std::mem::take(&mut state.line);
+        let c = state.field[i].1.drive(pose.position, pose.rotation, pose.speed, &line);
+        state.line = line;
+        if let Some(c) = c {
+            state.field[i].0.drive(world, &c);
+            state.driving += 1;
+        }
+    }
 
     if input.is_key_just_pressed(KeyCode::KeyR as u32) {
         state.rig.reset(world);
@@ -797,6 +824,44 @@ fn diagnose(world: &World, state: &mut CruiseState, pose: nfsu2::rig::Pose) {
     let Some(v) = vehicles.get(state.rig.chassis) else { return };
     let grounded: Vec<bool> = v.wheels.iter().map(|w| w.is_grounded).collect();
     let vel = world.borrow::<Velocity>().get(state.rig.chassis).map_or(Vec3::ZERO, |v| v.linear);
+    // The two things a pilot is judged on, and both are numbers rather than impressions: does it
+    // stay inside the corridor the race defines, and does its progress only go up. A rival that
+    // drifts out is lost; one whose progress falls has been pulled onto a crossing branch, which
+    // is the failure `Pilot`'s monotone index exists to prevent.
+    if let Some(c) = &state.course {
+        if !state.field.is_empty() {
+            let mut inside = 0;
+            let mut worst = 0.0f32;
+            for (rig, _) in &state.field {
+                let Some(p) = rig.pose(world) else { continue };
+                match c.corridor.locate(p.position) {
+                    Some(f) => {
+                        inside += usize::from(f.distance <= COURSE_HALF_WIDTH);
+                        worst = worst.max(f.distance);
+                    }
+                    None => worst = f32::INFINITY,
+                }
+            }
+            let moved = state
+                .field
+                .iter()
+                .filter(|(_, pilot)| pilot.progress(&state.line).is_some_and(|v| v > 1.0))
+                .count();
+            let lead = state.field.first().and_then(|(r, _)| r.pose(world));
+            let (lp, ls) = lead.map_or((Vec3::ZERO, 0.0), |p| (p.position, p.speed));
+            println!(
+                "field  {} rivals · {inside} inside the corridor · furthest {worst:.0} m · \
+                 {moved} past the line's start · {} driving · lead at ({:.0},{:.0}) {:.0} km/h, \
+                 progress {:.0} m",
+                state.field.len(),
+                state.driving,
+                lp.x,
+                lp.z,
+                ls * 3.6,
+                state.field.first().and_then(|(_, pl)| pl.progress(&state.line)).unwrap_or(-1.0),
+            );
+        }
+    }
     let (med, p95) = frame_ms(&state.frames).unwrap_or((f32::NAN, f32::NAN));
     println!(
         "diag  pos ({:+.1},{:+.2},{:+.1})  vel ({:+.2},{:+.2},{:+.2})  speed {:+.1} km/h  cell {:?}           grounded {grounded:?}  frame {med:.1}/{p95:.1} ms ({:.0} fps)",
