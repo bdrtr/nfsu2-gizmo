@@ -310,6 +310,28 @@ değil.** Kurulumdaki 2.923 yolun **1.361'i** dosya sırasında `progress` düş
 neredeyse yarısı sürüldüğü yönün tersine saklanmış. Bir yolun başı `+20`'nin sorusu, indeksin
 değil.
 
+**Yürüyüşün neden durduğu bulundu ve o hattı kapattım:** dördü de "hiçbir bağlantı ilerlemeyi
+sürdürmüyor" diye duruyor. Ama sayılara bakınca kuralın önermesi çürüyor — 4041'de yürüyüş
+`progress`'in tamamını (0→5911) kat ediyor ama yalnız 970 m yol gidiyor, altı kat fark; ve 4001'in
+ilerlemesi 0'dan değil **804**'ten başlıyor. `progress` küresel bir tur koordinatı değil, yollar
+farklı tabanlar taşıyor. Kavşakta "ilerlemeyi sürdür" kuralının dayanağı yok.
+
+Bunun yerine okunmamış `0x34149`'a baktım ve orada gerçek bir şey çıktı — bkz. aşağısı.
+
+### `0x34149` çözüldü: yol başına bir kayıt
+
+**220 bayt / yol**, ve ödeme tam olarak `220 × yol sayısı` — leafi taşıyan 105 dosyanın hepsinde.
+İki alan okundu ve ikisi de **2.923 kayıtta 2.923** doğru: `+116`/`+120` yolun dosya sırasındaki
+ilk ve son düğümünün ilerlemesi, `+128`/`+132` en küçüğü ve en büyüğü.
+
+İkisi birlikte **yolun hangi yöne sürüldüğünü dosyanın kendisi söylüyor** — `from > to` ise ters
+saklanmış — ve çıkan sayı 1.361, onsuz yaptığımız ölçümle kayıt kayıt aynı.
+
+Oyun tarafında `build_route` artık yolları ilerlemeye göre çeviriyor. Bu bir düzeltme, süs değil:
+çizginin neredeyse yarısı ters çiziliyor ve ters sürülüyordu. Rakipler 100 m yerine ~140 m gidiyor,
+yedisi de koridorda kalıyor — ama hâlâ duruyorlar, yani asıl sorun (yarış çizgisinin ağdan nasıl
+çıkarılacağı) açık.
+
 Sıradaki iş: yürüyüşün neden durduğunu bulmak. Duruş noktası ya `seen_path` koruması ya da
 "ilerlemeyi sürdüren bağlantı yok" — ikisi ayırt edilebilir ve ayırt edilmeli.
 

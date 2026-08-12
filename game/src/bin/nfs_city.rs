@@ -701,6 +701,18 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
             // rather than a jump across the map.
             if std::env::var("NFS_LINE").is_ok() {
                 let by_index: Vec<&gizmo_nfs::world::routes::RouteNode> = nodes.iter().collect();
+                {
+                    // Where progress actually runs. `start_of` treats the minimum as the start
+                    // line, which assumes the measure is a lap coordinate beginning at zero.
+                    let mut v: Vec<f32> = nodes.iter().map(|n| n.progress).collect();
+                    v.sort_by(f32::total_cmp);
+                    let zeros = v.iter().filter(|x| **x < 0.5).count();
+                    println!(
+                        "  progress runs {:.0}..{:.0} m · {zeros} nodes at zero · p25 {:.0} \
+                         median {:.0} p75 {:.0}",
+                        v[0], v[v.len() - 1], v[v.len() / 4], v[v.len() / 2], v[v.len() * 3 / 4]
+                    );
+                }
                 let start = nodes
                     .iter()
                     .enumerate()
@@ -722,8 +734,10 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
                 let mut walk: Vec<usize> = Vec::new();
                 let mut seen_path = std::collections::HashSet::new();
                 let mut cur = start;
+                let mut why = "ran off the table";
                 while let Some(i) = cur {
                     if !seen_path.insert(by_index[i].path) {
+                        why = "came back to a path it had already run";
                         break;
                     }
                     // **File order is not driving order.** A third of the paths are stored with
@@ -739,12 +753,32 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
                         walk.extend((lo..=i).rev());
                     }
                     let here = by_index[end].progress;
-                    cur = by_index[end]
+                    let links: Vec<usize> = by_index[end]
                         .linked()
                         .map(|l| l as usize)
                         .filter(|l| *l < by_index.len())
-                        .filter(|l| by_index[*l].progress > here)
-                        .min_by(|a, b| by_index[*a].progress.total_cmp(&by_index[*b].progress));
+                        .collect();
+                    let onward: Vec<usize> =
+                        links.iter().copied().filter(|l| by_index[*l].progress > here).collect();
+                    if onward.is_empty() {
+                        why = if links.is_empty() {
+                            "the last node of the path has no links at all"
+                        } else {
+                            "the links all go back — none carries progress on"
+                        };
+                        // What the links *do* say, so "none carries progress on" is a fact about
+                        // this rule and not about the data.
+                        println!(
+                            "    stopped at progress {here:.0} m with {} link(s): {:?}",
+                            links.len(),
+                            links.iter().map(|l| by_index[*l].progress.round()).collect::<Vec<_>>()
+                        );
+                        cur = None;
+                    } else {
+                        cur = onward
+                            .into_iter()
+                            .min_by(|a, b| by_index[*a].progress.total_cmp(&by_index[*b].progress));
+                    }
                 }
                 let pts: Vec<Vec3> =
                     walk.iter().map(|i| nfsu2::world::remap([by_index[*i].x, by_index[*i].y, 0.0])).collect();
@@ -772,7 +806,7 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
                 println!(
                     "  walked line: {} of {} nodes over {} paths · {covered:.0} m against the \
                      file's {stated:.0} m ({:.0}%) · step p05 {:.1} median {:.1} p95 {:.1} m · \
-                     over 100 m: {jumps}",
+                     over 100 m: {jumps} · stopped because it {why}",
                     walk.len(), nodes.len(), seen_path.len(),
                     100.0 * covered / stated.max(1.0), q(0.05), q(0.5), q(0.95)
                 );

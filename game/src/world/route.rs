@@ -105,6 +105,15 @@ pub fn build(nodes: &[RouteNode], ground: &Ground) -> Vec<RoutePath> {
         .into_iter()
         .filter(|p| !p.is_empty())
         .map(|path| {
+            // **File order is the sequence, not the direction.** Nearly half the install's paths —
+            // 1,361 of 2,923 — are stored with `progress` falling along the file, and the file says
+            // so itself in `0x00034149`. Left as they are, half the race line is drawn and driven
+            // backwards, which is not visible in a ribbon and is very visible in a car.
+            let path: Vec<_> = if path[path.len() - 1].progress < path[0].progress {
+                path.iter().rev().copied().collect()
+            } else {
+                path.to_vec()
+            };
             let flat: Vec<Vec3> = path.iter().map(|n| remap([n.x, n.y, 0.0])).collect();
 
             let candidates: Vec<Vec<f32>> =
