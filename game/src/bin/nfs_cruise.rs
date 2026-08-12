@@ -613,10 +613,10 @@ fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> CruiseState
     // a ribbon that disagreed about where the road is would be very hard to read.
     let net = city::Network::of(&route_nodes, &ground);
     if !net.is_empty() {
-        let (edges, dead, steep) = net.shape();
+        let (edges, dead, steep, walled) = net.shape();
         println!(
-            "network: {} nodes · {edges} links · {dead} with no way out · {steep} too steep to \
-             drive (a deck above, not a ramp)",
+            "network: {} nodes · {edges} links · {dead} with no way out · {steep} steeper than 1:1 \
+             · {walled} dropped because the road does not continue along them",
             net.len()
         );
     }

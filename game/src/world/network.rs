@@ -42,6 +42,8 @@ pub struct Junction {
 #[derive(Debug, Clone, Default)]
 pub struct Network {
     nodes: Vec<Junction>,
+    /// Links dropped because the road does not continue along them — see [`Network::drop_walled`].
+    walled: usize,
 }
 
 impl Network {
@@ -112,7 +114,60 @@ impl Network {
                 edge(i, l as usize, &mut out);
             }
         }
-        Self { nodes: out }
+        let mut me = Self { nodes: out, walled: 0 };
+        me.drop_walled(ground);
+        me
+    }
+
+    /// Remove the links a car cannot actually drive, because the road does not continue along them.
+    ///
+    /// **Twice now the field has stopped against something the graph said was a road**: first a
+    /// crash barrier between two carriageways of an interchange, then a retaining wall beside one.
+    /// Both times the node on the far side was a few metres away and the link between them is in
+    /// the file — the network joins roads that run beside each other, and nothing in it says there
+    /// is a wall in between.
+    ///
+    /// Nothing in the *parser* can say so either; it is a question about the city, and the city
+    /// answers it. Walk the link and ask [`Ground`] for a surface near the interpolated height at
+    /// each step. Where the road continues there is one; where a wall or a drop separates the two
+    /// there is not.
+    ///
+    /// Kept only if it earns its place — see `ROADMAP.md` for the sweep that threw out the previous
+    /// filter, which was just as plausible and made the field get less far at every setting.
+    fn drop_walled(&mut self, ground: &Ground) {
+        const STEP: f32 = 3.0;
+        // Swept, and it is the sweep that decides it rather than the idea: 0 (no filter) leaves the
+        // field at 21 junctions and the second waypoint, 2.5 makes it *worse* at 17, 5 worse still
+        // at 15, and 8 and 12 both take it to **33 junctions and the sixth waypoint**. Tight
+        // tolerances cut real roads, because a straight line between two nodes does not follow a
+        // crest or a dip; loose ones cut only what the road genuinely does not cross.
+        let tolerance: f32 =
+            std::env::var("NFS_WALL").ok().and_then(|v| v.parse().ok()).unwrap_or(8.0);
+        if tolerance <= 0.0 {
+            return;
+        }
+        let solid = |a: Vec3, b: Vec3| {
+            let d = Vec3::new(b.x - a.x, 0.0, b.z - a.z);
+            let n = (d.length() / STEP).ceil().max(1.0) as usize;
+            (1..n).all(|k| {
+                let t = k as f32 / n as f32;
+                let p = a.lerp(b, t);
+                ground.heights_at(p.x, p.z).iter().any(|h| (h - p.y).abs() <= tolerance)
+            })
+        };
+        let mut cut: Vec<(usize, u32)> = Vec::new();
+        for i in 0..self.nodes.len() {
+            for l in &self.nodes[i].links {
+                if (*l as usize) > i && !solid(self.nodes[i].at, self.nodes[*l as usize].at) {
+                    cut.push((i, *l));
+                }
+            }
+        }
+        self.walled = cut.len();
+        for (a, b) in cut {
+            self.nodes[a].links.retain(|l| *l != b);
+            self.nodes[b as usize].links.retain(|l| *l != a as u32);
+        }
     }
 
     #[must_use]
@@ -189,7 +244,7 @@ impl Network {
     /// Reported rather than assumed: a node with no way out is a car that stops, and the count is
     /// the difference between "the driver is bad" and "the road ends here".
     #[must_use]
-    pub fn shape(&self) -> (usize, usize, usize) {
+    pub fn shape(&self) -> (usize, usize, usize, usize) {
         let steep = (0..self.nodes.len())
             .flat_map(|i| self.nodes[i].links.iter().map(move |l| (i as u32, *l)))
             .filter(|(a, b)| self.grade(*a, *b) > 1.0)
@@ -199,6 +254,7 @@ impl Network {
             self.nodes.iter().map(|n| n.links.len()).sum::<usize>() / 2,
             self.nodes.iter().filter(|n| n.links.is_empty()).count(),
             steep,
+            self.walled,
         )
     }
 }

@@ -387,7 +387,42 @@ uzak tutuyor. Filtre kaldırıldı, eğim yalnız rapor ediliyor.
 Düğüm 132'deki engel hâlâ orada. Ama artık yüksekliği doğru, ve tıkanma yeri bir soru olarak
 keskin: altı araba oraya varıyor, yedincisi ızgaradan hiç çıkamıyor.
 
-Sıradaki iş: düğüm 132'de ne olduğunu görmek. Duruş noktası ya `seen_path` koruması ya da
+### Duvar: doğru filtre, ve onu bulan şey süpürme
+
+Düğüm 132'yi araba açısından çizdirdim: yolda, sağda **dalgalı beton istinat duvarı**, ve düğüm tam
+o yönde. İkinci kez aynı desen — önce çarpışma bariyeri, şimdi duvar. Ağ yan yana giden yolları
+birbirine bağlıyor ve aralarında ne olduğunu söylemiyor.
+
+Parser bunu söyleyemez; bu şehir hakkında bir soru, ve şehir cevaplıyor. `Network::drop_walled`
+her bağın üstünde yürüyüp `Ground`'a "burada araya giren yükseklikte bir yüzey var mı" diye soruyor.
+Yol devam ediyorsa var, duvar ya da boşluk varsa yok.
+
+**Ama toleransı süpürmeden koymadım, çünkü bir önceki "makul" filtre çürümüştü.** Sonuç:
+
+| tolerans | kesilen bağ | kavşak | yol noktası |
+|---:|---:|---:|---:|
+| 0 (filtresiz) | 0 | 106 | 2 |
+| 5 | 148 | 65 | 1 |
+| **8** | **90** | **166** | **6** |
+| 12 | 62 | 166 | 6 |
+| 20 | 59 | 166 | 6 |
+
+Dar tolerans gerçek yolları kesiyor (iki düğüm arasındaki düz çizgi tümseği ya da çukuru takip
+etmez); 8'den sonra plato. Varsayılan 8, `NFS_WALL` ile değişir. Alan ızgaradan ~1,5 km uzağa,
+(528, 972)'ye ulaşıyor.
+
+### `nfs_sim`: penceresiz yarış
+
+Yukarıdaki tablo bir öncekinin sekiz dakikası yerine **65 saniye** sürdü. `nfs_sim` aynı şehri,
+aynı ağı, aynı ızgarayı ve aynı fiziği kuruyor ama kare çizmiyor: 120 saniyelik yarış **13 saniyede**
+koşuyor, gerçek zamanın 9 katı. GPU yine açılıyor — `spawn_car` doku yüklüyor, yani araba gerçek —
+ama sunulmuyor.
+
+Sonunda makinece okunabilir tek satır bırakıyor (`SUMMARY junctions=… waypoint=…`), ki süpürmeler
+döngüye girebilsin. Ölçüt olarak metre değil **kavşak ve yol noktası** seçildi: duvara sürtünen bir
+araba da metre biriktirir.
+
+Sıradaki iş: sekiz arabanın üçü ızgaradan hiç çıkamıyor. Duruş noktası ya `seen_path` koruması ya da
 "ilerlemeyi sürdüren bağlantı yok" — ikisi ayırt edilebilir ve ayırt edilmeli.
 
 ---
