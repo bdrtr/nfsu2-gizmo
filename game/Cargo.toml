@@ -10,7 +10,7 @@ default-run = "nfs_drive"
 [dependencies]
 # Gizmo motoru — SABİTLENMİŞ commit. Oyun donmuş bir motora karşı geliştirilir; kardeş
 # `Gizmo` checkout'u bu sırada serbestçe ilerler (orada başka oturumlar çalışıyor) ve
-# artık oyunun derlemesini etkilemez. Eskiden burada `path = "../../Gizmo-engine/..."`
+# artık oyunun derlemesini etkilemez. Eskiden burada `path = "../../Gizmo/..."`
 # vardı: o kurulumda motorun HEAD'i her ne ise oyun onu derliyordu.
 #
 # Pin: `main` @ ba969c0 (2026-08-11). Oyunun ihtiyaç duyduğu her şey bu commit'te:
@@ -19,7 +19,7 @@ default-run = "nfs_drive"
 #
 # Yerel motoru geçici olarak denemek için kök Cargo.toml'daki `[patch]` bloğunu aç.
 # Pini yükseltmeden önce MOTOR-NOTLARI.md'deki kontrol listesini oku.
-gizmo = { package = "gizmo-engine", git = "https://github.com/bdrtr/Gizmo", rev = "ba969c0d881f8f93a9049988899325e9445ac3dc", features = ["audio", "scripting", "scene", "editor", "render", "window", "ui"] }
+gizmo = { package = "gizmo-engine", git = "https://github.com/bdrtr/Gizmo", rev = "48ac99e8bc4f27f9943e1d282a112e13cc1efaf0", features = ["audio", "scripting", "scene", "editor", "render", "window", "ui"] }
 # Saf NFSU2 asset parser'ı (motordan bağımsız) — artık kendi reposunda: PryHUB varlık aracı.
 # Yerelde paralel geliştirme için kök Cargo.toml'daki `[patch]` bunu ../PryHUB'a yönlendirir.
 gizmo-nfs = { git = "https://github.com/bdrtr/PryHUB.git", branch = "main" }

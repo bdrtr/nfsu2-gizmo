@@ -27,7 +27,7 @@ gizmo-nfs = { path = "../PryHUB/crates/gizmo-nfs" }
 # olduğunu söyler (git kaynağı mı, yoksa yerel path mi).
 #
 # [patch."https://github.com/bdrtr/Gizmo"]
-# gizmo-engine = { path = "../Gizmo-engine/crates/gizmo" }
+# gizmo-engine = { path = "../Gizmo/crates/gizmo" }
 
 # Parser hata ayıklama derlemesinde de 7.6 MB'lık dosyalar açıyor: optimize kalsın, yoksa
 # araba yüklenmesi saniyeler sürüyor.

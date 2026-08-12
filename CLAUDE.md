@@ -22,7 +22,7 @@ its `ug2` CLI and the PryHUB inspector built on it — is its own project:
 
 ```
 code/
-├─ Gizmo-engine/     ← the engine (github.com/bdrtr/Gizmo) — read it freely, but the build no
+├─ Gizmo/            ← the engine (github.com/bdrtr/Gizmo) — read it freely, but the build no
 │                      longer uses it: the engine is pinned by commit (see below)
 ├─ PryHUB/           ← the parser + asset toolkit (github.com/bdrtr/PryHUB) — required sibling
 └─ nfsu2-gizmo/      ← this repo (the game)

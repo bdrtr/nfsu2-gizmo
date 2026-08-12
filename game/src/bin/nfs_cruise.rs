@@ -17,7 +17,10 @@
 //! **R** back to the start · **T** auto-shift · hold **right mouse** to orbit · **F** print where
 //! the car is.
 //!
-//! Env: `NFS_TIERS=all` draw the coarse detail tiers too (off by default — they are distance
+//! Env: `NFS_FREEROAM=1` **serbest dolaşım** — Bayview with no race in it: loads `STREAML4RA.BUN`
+//! (the one region of the eight that is the city), starts on the free-roam grid, draws no line and
+//! never says you are off course · `NFS_SPOT=<n>` with it, stand at the n'th of the 24 places the
+//! free-roam markers name instead · `NFS_TIERS=all` draw the coarse detail tiers too (off by default — they are distance
 //! imposters and from a car they are blurred boxes in open ground) · `NFS_ROUTE=<Paths*.bin>` load that race: its line is drawn on the road and the HUD says
 //! where you are on it and whether you are still on it · `NFS_AT="x,y,z"` where to start — downtown sits near `y ≈ 27` and the airport near
 //! `y ≈ -11`, so the height matters as much as the place · `NFS_BUDGET=<n>` caps objects,
@@ -98,7 +101,23 @@ struct CruiseState {
     heading_out: bool,
     /// The race this file describes, if `NFS_ROUTE` named one.
     course: Option<Course>,
+    /// Free roam: Bayview with no race in it. Mutually exclusive with `course` by construction.
+    free_roam: bool,
+    /// The lone free-roam markers, so the HUD can say how many places there are to jump to.
+    spots: usize,
+    /// Recent frame times, in milliseconds, newest last.
+    ///
+    /// **The number the project has never had.** Every decision about culling, detail tiers and
+    /// streaming has been argued from object counts, and an object count is not a frame time: the
+    /// engine's own spatial index ships with a benchmark saying a BVH *loses* to a linear scan
+    /// below roughly eight thousand renderables and telling the caller to measure their own scene
+    /// instead of quoting the band. This is that measurement.
+    frames: Vec<f32>,
 }
+
+/// How many frames the timing window keeps. One second at 60 Hz, so a stutter shows as a p95 that
+/// moves rather than as a mean that hides it.
+const FRAME_WINDOW: usize = 60;
 
 /// A route file's network, and where the car is on it.
 ///
@@ -173,11 +192,19 @@ fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> CruiseState
     // A race is driven in a region, so load that region rather than every bundle in the folder.
     // The eight are not versions of one city — see `world::bundle_for_route` for what stacking them
     // costs — and until something streams by position, the route names the region for us.
-    let region = std::env::var("NFS_ROUTE")
-        .ok()
-        .and_then(|r| city::bundle_for_route(std::path::Path::new(&r)));
+    //
+    // Free roam is the same question with a fixed answer. It is not a race and has no route file,
+    // so `NFS_FREEROAM=1` names the city directly: `STREAML4RA.BUN`, the one region of the eight
+    // that *is* Bayview. See `world::REGIONS` for what the other seven are.
+    let free_roam = std::env::var("NFS_FREEROAM").is_ok_and(|v| v != "0");
+    let region = if free_roam {
+        city::free_roam_bundle(std::path::Path::new(&tracks))
+    } else {
+        std::env::var("NFS_ROUTE").ok().and_then(|r| city::bundle_for_route(std::path::Path::new(&r)))
+    };
     if let Some(b) = &region {
-        println!("region: {} — the bundle this race is driven in", b.display());
+        let what = if free_roam { "free roam is driven in" } else { "this race is driven in" };
+        println!("region: {} — the bundle {what}", b.display());
     }
     let source = region.map_or_else(|| tracks.clone(), |b| b.display().to_string());
     let city::Bundles { files, meshes, packs, shared } = city::load(&source);
@@ -237,7 +264,11 @@ fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> CruiseState
     // the ground is at `y = 27`. Asked properly, the number comes from the city.
     let ground = city::Ground::of(&colliders);
     let named_at = std::env::var("NFS_AT").is_ok();
+    //
+    // Free roam takes the `Err` arm on purpose even if `NFS_ROUTE` is set: there is nothing to
+    // follow, no line to draw and no corridor to be outside of. That is what free roam is.
     let (course_paths, mut course) = match std::env::var("NFS_ROUTE") {
+        _ if free_roam => (Vec::new(), None),
         Err(_) => (Vec::new(), None),
         Ok(file) => {
             let bytes = std::fs::read(&file).unwrap_or_else(|e| panic!("read {file}: {e}"));
@@ -263,7 +294,41 @@ fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> CruiseState
     // Where the file puts the cars, if it says. `TrackPosMarkers*.bin` sits beside the route file
     // and holds the event's starting grids; `start_of`'s least-progress node is the fallback for
     // when it does not, and it is a guess where this is a record.
-    let course_start = std::env::var("NFS_ROUTE")
+    let mut spot_count = 0usize;
+    let course_start = if free_roam {
+        // The city's own free-roam grid, and the places it names around it. Only `ROUTESL4RA`
+        // carries any: the other seven `TrackPosMarkersFreeRoam.bin` are 16-byte shells.
+        let file = std::path::Path::new(&tracks).join("ROUTESL4RA/TrackPosMarkersFreeRoam.bin");
+        std::fs::read(&file).ok().and_then(|bytes| {
+            let m = gizmo_nfs::world::routes::markers(&bytes).ok()?;
+            let spots = city::free_roam_spots(&m);
+            spot_count = spots.len();
+            println!(
+                "free roam: {} markers · 1 grid · {} named places in the city",
+                m.len(),
+                spots.len()
+            );
+            // NFS_SPOT=<n>: stand at one of the lone markers instead of the grid. They are spread
+            // over the whole map and the file considers each of them a place, so they are the
+            // cheapest way to look at a part of Bayview that is not the start.
+            match std::env::var("NFS_SPOT").ok().and_then(|v| v.parse::<usize>().ok()) {
+                Some(i) if !spots.is_empty() => {
+                    let p = spots[i % spots.len()];
+                    // A lone marker carries no direction — it is one point, and a grid's front/back
+                    // trick has nothing to work with. Facing the grid gives the car *a* heading that
+                    // is at least about the city rather than about the axes, and any of them is a
+                    // guess: the name behind the group hash is what would say which way a place
+                    // faces, and it is not recovered yet.
+                    let toward =
+                        city::free_roam_start(&m).map_or(Vec3::Z, |(g, _)| (g - p) * Vec3::new(1.0, 0.0, 1.0));
+                    println!("  spot {}/{}: {p:?}", i % spots.len(), spots.len());
+                    Some((p, toward.normalize_or(Vec3::Z)))
+                }
+                _ => city::free_roam_start(&m),
+            }
+        })
+    } else {
+        std::env::var("NFS_ROUTE")
         .ok()
         .and_then(|r| {
             let route = std::path::Path::new(&r);
@@ -276,13 +341,27 @@ fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> CruiseState
             let dir = route.parent()?;
             let bytes = std::fs::read(dir.join("TrackPosMarkersAll.bin")).ok()?;
             let m = gizmo_nfs::world::routes::markers(&bytes).ok()?;
-            let placed = city::start_grid(&m, event);
+            // A track has two grids — its two race directions — and the event's own outline says
+            // which one this race uses. Without it the choice was "the first", which is a coin
+            // flip; see `city::start_grid_facing` for what the outline is worth in numbers.
+            let route_bytes = std::fs::read(route).ok()?;
+            let catalogue = gizmo_nfs::world::routes::events(&route_bytes).unwrap_or_default();
+            let placed = match catalogue.iter().find(|e| e.id == event) {
+                Some(e) => city::start_grid_facing(&m, e),
+                None => city::start_grid(&m, event),
+            };
             if placed.is_some() {
-                println!("start grid: event {event}, pole slot from TrackPosMarkersAll.bin");
+                let how = if catalogue.iter().any(|e| e.id == event) {
+                    "grid picked by the event outline"
+                } else {
+                    "first grid — this event has no outline"
+                };
+                println!("start grid: event {event}, {how}");
             }
             placed
         })
-        .or_else(|| city::start_of(&course_paths));
+        .or_else(|| city::start_of(&course_paths))
+    };
 
     // A race has a start line, and it is the only thing in the data that names one: the point of
     // least `progress`. It takes precedence over the downtown default, and gives the car a heading
@@ -417,6 +496,7 @@ fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> CruiseState
             }
         }
 
+        let lift = scene::city_lift();
         for m in &visuals.meshes {
             // The city's lighting is baked into its vertex colours; `BakedLit` multiplies them in
             // rather than relighting a static world that was never drawn to be relit.
@@ -424,36 +504,53 @@ fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> CruiseState
                 Some(bg) => Material::new(bg.clone()).with_baked_lit(Vec4::new(1.0, 1.0, 1.0, 1.0)),
                 None => Material::new(white.clone()).with_baked_lit(Vec4::new(0.35, 0.35, 0.38, 1.0)),
             };
+            // The two arms the engine gained and nothing was pulling — `scene::city_lift`.
+            let material = material.with_ambient(lift.0).with_emissive(lift.1);
             scene::spawn_mesh(world, m.mesh.clone(), material, Transform::new(m.origin));
         }
 
-        // `Skybox`, and it is the lesser of two wrongs rather than the right answer. What a painted
-        // backdrop needs is what the note on `is_backdrop` already says: drawn first, camera-locked,
-        // depth writes off. The pinned engine has no such path, and neither material is it:
+        // `MaterialType::Backdrop`: drawn first, camera-locked, depth writes off — the three
+        // things a painted backdrop needs, which the note on `is_backdrop` had been asking for.
         //
-        //   - `MaterialType::Skybox` gets the *depth* right — `sky.wgsl` pins NDC z to the far
-        //     plane, so it can never occlude the city — but it contains no `textureSample` at all.
-        //     It discards the mesh's texture and vertex colour and returns a procedural
-        //     zenith/horizon/sun gradient computed from `scene.sun_color`. NFSU2's own painted sky
-        //     never reaches the screen; what you get is the engine's, at a pale (225,231,234).
-        //   - `MaterialType::Unlit` gets the *pixels* right (`vertex colour × albedo × texture`)
-        //     and the depth wrong: the panorama panels then draw as ordinary geometry in front of
-        //     the city, which is the "wall across the whole frame" that had them excluded in the
-        //     first place. Measured: frame median 30/255 as a skybox, 14/255 unlit, with two pale
-        //     panels sitting between the camera and the world.
+        // This replaced a choice between two wrongs, and the reason it is worth a paragraph is that
+        // the *pixels* of the old one are still what the numbers in `MOTOR-NOTLARI.md` item 7 are
+        // measured against:
         //
-        // So: the engine's invented sky, until the engine can draw ours. It still buys the thing
-        // that was missing — a horizon, and a skyline that reads as silhouette against something.
-        // `MOTOR-NOTLARI.md` carries the gap.
+        //   - `MaterialType::Skybox` got the *depth* right — `sky.wgsl` pins NDC z to the far
+        //     plane, so it can never occlude the city — but contained no `textureSample` at all,
+        //     discarding the mesh's texture and vertex colour for a procedural gradient computed
+        //     from `scene.sun_color`. NFSU2's own painted sky never reached the screen; what you
+        //     got was the engine's, at a pale (225,231,234). Frame median 30/255.
+        //   - `MaterialType::Unlit` got the *pixels* right (`vertex colour × albedo × texture`) and
+        //     the depth wrong: the panorama panels drew as ordinary geometry in front of the city,
+        //     which is the "wall across the whole frame" that had them excluded in the first place.
+        //     Frame median 14/255, with two pale panels between the camera and the world.
+        //
+        // **`with_backdrop_placed`, and the distinction is the whole point.** The locked variant
+        // is right for a unit-cube skybox and wrong for this: NFSU2's backdrop is *world-placed
+        // geometry* 12–18 km across, and locking it to the camera dragged a three-kilometre panel
+        // onto the lens — move the camera 1,000 m and the panel stayed at the same screen position
+        // and the same size, covering the city rather than sitting behind it. The engine gained
+        // the placed variant for exactly this (`MOTOR-NOTLARI.md` 7 and 9); the same measurement
+        // now reads 0.0 %.
+        //
+        // On by default: this is the game's own sky, and the frame is wrong without it in a way
+        // that is easy to mistake for a different bug. The city's reflective surfaces mirror
+        // whatever the sky is, so with no backdrop they show the engine's pale grey and read as
+        // flat white patches on the ground — one cause, two symptoms. `NFS_BACKDROP=0` turns it
+        // off.
         //
         // Double-sided, because a sky shell is seen from the inside and its triangles face out —
         // single-sided it culls to nothing, which looks exactly like not drawing it at all.
-        for m in &sky.meshes {
-            let material = match m.texture.and_then(|k| bound.get(&k)) {
-                Some(bg) => Material::new(bg.clone()).with_backdrop(Vec4::ONE).with_double_sided(true),
-                None => Material::new(white.clone()).with_backdrop(Vec4::ONE).with_double_sided(true),
-            };
-            scene::spawn_mesh(world, m.mesh.clone(), material, Transform::new(m.origin));
+        if std::env::var("NFS_BACKDROP").as_deref() != Ok("0") {
+            for m in &sky.meshes {
+                let material = match m.texture.and_then(|k| bound.get(&k)) {
+                    Some(bg) => Material::new(bg.clone()),
+                    None => Material::new(white.clone()),
+                };
+                let material = material.with_backdrop_placed(Vec4::ONE).with_double_sided(true);
+                scene::spawn_mesh(world, m.mesh.clone(), material, Transform::new(m.origin));
+            }
         }
     }
 
@@ -499,11 +596,31 @@ fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> CruiseState
         out_for: 0.0,
         heading_out: false,
         course: course.take(),
+        free_roam,
+        spots: spot_count,
+        frames: Vec::with_capacity(FRAME_WINDOW),
     }
+}
+
+/// The window's median and 95th percentile in milliseconds, or `None` before it has filled.
+///
+/// Both, because a median alone says the frame is fine while every twentieth one is not, and a
+/// mean would let one 200 ms hitch pass as a rounding error across a second.
+fn frame_ms(frames: &[f32]) -> Option<(f32, f32)> {
+    if frames.len() < FRAME_WINDOW / 2 {
+        return None;
+    }
+    let mut v = frames.to_vec();
+    v.sort_by(f32::total_cmp);
+    Some((v[v.len() / 2], v[v.len() * 19 / 20]))
 }
 
 fn update(world: &mut World, state: &mut CruiseState, dt: f32, input: &Input) {
     state.t += dt;
+    if state.frames.len() == FRAME_WINDOW {
+        state.frames.remove(0);
+    }
+    state.frames.push(dt * 1000.0);
 
     let controls = state.driver.read(input, dt);
     state.rig.drive(world, &controls);
@@ -600,12 +717,14 @@ fn diagnose(world: &World, state: &mut CruiseState, pose: nfsu2::rig::Pose) {
     let Some(v) = vehicles.get(state.rig.chassis) else { return };
     let grounded: Vec<bool> = v.wheels.iter().map(|w| w.is_grounded).collect();
     let vel = world.borrow::<Velocity>().get(state.rig.chassis).map_or(Vec3::ZERO, |v| v.linear);
+    let (med, p95) = frame_ms(&state.frames).unwrap_or((f32::NAN, f32::NAN));
     println!(
-        "diag  pos ({:+.1},{:+.2},{:+.1})  vel ({:+.2},{:+.2},{:+.2})  speed {:+.1} km/h  cell {:?}  grounded {grounded:?}",
+        "diag  pos ({:+.1},{:+.2},{:+.1})  vel ({:+.2},{:+.2},{:+.2})  speed {:+.1} km/h  cell {:?}           grounded {grounded:?}  frame {med:.1}/{p95:.1} ms ({:.0} fps)",
         pose.position.x, pose.position.y, pose.position.z,
         vel.x, vel.y, vel.z,
         v.current_speed_kmh,
         city::cell_of(pose.position),
+        1000.0 / med,
     );
 }
 
@@ -621,6 +740,16 @@ fn ui(world: &mut World, state: &mut CruiseState, ctx: &egui::Context) {
         .show(ctx, |ui| {
             ui.label(format!("{} obje · {} mesh · {} backdrop", s.objects, s.meshes, s.backdrop));
             ui.label(format!("{} hücre · {} üçgen ({} sürülebilir)", s.cells, s.triangles, s.drivable));
+            if state.free_roam {
+                ui.label(format!(
+                    "SERBEST DOLAŞIM · free roam · {} nokta (NFS_SPOT=0..{})",
+                    state.spots,
+                    state.spots.saturating_sub(1)
+                ));
+            }
+            if let Some((med, p95)) = frame_ms(&state.frames) {
+                ui.label(format!("{med:.1} ms · p95 {p95:.1} ms · {:.0} fps", 1000.0 / med));
+            }
             ui.label("W/S · A/D · Space · R · F konumu yazdırır");
         });
     // The warning is the point of the grace period — a countdown nobody sees is just a delay.

@@ -29,6 +29,11 @@
 //!   length, and the worst step up, which is the number that shows the surface choice going wrong.
 //!   `NFS_ROUTE_DUMP=1` adds the first ten nodes with every surface the city offers under them,
 //!   road-only and unfiltered, which is how the two were told apart.
+//! - `NFS_GRIDS=1` — hold every start marker against the city under it. The marker is the only
+//!   record in these files with a height and nothing had checked it: 140 of the 141 race grids
+//!   with a road beneath them sit within **1 m** of what the ground answers (median −0.0 m), and
+//!   22 of free roam's 24 lone markers do too. That is what says the field is a height and `remap`
+//!   is right. It also names the exceptions, which is how the free-roam grid's 30 m was found.
 //! - `NFS_PROBE=<dir>` — ask the city's collision triangles what is under a list of world points
 //!   (`<dir>/nodes.csv`, one `x,y` per line) and beside a list of segments (`<dir>/segments.csv`,
 //!   `x1,y1,x2,y2`), both in the world's own frame. Written for one undecoded chunk and kept
@@ -77,10 +82,11 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
     }
     println!("{} bundle(s), {} objects, {} packs", loaded.len(), meshes.len(), packs.len());
 
-    // NFS_BUNDLES=1: how much of the eight-bundle union is one city and how much is eight versions
-    // of it. The files are per-race-route supersets that share a coordinate system, so loading all
-    // of them draws objects no single race ever shows — and `dedup` only removes the *byte
-    // identical* repeats, not a bundle's own variant of the same place.
+    // NFS_BUNDLES=1: what each of the eight regions is. They are not eight versions of one city
+    // and not eight tiles of it either — one is Bayview, one is Bayview again, four are standalone
+    // venues and two are test tracks, and all of them share an origin. `nfsu2::world::REGIONS`
+    // carries the table this diagnostic produced; the ground extent below is the measurement that
+    // settles it, with the backdrop excluded because it is fifteen kilometres wide.
     if std::env::var("NFS_BUNDLES").is_ok() {
         let key = |m: &gizmo_nfs::world::WorldMesh| {
             let t = m.header.matrix[3];
@@ -143,12 +149,39 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
                     hi = hi.max(c);
                 }
             }
+            // Where the whole bundle sits, not just what it alone carries: a streamed city is
+            // regions, and a region is a place before it is a set of objects.
+            let (mut flo, mut fhi) = (Vec3::splat(f32::MAX), Vec3::splat(f32::MIN));
+            // Ground only. The backdrop is tens of kilometres wide and would drown the answer;
+            // what is being asked is where you can drive, and that is the terrain family.
+            for m in ms.iter().filter(|m| !m.positions.is_empty() && m.header.name.starts_with("TRN_")) {
+                let c = nfsu2::world::world_point(&m.header, m.header.bbox_min)
+                    .midpoint(nfsu2::world::world_point(&m.header, m.header.bbox_max));
+                flo = flo.min(c);
+                fhi = fhi.max(c);
+            }
+            let mid = (flo + fhi) * 0.5;
             let mut top: Vec<_> = families.into_iter().collect();
             top.sort_by_key(|(_, n)| std::cmp::Reverse(*n));
             let span = if own.is_empty() { Vec3::ZERO } else { hi - lo };
+            let place = name
+                .strip_prefix("STREAM")
+                .and_then(|k| k.split('.').next())
+                .and_then(nfsu2::world::place_of)
+                .map_or("?", |p| match p {
+                    nfsu2::world::Place::City => "SEHIR (free roam)",
+                    nfsu2::world::Place::CityAgain => "sehir, yeniden",
+                    nfsu2::world::Place::Arena => "ayri mekan",
+                    nfsu2::world::Place::TestTrack => "test pisti",
+                });
             println!(
-                "  {name:<12} {:>6} objects · {:>5} only here, spread {:.0}x{:.0} m · {}",
-                set.len(),
+                "  {name:<12} {place:<18} {:>6} objects · centre ({:>6.0},{:>6.0}) ground {:>5.0}x{:<5.0} m \
+                 · {:>5} only here, spread {:.0}x{:.0} m · {}",
+                ms.len(),
+                mid.x,
+                mid.z,
+                fhi.x - flo.x,
+                fhi.z - flo.z,
                 own.len(),
                 span.x,
                 span.z,
@@ -157,8 +190,20 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
         }
     }
 
-    // Sky and panorama are drawn by nothing yet, and drawn as ordinary geometry they are a wall
-    // across the frame — see `world::is_backdrop` for what they are and how they were found.
+    // NFS_BACKDROP=1: draw the sky shell and the panorama panels too, through the engine's
+    // `MaterialType::Backdrop` — drawn first, camera-locked, depth writes off.
+    //
+    // Off by default so every existing measurement here keeps meaning what it meant, and because
+    // this binary's job is the *city*: a backdrop that spans fifteen kilometres would dominate any
+    // frame statistic taken to answer a question about a street. On, it is the instrument
+    // `MOTOR-NOTLARI.md` item 7 has been waiting for — the game's own painted backdrop either
+    // reaches the screen or it does not, and a frame either shows that or it does not.
+    let want_backdrop = std::env::var("NFS_BACKDROP").is_ok_and(|v| v != "0");
+    let backdrop: Vec<gizmo_nfs::world::WorldMesh> = if want_backdrop {
+        meshes.iter().filter(|m| nfsu2::world::is_backdrop(&m.header.name)).cloned().collect()
+    } else {
+        Vec::new()
+    };
     let sky = meshes.iter().filter(|m| nfsu2::world::is_backdrop(&m.header.name)).count();
     let lod = meshes.iter().filter(|m| nfsu2::world::is_distant_lod(&m.header.name)).count();
     meshes.retain(|m| {
@@ -392,6 +437,137 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
         _ => nfsu2::world::lod::keep_finest(meshes),
     };
 
+    // NFS_GRIDS=1: does a start marker's own height agree with the city under it?
+    //
+    // The marker is the only record in these files carrying a height and nothing had ever checked
+    // it. If the field is a height and `remap` is right, a grid sits on a road: marker minus ground
+    // should be near zero for most grids. A constant offset would mean it is measured from
+    // somewhere else; a scatter of tens of metres would mean it is not a height at all.
+    if std::env::var("NFS_GRIDS").is_ok() {
+        let ground = nfsu2::world::road_ground(&meshes);
+        let root = std::path::Path::new(&path);
+        let root = if root.is_file() { root.parent().unwrap_or(root) } else { root };
+        let mut files: Vec<std::path::PathBuf> = Vec::new();
+        let mut stack = vec![root.to_path_buf()];
+        while let Some(d) = stack.pop() {
+            let Ok(entries) = std::fs::read_dir(&d) else { continue };
+            for e in entries.filter_map(std::result::Result::ok) {
+                let f = e.path();
+                if f.is_dir() {
+                    stack.push(f);
+                } else if f.file_name().and_then(|n| n.to_str())
+                    .is_some_and(|n| n.starts_with("TrackPosMarkers") && n.ends_with(".bin"))
+                {
+                    files.push(f);
+                }
+            }
+        }
+        files.sort();
+        let mut rows: Vec<(u32, f32, f32)> = Vec::new();
+        let mut no_ground = 0usize;
+        for f in &files {
+            let Ok(bytes) = std::fs::read(f) else { continue };
+            let Ok(m) = gizmo_nfs::world::routes::markers(&bytes) else { continue };
+            for g in gizmo_nfs::world::routes::grids(&m) {
+                let q = nfsu2::world::remap(g[0].at);
+                match ground.height_at(q + Vec3::Y * 2.0) {
+                    Some(y) => rows.push((g[0].track, q.y, y)),
+                    None => no_ground += 1,
+                }
+            }
+        }
+        let mut diffs: Vec<f32> = rows.iter().map(|(_, said, got)| said - got).collect();
+        diffs.sort_by(f32::total_cmp);
+        let q = |f: f64| diffs.get(((diffs.len().max(1) - 1) as f64 * f) as usize).copied().unwrap_or(f32::NAN);
+        let within = |t: f32| diffs.iter().filter(|d| d.abs() <= t).count();
+        println!(
+            "grids vs ground: {} grids with road under them, {no_ground} without\n  \
+             marker minus ground: p05 {:.1} · median {:.1} · p95 {:.1} m · within 1 m {} · \
+             within 3 m {} · over 10 m {}",
+            rows.len(), q(0.05), q(0.50), q(0.95),
+            within(1.0), within(3.0), diffs.iter().filter(|d| d.abs() > 10.0).count()
+        );
+        let mut worst = rows.clone();
+        worst.sort_by(|a, b| (b.1 - b.2).abs().total_cmp(&(a.1 - a.2).abs()));
+        for (track, said, got) in worst.iter().take(5) {
+            println!("    track {track:<5} marker y={said:>7.1} ground y={got:>7.1} off by {:>6.1} m", said - got);
+        }
+        // Free roam's own grid, named rather than left to the tail of a sorted list: it is the one
+        // this mode spawns on, so it is the one whose number has to be seen.
+        for (track, said, got) in rows.iter().filter(|(t, _, _)| *t == 4000) {
+            println!("    track {track:<5} marker y={said:>7.1} ground y={got:>7.1} off by {:>6.1} m  <- free roam", said - got);
+        }
+        // The 24 lone free-roam markers, each against the city under it. If these stand on roads
+        // and the grid does not, they are the places free roam is about and the grid is something
+        // else — which is a question about the data, not a preference.
+        {
+            let all = nfsu2::world::Ground::of(&nfsu2::world::collision_cells(&meshes));
+            let fr = root.join("ROUTESL4RA/TrackPosMarkersFreeRoam.bin");
+            if let Ok(bytes) = std::fs::read(&fr) {
+                if let Ok(m) = gizmo_nfs::world::routes::markers(&bytes) {
+                    let spots = nfsu2::world::free_roam_spots(&m);
+                    let (mut on_road, mut on_any, mut nothing) = (0, 0, 0);
+                    let mut offs: Vec<f32> = Vec::new();
+                    for q in &spots {
+                        let r = ground.heights_at(q.x, q.z);
+                        let a = all.heights_at(q.x, q.z);
+                        if let Some(y) = r.iter().rev().find(|y| **y <= q.y + 2.0) {
+                            on_road += 1;
+                            offs.push(q.y - y);
+                        } else if let Some(y) = a.iter().rev().find(|y| **y <= q.y + 2.0) {
+                            on_any += 1;
+                            offs.push(q.y - y);
+                        } else {
+                            nothing += 1;
+                        }
+                    }
+                    let mut listed: Vec<(usize, f32, f32, f32)> = Vec::new();
+                    for (i, q) in spots.iter().enumerate() {
+                        let a = all.heights_at(q.x, q.z);
+                        if let Some(y) = a.iter().rev().find(|y| **y <= q.y + 2.0) {
+                            listed.push((i, q.y, *y, q.y - y));
+                        }
+                    }
+                    listed.sort_by(|a, b| b.3.abs().total_cmp(&a.3.abs()));
+                    for (i, said, got, d) in listed.iter().take(6) {
+                        println!("    spot {i:>2}  marker y={said:>7.1}  ground y={got:>7.1}  {d:>7.1} m up");
+                    }
+                    println!(
+                        "    within 1 m: {} of {}",
+                        listed.iter().filter(|(_, _, _, d)| d.abs() <= 1.0).count(),
+                        listed.len()
+                    );
+                    offs.sort_by(f32::total_cmp);
+                    println!(
+                        "  free-roam spots: {} · {on_road} over a road · {on_any} over other ground \
+                         · {nothing} over nothing · marker minus ground median {:.1} m, worst {:.1} m",
+                        spots.len(),
+                        offs.get(offs.len() / 2).copied().unwrap_or(f32::NAN),
+                        offs.iter().fold(0.0_f32, |a, b| if b.abs() > a.abs() { *b } else { a })
+                    );
+                }
+            }
+        }
+        // The same point through the collision set the game actually drives on, which is a
+        // different question from "is there a road named here" and had better not disagree.
+        {
+            let all = nfsu2::world::Ground::of(&nfsu2::world::collision_cells(&meshes));
+            for f in &files {
+                let Ok(bytes) = std::fs::read(f) else { continue };
+                let Ok(m) = gizmo_nfs::world::routes::markers(&bytes) else { continue };
+                for g in gizmo_nfs::world::routes::grids(&m).iter().filter(|g| g[0].track == 4000) {
+                    let q = nfsu2::world::remap(g[0].at);
+                    println!(
+                        "    free roam pole ({:.0},{:.0}) marker y={:.1} · road surfaces {:?} · all surfaces {:?}",
+                        q.x, q.z, q.y,
+                        ground.heights_at(q.x, q.z).iter().map(|v| (v * 10.0).round() / 10.0).collect::<Vec<_>>(),
+                        all.heights_at(q.x, q.z).iter().map(|v| (v * 10.0).round() / 10.0).collect::<Vec<_>>()
+                    );
+                }
+            }
+        }
+    }
+
     // NFS_ROUTE=<Paths*.bin>: put that file's race line on the city and draw it. Built here rather
     // than at the spawn below because the height comes from the collision geometry, and `meshes` is
     // about to be moved into `build_region`.
@@ -602,6 +778,12 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
     // Frame on the region's own centre so a budget takes a neighbourhood rather than an edge.
     let around = centre_of(&meshes);
     let city = build_region(&renderer.device, meshes, &packs, Some(&shared), around, budget);
+    // Built here, not at the spawn below, because its textures have to be in the upload loop:
+    // the backdrop's keys are not the city's — most of them live in the shared tier — and a key
+    // nobody uploaded binds to nothing and draws white. That was the whole of "the backdrop is
+    // pale": 153 meshes declared a texture and 85 of them found one.
+    let sky_visuals = (!backdrop.is_empty())
+        .then(|| build_region(&renderer.device, backdrop, &packs, Some(&shared), around, None));
 
     println!(
         "{declared} declared, {sky} backdrop, {lod} world-LOD, {} kept ({} duplicates), {} packs, {} merged meshes, {} unresolved runs",
@@ -613,6 +795,9 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
     );
 
     // ── Textures: decode each key once, only the ones something actually uses ──
+    // The two arms the engine gained and nothing was pulling — see `scene::city_lift`.
+    let lift = scene::city_lift();
+    println!("city lift: ambient {:?}, emissive {:?}", lift.0, lift.1);
     let white =
         assets.create_white_texture(&renderer.device, &renderer.queue, &renderer.scene.texture_bind_group_layout);
     let mut tex = Textures {
@@ -623,7 +808,8 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
     };
     let mut bound: HashMap<AssetHash, _> = HashMap::new();
     let mut decoded = 0usize;
-    for key in city.meshes.iter().filter_map(|m| m.texture) {
+    let sky_keys = sky_visuals.iter().flat_map(|s| s.meshes.iter()).filter_map(|m| m.texture);
+    for key in city.meshes.iter().filter_map(|m| m.texture).chain(sky_keys) {
         if bound.contains_key(&key) {
             continue;
         }
@@ -679,11 +865,38 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
             // a hole in the world reads as a parser bug, and this is not one.
             None => Material::new(white.clone()).with_baked_lit(Vec4::new(0.35, 0.35, 0.38, 1.0)),
         };
+        let material = material.with_ambient(lift.0).with_emissive(lift.1);
         let material = if double { material.with_double_sided(true) } else { material };
         scene::spawn_mesh(&mut world, m.mesh.clone(), material, Transform::new(m.origin));
         spawned += 1;
     }
     println!("{spawned} entities spawned");
+
+    // The backdrop, if asked for. Double-sided because a sky shell is seen from the inside and its
+    // triangles face out — single-sided it culls to nothing, which looks exactly like not drawing
+    // it at all, and that mistake is indistinguishable from the bug being checked for.
+    if let Some(sky) = &sky_visuals {
+        for m in &sky.meshes {
+            let material = match m.texture.and_then(|k| bound.get(&k)) {
+                Some(bg) => Material::new(bg.clone()),
+                None => Material::new(white.clone()),
+            };
+            let material = material.with_backdrop_placed(Vec4::ONE).with_double_sided(true);
+            scene::spawn_mesh(&mut world, m.mesh.clone(), material, Transform::new(m.origin));
+        }
+        // "textured" used to count meshes that *declare* a key, which is not the same as meshes
+        // whose key was found — and the difference is the whole story here: the backdrop's
+        // textures do not live in the region's own packs. Count what actually bound.
+        let declared = sky.meshes.iter().filter(|m| m.texture.is_some()).count();
+        let resolved =
+            sky.meshes.iter().filter(|m| m.texture.is_some_and(|k| bound.contains_key(&k))).count();
+        println!(
+            "backdrop: {} meshes · {declared} declare a texture · {resolved} of those bound · \
+             {} unresolved runs",
+            sky.meshes.len(),
+            sky.unresolved_runs
+        );
+    }
 
     // The regions, as flat fans lifted clear of the road, one colour per `kind`.
     if !regions.is_empty() {
