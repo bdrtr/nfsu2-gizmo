@@ -66,6 +66,41 @@ pub fn city_lift() -> (Vec3, Vec3) {
 /// legible without the sky-to-ground contrast collapsing.
 pub const CITY_AMBIENT: Vec3 = Vec3::new(0.10, 0.11, 0.14);
 
+/// What crosses the glare threshold in this city, and how hard it glows.
+///
+/// The renderer's own default is a threshold of `0.85`, and **nothing in Bayview ever reaches it**:
+/// the brightest surfaces are a p95 vertex colour of 183 against window textures that peak at 250,
+/// which is about `0.44` in linear. So the glare pass ran every frame and extracted nothing. That
+/// default is right for a scene with values above `1.0` and a baked-lit night map is not one — the
+/// city's whole lighting is a byte per vertex, and a byte cannot be over-bright.
+///
+/// Lowering it puts the glow back on exactly the things that should have it. Measured over the
+/// frame, threshold `0.85` → `0.18` moves the maximum from 202 to 221 and the share of pixels over
+/// 200 from 0.00 % to 0.06 % — a small number, and the right small number: it is the lit windows
+/// and the neon, and nothing else moved. The median does not shift at all, so this is glare and not
+/// a brightness knob; [`city_lift`] is the brightness knob.
+///
+/// `NFS_BLOOM="threshold[,intensity]"` overrides both.
+#[must_use]
+pub fn city_glare() -> (f32, f32) {
+    let mut out = (CITY_BLOOM_THRESHOLD, CITY_BLOOM_INTENSITY);
+    if let Ok(v) = std::env::var("NFS_BLOOM") {
+        let n: Vec<f32> = v.split(',').filter_map(|p| p.trim().parse().ok()).collect();
+        if let Some(t) = n.first() {
+            out.0 = *t;
+        }
+        if let Some(i) = n.get(1) {
+            out.1 = *i;
+        }
+    }
+    out
+}
+
+/// The glare threshold the city is drawn with. See [`city_glare`] for where it comes from.
+pub const CITY_BLOOM_THRESHOLD: f32 = 0.18;
+/// How hard what crosses [`CITY_BLOOM_THRESHOLD`] glows.
+pub const CITY_BLOOM_INTENSITY: f32 = 1.2;
+
 /// The four handles every texture upload needs, bundled so call sites stay one line.
 pub struct Textures<'a> {
     /// The asset manager owning the GPU texture cache.

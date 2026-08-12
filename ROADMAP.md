@@ -241,6 +241,28 @@ Bir sebep, iki belirti.
 
 Maliyeti ölçüldü: kare medyanı **8,0 → 8,6 ms**.
 
+### Pencereler neden sönüktü — ve neden bu bir hata değil
+
+Gece karesindeki binaların pencereleri siyah görünüyordu. Üç hipotez sırayla elendi, hepsi ölçümle:
+
+1. **Doku bağlanmıyor mu?** Hayır. Pencere dokuları parlak: `ARC_*_WINDOW*` ailesinin p95'i ~250,
+   max 254. Yani yanan pencere dokuda var.
+2. **Yanan yüzeyleri ayıran bir işaret mi kaçırıyoruz?** Hayır, ve bu kesin: `NfsMaterialRange`
+   bir shader hash'i taşıyor — arabalarda camı boyadan ayıran alan bu — ama şehirde **16.641
+   run'ın hepsinde `00000000`**. Tek bir farklı değer yok. Şehir bu ayrımı yapmıyor.
+3. **Vertex rengi yanlış mı okunuyor?** Hayır. Dağılım sağlıklı: 799.010 vertex üzerinde p05 9,
+   p25 29, medyan 51, p75 93, p95 183, max 255. %4'ü 8'in altında, %3,2'si 200'ün üstünde. Kod
+   hatası sıfıra ya da 255'e yığılırdı; bu yazılmış bir gece.
+
+Yani karanlık veri sadık şekilde çiziliyor. Eksik olan **parlama**. Ve orada gerçek bir bulgu var:
+motorun bloom eşiği `0.85` ve **bu şehirde hiçbir şey ona ulaşmıyor** — en parlak yüzey lineer
+uzayda ~0,44. Parlama geçidi her kare koşuyor ve hiçbir şey çıkarmıyordu.
+
+`scene::city_glare` eşiği `0.18`, yoğunluğu `1.2` yapıyor (`NFS_BLOOM="eşik[,yoğunluk]"` ezer).
+Ölçüm: kare maksimumu 202 → 221, 200 üstü piksel oranı %0,00 → %0,06 — küçük bir sayı ve doğru
+küçük sayı, çünkü kıpırdayan tek şey yanan pencereler ve neon. **Medyan hiç oynamıyor**, yani bu
+bir parlaklık kolu değil parlama kolu; parlaklık kolu `city_lift`. Kare maliyeti değişmedi.
+
 ---
 
 ## 1. Ana fikir

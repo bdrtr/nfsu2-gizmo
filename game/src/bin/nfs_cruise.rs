@@ -169,6 +169,11 @@ fn main() {
             // nothing to work with here.
             renderer.gpu_fluid = None;
             renderer.gpu_particles = None;
+            // The glare threshold the renderer ships with extracts nothing from a baked-lit
+            // night map — see `scene::city_glare` for the measurement.
+            let (bt, bi) = scene::city_glare();
+            renderer.bloom_threshold = bt;
+            renderer.bloom_intensity = bi;
             renderer.ssr = None;
             renderer.ssgi = None;
             renderer.volumetric = None;

@@ -437,6 +437,82 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
         _ => nfsu2::world::lod::keep_finest(meshes),
     };
 
+    // NFS_VCOL=1: the distribution of the city's baked vertex colour.
+    //
+    // The city's whole lighting is this one number per vertex — `(vcol · shadow + ambient) ·
+    // albedo · texture` — and the window textures peak at 250/255, so anything dark on screen is
+    // dark because of what is here. Worth a census rather than an assumption: a decode that read
+    // the wrong bytes would show as a distribution pinned near zero or near 255, and an authored
+    // night would show as a spread.
+    if std::env::var("NFS_VCOL").is_ok() {
+        let mut lum: Vec<u8> = Vec::new();
+        let mut alpha: Vec<u8> = Vec::new();
+        for m in &meshes {
+            for c in &m.colours {
+                lum.push(
+                    ((u32::from(c[0]) * 299 + u32::from(c[1]) * 587 + u32::from(c[2]) * 114) / 1000)
+                        as u8,
+                );
+                alpha.push(c[3]);
+            }
+        }
+        lum.sort_unstable();
+        alpha.sort_unstable();
+        let q = |v: &[u8], f: f64| v.get((v.len() as f64 * f) as usize).copied().unwrap_or(0);
+        let under = |v: &[u8], t: u8| 100.0 * v.iter().filter(|x| **x < t).count() as f64 / v.len() as f64;
+        println!(
+            "vertex colour over {} vertices: p05 {} · p25 {} · median {} · p75 {} · p95 {} · max {}",
+            lum.len(), q(&lum, 0.05), q(&lum, 0.25), q(&lum, 0.5), q(&lum, 0.75), q(&lum, 0.95),
+            lum.last().copied().unwrap_or(0)
+        );
+        println!(
+            "  under 8: {:.1}% · under 32: {:.1}% · over 200: {:.1}%",
+            under(&lum, 8), under(&lum, 32),
+            100.0 - under(&lum, 201)
+        );
+        println!(
+            "  alpha: p05 {} · median {} · p95 {} · under 255: {:.1}%",
+            q(&alpha, 0.05), q(&alpha, 0.5), q(&alpha, 0.95), under(&alpha, 255)
+        );
+    }
+
+    // NFS_SHADERS=1: what shader hashes the city's material runs carry, and what they cover.
+    //
+    // Every run has one (`NfsMaterialRange::shader`) and the world path has never looked at it —
+    // `build_region` merges by texture key alone. On a car the same field is what tells glass from
+    // paint, so if the city distinguishes lit windows from wall at all, this is where it would say
+    // so. Reported as a census with the textures each covers, because a hash on its own is a
+    // number and a hash with `ARC_*_WINDOW` under it is a finding.
+    if std::env::var("NFS_SHADERS").is_ok() {
+        let mut by: std::collections::BTreeMap<u32, (usize, usize, std::collections::BTreeSet<String>)> =
+            std::collections::BTreeMap::new();
+        for m in &meshes {
+            for g in &m.groups {
+                let e = by.entry(g.shader.0).or_default();
+                e.0 += 1;
+                e.1 += g.index_count / 3;
+                if e.2.len() < 6 {
+                    let name = packs
+                        .iter()
+                        .find_map(|p| p.get(g.hash))
+                        .map(|t| t.name.clone())
+                        .unwrap_or_else(|| format!("{:08X}", g.hash.0));
+                    e.2.insert(name);
+                }
+            }
+        }
+        let runs: usize = by.values().map(|v| v.0).sum();
+        println!("shader hashes: {} distinct over {runs} runs", by.len());
+        let mut rows: Vec<_> = by.into_iter().collect();
+        rows.sort_by_key(|(_, v)| std::cmp::Reverse(v.1));
+        for (h, (n, tris, names)) in rows.iter().take(12) {
+            println!(
+                "  {h:08X}  {n:>6} runs  {tris:>8} tris  {}",
+                names.iter().cloned().collect::<Vec<_>>().join(", ")
+            );
+        }
+    }
+
     // NFS_GRIDS=1: does a start marker's own height agree with the city under it?
     //
     // The marker is the only record in these files carrying a height and nothing had ever checked
@@ -795,6 +871,17 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
     );
 
     // ── Textures: decode each key once, only the ones something actually uses ──
+    // NFS_BLOOM="threshold[,intensity]": what crosses the glare threshold, and how hard.
+    //
+    // The renderer's default is 0.85, which nothing in this city ever reaches: the brightest
+    // surface is a p95 vertex colour of 183 against a window texture peaking at 250, which is
+    // about 0.44 in linear. So the glare pass runs every frame and extracts nothing. That is a
+    // threshold tuned for a scene with values above 1.0, and a baked-lit night map is not one.
+    let (bloom_t, bloom_i) = scene::city_glare();
+    renderer.bloom_threshold = bloom_t;
+    renderer.bloom_intensity = bloom_i;
+    println!("bloom: threshold {bloom_t:.2}, intensity {bloom_i:.2}");
+
     // The two arms the engine gained and nothing was pulling — see `scene::city_lift`.
     let lift = scene::city_lift();
     println!("city lift: ambient {:?}, emissive {:?}", lift.0, lift.1);
