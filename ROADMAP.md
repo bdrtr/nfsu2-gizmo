@@ -600,6 +600,39 @@ geriledi.
 
 Kara liste pilotun kendi deneyimi, grafın özelliği değil — o yüzden `step_avoiding`'e parametre
 olarak geçiyor: aynı yolda iki araba farklı şeylere çarpmış olabilir.
+### Ölçütüm yanlıştı: düşen arabayı ilerleme sayıyordum
+
+Geçen turda "toplam mesafe 7,9 km" dedim. Yanlış. Arabaların hızına bakınca çıktı: bir parkurda
+sekizin altısı **−219 ile −310 km/h**'de, ve biri haritanın 2,4 km dışında. Bu geri vites değil,
+**düşüş**. `en uzak` düz mesafeyi ölçüyordu, yani tespit etmesi gereken hatayı ödüllendiriyordu.
+
+Düzeltilmiş tablo, sekiz parkur, 90 sn:
+
+| | |
+|---|---|
+| giden araba | 41/64 |
+| **haritadan düşen** | **20/64** |
+| mesafe (yalnız ayakta olanlar) | **2404 m** — 7924 değil |
+
+Yani sürücüler bildirdiğimden çok daha kötüymüş. `nfs_sim` artık düşenleri ayrı sayıyor ve
+mesafeye katmıyor; ölçüt "ızgara yüksekliğinin 50 m altına inen araba düşmüştür".
+
+### Fren
+
+Pilotun hız politikası yalnızca gaz kesmekti ve yetmiyordu: 90 km/h'yi viraja taşıyıp dışarı
+çıkıyordu. Fren eklendi — dönme sertliği × hız, arabanın tutabileceğine karşı. Eşik yine süpürmeyle,
+ve bu sefer **üç ölçütte birden** kazanan bir değer çıktı:
+
+| eşik | giden | düşen | mesafe |
+|---|---:|---:|---:|
+| frensiz | 41/64 | 20/64 | 2404 m |
+| 20 m/s | 41 | 18 | 2418 m |
+| 14 m/s | 41 | 17 | 2354 m |
+| **9 m/s** | **44** | **13** | **2594 m** |
+| 6 m/s | 41 | 14 | 2242 m |
+
+Ayrıca pilot artık kaç **ayrı** düğüm gördüğünü sayıyor; kavşak sayısına karşı bu, parkuru dolaşan
+bir arabayla daireler çizen arabayı ayırıyor.
 ---
 
 ## 1. Ana fikir

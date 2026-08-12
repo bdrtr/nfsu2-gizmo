@@ -57,7 +57,18 @@ const BACK_FOR: f32 = 1.2;
 /// sixty, so this is right where it matters and generous where it does not.
 const TICK: f32 = 1.0 / 60.0;
 
-/// How much steering costs throttle — the whole of the speed policy.
+/// The speed, in m/s, at which full lock is as much as the car will hold. Above it, braking.
+///
+/// Swept over eight routes on all three measures at once — cars that got away, cars that fell off
+/// the world, and distance covered by the ones still on it. No brake gives 41/64 away, 20 fallen
+/// and 2,404 m; 20 m/s gives 41, 18 and 2,418; 14 gives 41, 17 and 2,354; **9 gives 44, 13 and
+/// 2,594**; 6 gives 41, 14 and 2,242. Nine wins on every column, which is rarer than it sounds and
+/// is why it is the default.
+const BRAKE_SPEED: f32 = 9.0;
+/// How hard the brake comes on past that.
+const BRAKE_GAIN: f32 = 1.5;
+
+/// How much steering costs throttle.
 const CORNER_LIFT: f32 = 0.75;
 
 /// One rival's driver.
@@ -80,6 +91,9 @@ pub struct Pilot {
     steer: f32,
     /// How many junctions it has taken. The one number that says a pilot is getting somewhere.
     passed: usize,
+    /// How many *distinct* nodes it has been on. Against [`Self::passed`] this is the difference
+    /// between a car making its way round a course and one going round in circles.
+    seen: std::collections::BTreeSet<u32>,
     /// How long this pilot has been driving. Only used to give a car a moment to settle before
     /// it is judged stuck.
     age: f32,
@@ -175,6 +189,7 @@ impl Pilot {
         self.line = self.goal;
         self.laps = 0;
         self.blocked.clear();
+        self.seen.clear();
     }
 
     /// Hold this pilot on the line for `seconds` before it pulls away.
@@ -186,6 +201,12 @@ impl Pilot {
     #[must_use]
     pub fn passed(&self) -> usize {
         self.passed
+    }
+
+    /// How many distinct nodes it has visited.
+    #[must_use]
+    pub fn seen(&self) -> usize {
+        self.seen.len()
     }
 
     /// Which node of the network it is on.
@@ -289,6 +310,7 @@ impl Pilot {
             self.from = self.at;
             self.at = Some(next);
             self.passed += 1;
+            self.seen.insert(next);
         }
         let _ = here;
 
@@ -371,6 +393,17 @@ impl Pilot {
         self.steer += (want - self.steer) * 0.35;
         let throttle = (1.0 - self.steer.abs() * CORNER_LIFT).max(0.15);
 
-        Some(Controls { throttle, brake: 0.0, steer: self.steer, toggle_auto_shift: false })
+        // **Brake.** Lifting the throttle was the whole speed policy and it is not enough: with no
+        // brake a car carries 90 km/h into a corner, runs wide and leaves the road — measured, 20
+        // of 64 cars across eight routes ended off the world, falling.
+        //
+        // The rule is the crudest one that is about the corner rather than about the moment: how
+        // hard the car is turning, times how fast it is going, against what it could hold.
+        let bs: f32 =
+            std::env::var("NFS_BRAKE").ok().and_then(|v| v.parse().ok()).unwrap_or(BRAKE_SPEED);
+        let over = (speed / bs) * self.steer.abs();
+        let brake = ((over - 1.0) * BRAKE_GAIN).clamp(0.0, 1.0);
+
+        Some(Controls { throttle, brake, steer: self.steer, toggle_auto_shift: false })
     }
 }

@@ -336,24 +336,39 @@ async fn run() {
     // waypoints are counted or how many junctions a route happens to have. Straight-line from the
     // grid: crude, and crude in the same way for every run, which is what a comparison needs.
     let mut furthest = 0.0f32;
+    let mut fallen = 0usize;
     let line = slots[0];
+    // **A car that has driven off the world is not a car that got far.** On one route six of eight
+    // ended at -219 to -310 km/h, which is not reverse — it is falling — and one was 2.4 km outside
+    // the map. Straight-line distance counted every one of them as progress, so the measure was
+    // rewarding the exact failure it was there to detect.
+    let floor = line.y - 50.0;
     for (k, (rig, pilot)) in field.iter().enumerate() {
         let p = rig.pose(&world);
         let (at, speed) = p.map_or((Vec3::ZERO, 0.0), |p| (p.position, p.speed));
         junctions += pilot.passed();
         best_waypoint = best_waypoint.max(pilot.goal());
-        furthest = furthest.max((Vec3::new(at.x, 0.0, at.z) - Vec3::new(line.x, 0.0, line.z)).length());
+        if at.y < floor {
+            fallen += 1;
+        } else {
+            furthest = furthest
+                .max((Vec3::new(at.x, 0.0, at.z) - Vec3::new(line.x, 0.0, line.z)).length());
+        }
         println!(
-            "  car {k}: ({:>7.0},{:>7.0}) {:>4.0} km/h · {:>4} junctions · waypoint {}",
+            "  car {k}: ({:>7.0},{:>6.0},{:>7.0}) {:>4.0} km/h{} · {:>4} junctions over {:>3} \
+             distinct nodes · waypoint {}",
             at.x,
+            at.y,
             at.z,
             speed * 3.6,
+            if at.y < floor { " FALLEN" } else { "" },
             pilot.passed(),
+            pilot.seen(),
             pilot.goal()
         );
     }
     println!(
-        "SUMMARY junctions={junctions} waypoint={best_waypoint} furthest={furthest:.0}          cars={} seconds={seconds:.0}",
+        "SUMMARY junctions={junctions} waypoint={best_waypoint} furthest={furthest:.0}          fallen={fallen} cars={} seconds={seconds:.0}",
         field.len()
     );
 }
