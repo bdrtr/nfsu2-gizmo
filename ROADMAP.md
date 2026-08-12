@@ -475,8 +475,36 @@ genellenmedi:
 Ağların şekli farkı açıklamıyor: 4001/4021/4102/4121 karşılaştırıldığında düğüm sayısı, bağ sayısı,
 çıkışsız düğüm ve ilk arabanın düğüme uzaklığı hepsi benzer.
 
-**Sınır, dürüstçe: pilot sekiz parkurun ikisinde çalışıyor, dördünde hiç çalışmıyor.** Bir sonraki
-soru bu — tek parkurdaki üç araba değil, hiç kimsenin kıpırdamadığı dört parkur. Duruş noktası ya `seen_path` koruması ya da
+### Dört ölü parkurun sebebi: pilot yanlış yol noktasından başlıyordu
+
+İzi açtım: ölü parkurlarda araba **geri geri** gidiyor ve yol noktası sayacı 0'da kalıyor. Kurtulma
+davranışını suçladım, kapatıp sınadım — sebep o değil, dört parkur onsuz da ölü.
+
+Asıl sebep tek bir satırdı: pilot her zaman **0. yol noktasından** başlıyordu. Oysa etkinlik anahattı
+kapalı bir halka ve yazarının başladığı yerden çiziliyor; ızgarayla ilgisi yok. Ölçüm bunu kusursuz
+sıralıyor:
+
+| parkur | wp0'ın ızgaraya uzaklığı | giden araba |
+|---|---:|---|
+| 4001 | 10 m | 5/8 |
+| 4102 | 13 m | 8/8 |
+| 4081 | 33 m | 1/8 |
+| 4041 | 75 m | 2/8 |
+| 4121 | 160 m | 0/8 |
+| 4021 | 493 m | 0/8 |
+| 4002 | 785 m | 0/8 |
+| 4061 | 844 m | 0/8 |
+
+Yarım kilometre ötedeki bir noktaya nişan alan pilot arabayı ilk kareden itibaren parkurdan uzağa
+sürüyor. `place` artık ızgaraya **en yakın** yol noktasını buluyor ve bir sonrakini hedefliyor —
+en yakını ızgaranın üstünde olduğu için, orayı hedeflemek yerinde dönen bir araba demek.
+
+Sonuç: 4021 **0/8 → 5/8** (0 → 109 kavşak, wp0 → wp11), 4061 0 → 12 kavşak wp5, 4121 0 → 13 kavşak
+wp2, 4002 wp0 → wp9. **Artık sekiz parkurun sekizinde de yol noktası ilerliyor**, hiçbiri 0'da
+kalmıyor. 4102 8/8'den 7/8'e indi, tek kayıp.
+
+Kalan: dört parkurda arabalar hareket ediyor ama hâlâ uzağa gidemiyor. Sınır artık "ölü" değil
+"zayıf". Duruş noktası ya `seen_path` koruması ya da
 "ilerlemeyi sürdüren bağlantı yok" — ikisi ayırt edilebilir ve ayırt edilmeli.
 
 ---

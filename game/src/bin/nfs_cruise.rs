@@ -661,7 +661,7 @@ fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> CruiseState
             },
         );
         let mut pilot = Pilot::new();
-        pilot.place(stand, start_heading.unwrap_or(Vec3::NEG_Z), &net);
+        pilot.place(stand, start_heading.unwrap_or(Vec3::NEG_Z), &net, &course_line);
         field.push((rig, pilot));
     }
     if !field.is_empty() {

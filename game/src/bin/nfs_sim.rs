@@ -93,6 +93,22 @@ async fn run() {
         .and_then(|e| city::start_slots(&markers, e))
         .expect("this race names no full starting grid");
     println!("grid: {} places · {} waypoints", slots.len(), waypoints.len());
+    // Where the course starts relative to the grid. The pilot heads for waypoint 0 first, and
+    // nothing says waypoint 0 is anywhere near the line — an outline is a closed ring drawn from
+    // wherever its author began.
+    if let Some(first) = slots.first() {
+        let d = |w: &Vec3| ((w.x - first.x).powi(2) + (w.z - first.z).powi(2)).sqrt();
+        let near = waypoints
+            .iter()
+            .enumerate()
+            .min_by(|a, b| d(a.1).total_cmp(&d(b.1)))
+            .map(|(i, w)| (i, d(w)));
+        println!(
+            "  waypoint 0 is {:.0} m from the grid · nearest is {:?}",
+            waypoints.first().map_or(f32::NAN, |w| d(w)),
+            near.map(|(i, m)| format!("#{i} at {m:.0} m"))
+        );
+    }
 
     // Headless, but a real device: the car's materials and textures are built the way the game
     // builds them, so a sim result is about the same car.
@@ -169,7 +185,7 @@ async fn run() {
             Placement::facing(stand, heading, 1.5),
         );
         let mut pilot = Pilot::new();
-        pilot.place(stand, heading, &net);
+        pilot.place(stand, heading, &net, &waypoints);
         // NFS_STAGGER=<s>: seconds between one car pulling away and the next.
         let stagger: f32 =
             std::env::var("NFS_STAGGER").ok().and_then(|v| v.parse().ok()).unwrap_or(0.0);

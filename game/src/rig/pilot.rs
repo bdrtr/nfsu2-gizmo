@@ -85,14 +85,15 @@ pub struct Pilot {
     /// A pilot with nothing else to try holds full lock and a fifteen-percent throttle against
     /// whatever it is touching, for ever. Three of eight rivals do exactly that.
     ///
-    /// **This does not fix them, and the number says so**: 166 junctions without the manoeuvre and
-    /// 165 with, the same five cars away and the same three left behind — they reverse, and then
-    /// they are stuck again facing the same thing. It is kept because a driver that tries to back
-    /// off what it has hit is a driver and one that grinds for ever is not, and because the three
-    /// tries that came before it are worth having written down: spreading the grid apart (5/8, 6/8,
-    /// 5/8 at one, two and four times the spacing), staggering the start (5/8, 4/8, 3/8, 6/8 at
-    /// nought to two seconds), and gating recovery on progress rather than time, which locked it
-    /// away from the only cars that needed it.
+    /// **It is close to neutral and the numbers say so.** Held against eight routes with the
+    /// manoeuvre disabled it wins on two and loses on one: 4041 goes 5/8 to 2/8 with it, 4061 1/8
+    /// to 0/8, and 4102 7/8 to 8/8. It is kept because a driver that tries to back off what it has
+    /// hit is a driver and one that grinds for ever is not, not because it moved a number.
+    ///
+    /// Three tries that came before it are worth having written down: spreading the grid apart
+    /// (5/8, 6/8, 5/8 at one, two and four times the spacing), staggering the start (5/8, 4/8, 3/8,
+    /// 6/8 at nought to two seconds), and gating recovery on progress rather than time, which
+    /// locked it away from the only cars that needed it.
     stalled: f32,
     /// How long is left of a reversing manoeuvre.
     backing: f32,
@@ -124,12 +125,33 @@ impl Pilot {
     /// — swept over half-angles from 90° to 25°, it took the field from five cars away to three,
     /// three, two and two. The correlation is real and the intervention it suggests is wrong, so
     /// the parameter is gone rather than left at a value that reads as tuned.
-    pub fn place(&mut self, at: Vec3, facing: Vec3, net: &Network) {
+    pub fn place(&mut self, at: Vec3, facing: Vec3, net: &Network, course: &[Vec3]) {
         let _ = facing;
         self.at = net.nearest(at);
         self.from = None;
         self.passed = 0;
         self.age = 0.0;
+
+        // **Start at the waypoint nearest the grid, not at waypoint zero.** An event outline is a
+        // closed ring drawn from wherever its author began, and nothing puts that beginning near
+        // the start line. Measured over eight races, how well the field drives sorts *perfectly* by
+        // how far waypoint 0 happens to be from the grid: 13 m and 10 m on the two that worked
+        // (8/8 and 5/8 cars away), 33 m and 75 m on the two that half worked, and 160, 493, 785 and
+        // 844 m on the four where nothing moved at all. A pilot aiming at a point half a kilometre
+        // off the course drives off the course, from the first frame.
+        self.goal = course
+            .iter()
+            .enumerate()
+            .min_by(|a, b| {
+                let d = |p: &Vec3| (p.x - at.x).powi(2) + (p.z - at.z).powi(2);
+                d(a.1).total_cmp(&d(b.1))
+            })
+            .map_or(0, |(i, _)| i);
+        // And then the *next* one, because the nearest is the one the grid sits on: aiming at where
+        // you already are is a car that turns in place.
+        if !course.is_empty() {
+            self.goal = (self.goal + 1) % course.len();
+        }
     }
 
     /// Hold this pilot on the line for `seconds` before it pulls away.
