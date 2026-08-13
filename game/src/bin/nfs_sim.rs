@@ -824,6 +824,46 @@ async fn run() {
     // answer. Three different failures wear the same number and want completely different work: a
     // car pinned by the fence, a car queued behind another car, and a car stuck against the city.
     let early: Vec<usize> = (0..field.len()).filter(|k| moved_at[*k] < 30.0).collect();
+    // **Is there anywhere to go?** Three ways of choosing a different *node* have now been
+    // refuted (blacklist, shun the heading, expire the list), and the conclusion was that the
+    // answer has to come from outside the node machine — from the city's own geometry. Before
+    // writing that, the question it assumes has to be asked: does a stuck car actually have
+    // open ground around it that it is failing to use, or is it genuinely boxed in? Twelve
+    // directions, drivable ground at the car's own height, nothing standing across the way.
+    if !early.is_empty() {
+        println!("\nwhat the stuck cars have around them:");
+        for &k in &early {
+            let Some((rig, _)) = field.get(k) else { continue };
+            let Some(p) = rig.pose(&world) else { continue };
+            let mut open = 0usize;
+            let mut best = f32::MIN;
+            let mut best_deg = 0.0f32;
+            for i in 0..12 {
+                let a = i as f32 * std::f32::consts::TAU / 12.0;
+                let dir = Vec3::new(a.cos(), 0.0, a.sin());
+                // How far the ground holds along that heading, up to 20 m.
+                let reach = ground
+                    .gap_along(p.position, p.position + dir * 20.0, PROBE_SLACK, 2.0)
+                    .unwrap_or(20.0);
+                // And whether anything stands across it at car height.
+                let clear = !walls.across(&ground, p.position, p.position + dir * reach, 0.5, 3.0);
+                if reach > 8.0 && clear {
+                    open += 1;
+                }
+                if clear && reach > best {
+                    best = reach;
+                    best_deg = a.to_degrees();
+                }
+            }
+            let nose = p.rotation * Vec3::NEG_Z;
+            let facing = nose.z.atan2(nose.x).to_degrees().rem_euclid(360.0);
+            println!(
+                "  car {k}: {open}/12 directions open past 8 m · best {best:>5.1} m at \
+                 {best_deg:>5.0}° · car faces {facing:>5.0}°"
+            );
+        }
+    }
+
     if !early.is_empty() {
         println!("\nwhy {} stopped gaining before t=30:", early.len());
         for k in early {

@@ -51,6 +51,29 @@ const WALL_EVERY: u8 = 10;
 /// and a pilot that has run out of ways round is exactly the case the stall-and-reverse rule below
 /// already handles.
 const WALL_WIDEST: f32 = 4.0;
+/// How long a geometric escape steers the car, in seconds.
+///
+/// **Swept twice, and the first sweep is why the second one works.** Steering at the most
+/// open heading refuted: 799 waypoints with the rule off against 781 / 757 / 742 / 737 at
+/// 1, 2, 3.5 and 6 s — monotonically worse, while `away` went 63/64 to **64/64**. The
+/// mechanism was freeing every car and then driving it off the course. Weighting the
+/// opening by the direction the car actually needs to go turns the same sweep round:
+/// **802 / 827 / 833 / 838**, still 64/64 away, distinct nodes 1247 → 1329.
+///
+/// 3.5 is the middle of the 2-6 s plateau and the best of it on the tiebreaker: most
+/// distinct nodes (1329), fewest cars stopped before t=30 (15 against 18), one car off the
+/// world. Six seconds covers five more waypoints and gives back both of those.
+const ESCAPE_FOR: f32 = 3.5;
+/// Headings probed for a way out, how far each is probed, and the height window the ground
+/// is allowed to move through along one — the same 8 m `drop_walled` settled on, for the
+/// same reason: a straight probe over a crest is not a hole.
+const ESCAPE_RAYS: usize = 12;
+const ESCAPE_REACH: f32 = 20.0;
+const ESCAPE_SLACK: f32 = 8.0;
+/// How much clear ground a heading needs before it counts as a way out, and how near the
+/// escape point counts as having arrived.
+const ESCAPE_MIN: f32 = 8.0;
+const ESCAPE_ARRIVED: f32 = 4.0;
 /// How far sideways the aim moves per step of that search, in metres.
 ///
 /// Swept over eight routes, and **seven of the eight settings beat having no rule at all** on
@@ -275,6 +298,16 @@ pub struct Pilot {
     /// within 45° of the one abandoned — that is, sent the car the same way again.
     swaps: usize,
     swaps_same: usize,
+    /// Where to drive while escaping, and for how long — a point in the world, not a node.
+    ///
+    /// **The graph has no answer here and that is measured, not assumed.** Three ways of
+    /// choosing a different *node* are refuted in `ROADMAP.md` (blacklist the node, shun its
+    /// heading, expire the list), and the reason they all fail is the same: they pick from
+    /// branches that all lead back to the obstruction, and 92 % of the alternatives are
+    /// already crossed off. Meanwhile the stuck car is standing in open ground — probed at
+    /// the moment it gives up, **six to ten of twelve directions are clear for the full
+    /// twenty metres of the probe**. So the escape stops asking the graph and asks the city.
+    escape: Option<(Vec3, f32)>,
     /// Links the node being re-picked from had, summed over give-ups, and how many of them pointed
     /// away from the abandoned one. The difference between "no way out" and "no way that is
     /// different".
@@ -692,6 +725,42 @@ impl Pilot {
         if self.stalled >= STALL_FOR {
             self.stalled = 0.0;
             self.backing = BACK_FOR;
+            // **Pick a way out of the city, not out of the node list.** Twelve headings, the
+            // ground asked how far it holds along each and the walls asked whether anything
+            // stands across it; the longest clear one wins and the car drives at it for a
+            // bounded time, graph ignored. When it expires the pilot resumes exactly where it
+            // was — nothing about the node walk is disturbed, which is why this can be tried
+            // without unpicking any of the three refuted rules.
+            let far: f32 =
+                std::env::var("NFS_ESCAPE").ok().and_then(|v| v.parse().ok()).unwrap_or(ESCAPE_FOR);
+            if far > 0.0 {
+                if let Some((walls, ground)) = sight {
+                    let mut best = (0.0f32, Vec3::ZERO);
+                    for i in 0..ESCAPE_RAYS {
+                        let a = i as f32 * std::f32::consts::TAU / ESCAPE_RAYS as f32;
+                        let dir = Vec3::new(a.cos(), 0.0, a.sin());
+                        let reach = ground
+                            .gap_along(at, at + dir * ESCAPE_REACH, ESCAPE_SLACK, 2.0)
+                            .unwrap_or(ESCAPE_REACH);
+                        // **Hedefe doğru en açık, en açık değil.** İlk sürüm yalnız en uzun
+                        // temiz yönü seçiyordu ve ölçüm onu çürüttü: araba kurtuluyor (2 sn'den
+                        // itibaren 64/64 kavşak alıyor) ama parkurdan uzaklaşıyor, kapsama
+                        // 799'dan 737'ye iniyor. Açıklığı, gidilmesi gereken yönle ağırlıklamak
+                        // ikisini birden ister: yarısı mesafe, yarısı yön.
+                        let want = flat(toward - at).normalize_or_zero();
+                        let score = reach * (0.5 + 0.5 * dir.dot(want));
+                        if score > best.0
+                            && !walls.across(ground, at, at + dir * reach, WALL_LIFT, WALL_STEP)
+                        {
+                            best = (score, dir * reach);
+                        }
+                    }
+                    // `best.1` artık yönün kendisi değil, o yöndeki tam vektör.
+                    if best.1.length() > ESCAPE_MIN {
+                        self.escape = Some((at + best.1, far));
+                    }
+                }
+            }
             // Give up on where it was going, and take the next best way out of where it came from.
             // Reversing alone only buys another run at the same obstacle.
             if let Some(bad) = self.at {
@@ -785,6 +854,18 @@ impl Pilot {
             }
         }
 
+        // An escape overrides the graph's aim for its duration, and nothing else: the held
+        // node, the blacklist and the waypoint are all left exactly as they were, so the
+        // pilot resumes mid-stride when it expires.
+        if let Some((to, left)) = self.escape {
+            let left = left - TICK;
+            if left <= 0.0 || flat(to - at).length() < ESCAPE_ARRIVED {
+                self.escape = None;
+            } else {
+                self.escape = Some((to, left));
+                aim = to;
+            }
+        }
         self.aim = Some(aim);
         let to = flat(aim - at).normalize_or_zero();
         let angle = f.cross(to).y.atan2(f.dot(to));

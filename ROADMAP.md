@@ -1381,6 +1381,53 @@ Sayının büyüklüğü de bunu tamamlıyor: arabalar doksan saniyede **39 ilâ
 saniyede yarım kez. Kara listenin uzunluğu (sekiz rotada 334 düğüm) bunun çok altında, çünkü
 vazgeçmelerin çoğu zaten listede olan düğümleri yeniden seçiyor.
 
+### Ve kaçış grafın dışından geldi: şehre sormak
+
+Üç varyantın da çürümesi bir şeyi söylüyordu — cevap düğüm seçme makinesinin dışında. Ama
+mekanizmadan önce onun varsaydığı şey ölçüldü: sıkışan araba gerçekten kapana mı kısılmış?
+
+`nfs_sim` sıkışan her araba için on iki yönde zemin ne kadar tutuyor ve üstünde bir şey
+duruyor mu diye sordu. Cevap: **6-10 yön, yirmi metre boyunca temiz.** Araba açık alanın
+ortasında duruyor ve hiçbirini kullanmıyor, çünkü pilotun sorabildiği tek soru "hangi
+düğüm" ve o düğümlerin hepsi aynı tıkanıklığa bakıyor.
+
+Kural: pilot sıkıştığını anlayınca **grafı bırakıyor** ve şehre soruyor — en iyi yön
+kazanıyor, araba sınırlı süre oraya sürüyor, süre dolunca tuttuğu düğüm/kara liste/yol
+noktası **hiç dokunulmamış** hâlde beklediği için tam kaldığı yerden devam ediyor. Üç
+çürütülmüş kuralın hiçbiri geri alınmadan denenebilmesinin sebebi bu: onlar makinenin
+içindeydi, bu dışında.
+
+**İlk sürüm çürüdü, ve nasıl çürüdüğü düzeltmeyi yazdı.** "En açık yön" seçilince:
+
+| kaçış | giden | yol noktası |
+|---|---:|---:|
+| 0 | 63/64 | **799** |
+| 1,0 | 61/64 | 781 |
+| 2,0 | **64/64** | 757 |
+| 3,5 | **64/64** | 742 |
+| 6,0 | **64/64** | 737 |
+
+Mekanizma yapması gerekeni yapıyordu — 2 saniyeden itibaren **64/64 araba kavşak alıyor**,
+yani kimse sıkışıp kalmıyor — ama kurtarılan araba parkurdan uzaklaşıyordu. Tek satırlık
+düzeltme: açıklığı, gidilmesi gereken yönle ağırlıkla (`reach × (0,5 + 0,5·cos)`). Aynı
+süpürme tersine döndü:
+
+| kaçış | giden | düşen | **yol noktası** | ayrı düğüm | t<30 |
+|---|---:|---:|---:|---:|---:|
+| **0 (kapalı)** | 63/64 | 2 | 799 | 1.247 | 18 |
+| 1,0 | 61/64 | 1 | 802 | 1.262 | 15 |
+| 2,0 | **64/64** | 2 | 827 | 1.314 | 18 |
+| **3,5** | **64/64** | **1** | **833** | **1.329** | **15** |
+| 6,0 | **64/64** | 2 | 838 | 1.319 | 19 |
+
+3,5 seçildi: 2-6 platosunun ortası ve ayrı düğümde en iyisi (1.329), erken duran en az
+(15), düşen 1. 6,0 beş yol noktası daha kapsıyor ama ikisini de geri veriyor.
+
+Bu, dört turdur açık olan maddeyi kapatıyor: **kaçış manevrası pilotun düğüm makinesinin
+dışından geldi ve işe yaradı.**
+
+### Yönü elemek (çürüdü)
+
 Bunun üzerine yazılan mekanizma — **düğümü değil yönü elemek** — çürüdü, ve nasıl çürüdüğü asıl
 bulgu. Vazgeçme anında, terk edilen düğümün yönüne `shun` derece içinde kalan bütün dallar o seçim
 için elendi, kalanların hedefe en yakını alındı; hiçbiri kalmazsa eski davranışa düşüyordu.
