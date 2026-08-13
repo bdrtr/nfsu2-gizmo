@@ -849,6 +849,32 @@ Kalan gerçek: alan parkurun ortalama **7 yol noktasını** geçiyor (rotaya gö
 Sürüyorlar, düşmüyorlar, ama parkuru sürmüyorlar — ve bunun sebebi ne ilerletme kuralı ne de
 senkron. Sıradaki iş burada.
 
+### Ağdaki en kısa yol da çürüdü — ve çürüme şekli asıl bulgu
+
+Alanın parkuru sürmemesinin en makul açıklaması pusulaydı: pilot her kavşakta **düz çizgi**
+mesafesine göre dal seçiyor, ve şehir bu pusulanın en kötü olduğu yer. Hedefe *bakan* her şey
+seçilir — çıkmaz sokak, karşı şerit, denizde biten cadde — ve graf bunu kuş uçuşundan ayıramaz.
+
+Yerine dürüst soru kondu: yol noktasının kendi düğümünden dışa doğru Dijkstra, her dal "kaç metre
+yol kaldı" ile puanlanıyor (`Network::guide_to`, kurs başına bir alan). Sekiz parkurda **her ölçütte
+daha kötü**:
+
+| | düz çizgi | ağda en kısa yol |
+|---|---:|---:|
+| geçilen yol noktası | **462** | 391 |
+| toplam mesafe | **4.129 m** | 2.779 m |
+| t<30'da duran | **39/64** | 44/64 |
+
+**Ve bozuk bir uygulama değil** — asıl bulgu bu. Dört parkurda ölçüldü: alanlar grafın **tamamını**
+çözüyor (341/341, 340/341, 154/154, 227/227) ve her yol noktası, alanının çözüldüğü düğüme medyan
+17-19 m uzakta, en kötüsü 107 m. Pusula doğruydu ve araba onunla daha kötü sürdü.
+
+Kalan okuma: **bu graf tam olarak izlenebilecek bir yol haritası değil.** Yan yana giden yolları
+birleştiriyor — `drop_walled` zaten aralarında duvar olan iki bağ yüzünden var — yani en kısa yol,
+arabanın fiziksel olarak alamayacağı birleşmelerden geçiyor ve o tek rotaya kilitleniyor. Düz çizgi
+pusulası ise geziniyor, ve gezinme yalnızca kabaca doğru olan bir grafı tolere eden şey. Sıra:
+**rotayı optimize etmeden önce grafı doğru yap.**
+
 **Yapışan düğüm için "geçtiyse bırak" ise çürüdü — bin kat.** Nişan düzeltmesinin simetriği gibi
 duruyor (düğüm arabanın arkasında kaldıysa ilerlet) ve sekiz parkurda kavşağı 848 → **854.536**
 yapıyor, mesafeyi 3.652 → 2.699 m'ye düşürüyor. Bu, kodda zaten yazılı olan "yeterince yakınsa

@@ -219,6 +219,25 @@ impl Network {
 
     /// The next node to head for, from `here`, having come from `came_from`, aiming at `toward`.
     ///
+    /// **Straight line, and a shortest path over the roads is refuted.** The obvious complaint about
+    /// this rule is that a bearing is a bad compass in a city — greedy descent on the crow's flight
+    /// walks into whatever happens to *point* at the target — so it was replaced with the honest
+    /// question: Dijkstra outward from the waypoint's own node, every branch scored by how much road
+    /// is left. Over eight routes it is **worse on every measure**: waypoints actually driven past
+    /// 462 → 391, distance 4,129 → 2,779 m, cars that stop making progress before t=30 s 39 → 44.
+    ///
+    /// And it is not a broken implementation, which is what makes it worth writing down. Measured on
+    /// four routes, the fields solve **the entire graph** (341 of 341 nodes, 340 of 341, 154 of 154,
+    /// 227 of 227) and every waypoint sits a median 17-19 m from the node its field was solved from,
+    /// worst 107 m. The compass was correct and the car still did worse with it.
+    ///
+    /// The reading that survives: **this graph is not a road map that can be followed exactly.** It
+    /// joins roads that merely run beside each other — [`Self::drop_walled`] exists because of two
+    /// such links with a wall between them — so the shortest path routes a car across joins it
+    /// cannot physically take, and commits to that one route. A bearing wanders, and wandering is
+    /// what tolerates a graph that is only roughly right. Make the graph true before making the
+    /// route optimal.
+    ///
     /// Chooses the neighbour that gets nearest the target, and **refuses to turn round**: the node
     /// just left is excluded unless it is the only way out. Without that a car at a dead end
     /// oscillates, and with it a dead end is driven out of rather than rattled in.
