@@ -168,7 +168,25 @@ impl Network {
         // leading car gets four times as far (176 → 739 m) while the field's coverage there does
         // not move (27 → 26), and `Paths4001` loses a third of its coverage (141 → 103) at every
         // setting, its dead ends going 1 → 6. Removing a link a car cannot drive also removes the
-        // way round it, and this graph cannot spare it. See `ROADMAP.md`.
+        // way round it, and this graph cannot spare it.
+        //
+        // So the barrier was **priced** instead — the branch left in the graph and made to look a
+        // hundred metres further off, which loses to any ordinary branch and still wins when it is
+        // the only way on, so no dead end can be created by construction. Swept on both axes and
+        // **refuted** as well. It beats deleting on every column and still does not earn its place:
+        // the cost saturates at 100 m (300 is identical to it) and the best cell of the two,
+        // 1 m of lift, leaves the field at 609 waypoints against 605 with no mechanism at all —
+        // the margin this project called "no gain" when the blacklists came to 461 against 462.
+        // Half a metre of lift is the interesting one and it splits the columns rather than winning
+        // them: 4,717 m against 4,187 and 973 distinct nodes against 926, for 593 waypoints
+        // against 605.
+        //
+        // The instrument was cleared on the way past, and that is the part worth keeping. Of the
+        // 168 links it marks on 4001, **154 join two paths of the file** — which is exactly what a
+        // central reservation between two carriageways is — against 14 that run along a single path
+        // and therefore cannot have a barrier across them at all. `Paths4061` has none, which is
+        // why five of the eight routes never move by a digit at any setting. What the marks cost is
+        // real detour, not mismarking. See `ROADMAP.md`.
         let solid = |a: Vec3, b: Vec3| ground.gap_along(a, b, tolerance, STEP).is_none();
         let mut cut: Vec<(usize, u32)> = Vec::new();
         for i in 0..self.nodes.len() {

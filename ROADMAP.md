@@ -1043,6 +1043,68 @@ filtrenin kendisiydi.
 **Açık kalan:** 4002'nin ayırıcıları hâlâ orada. Bir sonraki denemenin bunu **bağı silmeden**
 yapması gerekiyor — dalı grafta bırakıp pilota "bunun üstünde bir şey var" demek gibi, ki dolanma
 yolu kaybolmasın.
+
+### Fiyatlamak da çürüdü — ama aleti akladı, ve dosya hakkında bir şey söyledi
+
+Yukarıdaki girdinin bıraktığı iş yapıldı: bağ grafta kalıyor, yalnız pahalanıyor. `mark_barriered`
+işaretliyor ve silmiyor; `step_avoiding` artık mesafenin karesiyle değil **mesafenin kendisiyle**
+sıralıyor — aynı sıra, ama üstüne metre eklenebilen tek biçim — ve bariyerli dala
+`NFS_BARRIER_COST` metre bindiriyor. Yapısal olarak çıkışsız düğüm üretemiyor: bütün dallar
+bariyerliyse hepsi aynı bedeli aldığı için aralarındaki sıra değişmiyor, yani her zaman bir yol
+kalıyor. Geçen turu batıran şey tam da buydu.
+
+**Bedel süpürmesi** (yükseklik 0,5 m):
+
+| bedel | giden | düşen | mesafe | **yol noktası** | kavşak | ayrı düğüm |
+|---|---:|---:|---:|---:|---:|---:|
+| **0 (kapalı)** | 63/64 | 0 | 4.187 m | **605** | 1245 | 926 |
+| 10 | 63/64 | 0 | 4.191 | 586 | 1225 | 902 |
+| 30 | 63/64 | 1 | 4.246 | 593 | 1235 | 910 |
+| **100** | 63/64 | 1 | **4.717** | 593 | **1291** | **973** |
+| 300 | 63/64 | 1 | 4.717 | 593 | 1291 | 973 |
+
+100 ile 300 birebir aynı, yani bedel 100'de **doyuyor**: alternatifi olan her seçimi çeviriyor,
+üstüne koymak bir şey değiştirmiyor. Ve tablo ilk kez ikiye bölünüyor — mesafe, kavşak ve ayrı
+düğüm kapalıyı geçiyor (4.717'ye karşı 4.187, 973'e karşı 926), yol noktası geçmiyor.
+
+**Yükseklik süpürmesi** (bedel 100'de sabit):
+
+| lift | mesafe | **yol noktası** | ayrı düğüm |
+|---|---:|---:|---:|
+| kapalı | 4.187 m | **605** | 926 |
+| 0,5 | **4.717** | 593 | **973** |
+| **1,0** | 4.115 | **609** | 893 |
+| 1,5 / 2,0 | 4.105 | 597 | 891 |
+| 3,0 | 4.062 | 595 | 884 |
+
+En iyi hücre 609'a karşı 605. Bu bir kazanç değil: kara liste turunda 461'e karşı 462 için "kazanç
+yok" denmişti ve büyüklük aynı — üstelik o hücrede mesafe ve ayrı düğüm düşüyor. Yani mekanizma
+silmekten her sütunda iyi, ve yerini yine de hak etmiyor.
+
+**Asıl kazanım aletin aklanması.** İşaretlerin ne cinsten olduğu dosyanın kendisine soruldu: grafta
+iki tür bağ var — bir yolun ardışık iki düğümü (dosya "burası tek bir yol, bu sırayla sürülüyor"
+diyor) ve iki yolu birleştiren kavşak bağı (dosya yalnız "bunlar buluşuyor" diyor). Birincisinin
+üstünde bariyer olması çelişki, ikincisinin üstünde olması ise refüjün ta kendisi:
+
+| rota | tek yolun içinde | iki yolu birleştiren |
+|---|---:|---:|
+| 4001 | 14 | **154** |
+| 4002 | 21 | **80** |
+| 4021 | 5 | 21 |
+| 4061 | **0** | **0** |
+
+Yani mekanizma aradığı şeyi buluyor; çelişkili işaret %8'de kalıyor. 4061'in sıfırı da beş rotanın
+her ayarda kılını kıpırdatmamasını açıklıyor — oralarda işaretlenecek hiçbir şey yok.
+
+Buradan çıkan iki gerçek, mekanizma silinse de duruyor: **rota dosyası yan yana giden taşıt
+yollarını, aralarında ne olduğuna bakmadan birleştiriyor** (4001'de 154 kavşak bağında bir şey
+duruyor), ve **4001'in kaybı yanlış işaretten değil, dolanmanın kendi bedelinden geliyor** — bedelle
+birlikte beş araba (80, 23, 1195) civarına toplanıp 51-61. saniyede duruyor, bedelsiz hâlde ise üçü
+79. saniyeye kadar yol noktası kazanmaya devam ediyor. Bariyerden kaçınmak onları başka bir
+tıkanıklığa sokuyor, ve o tıkanıklık ölçülmedi.
+
+**Açık kalan:** 4002 hâlâ çözülmedi, ama artık ne olmadığını biliyoruz — ne bağı silmek, ne
+fiyatlamak. Sıradaki adayın grafa değil **pilotun nişan almasına** dokunması gerekiyor.
 ---
 
 ## 1. Ana fikir
