@@ -1448,6 +1448,64 @@ Alan genelindeki kazanç bundan bağımsız ve gerçek: kaçış, yanlış nişa
 edebilen* arabalara yaradı. Kalan sekiz araba artık bir pilot sorunu değil, bir **fizik/
 geometri** sorunu olarak sınıflanmalı — ve bir sonraki tur onu öyle ele almalı.
 
+### Sekiz araba fizik sorunu değildi: manevra kendi tetikleyicisini üretiyordu
+
+Yukarıdaki son cümle yanlış çıktı ve nasıl yanlış çıktığı, bulgunun kendisinden değerli.
+
+Sekiz arabanın "fiziksel olarak kamalanmış" olduğu bir çıkarımdı, ölçüm değil. Ölçülünce sırayla
+düştüler: **karnı yerde değil** (dört tekerin taşıdığı yük, kendi ağırlığının 0,95-1,00'i),
+**kutuda değil** (on iki yönün sekizi 8 m'den açık, biri 20 m), **önü kapalı değil** (burnu
+boyunca on metre zemin profili dümdüz), **aktarma bozuk değil** (boşta geçen süre %0, ikinci
+vites, kesintisiz 1200 Nm), **lastik modeli tükenmiş değil** (`ref_vel` tabanı sayesinde durgun
+halde kayma oranı 0,33, yani tepeye yakın; teker traksiyon kontrolüne kırpıldığı için 0,5 rad/s).
+
+Zinciri kesen şey ölçüm değil **deney** oldu, ve baştan yapılmalıydı: pilotu devreden çıkarıp
+gazı basılı tutmak (`NFS_FLOOR`). Araba **0'dan 71 km/h'ye** çıktı ve 180 m gitti. Tam kilitle
+tekrarlandığında da kalktı (29 km/h) — yani direksiyon da suçlu değil. Araba kusursuzdu; onu
+sürmeyen pilottu.
+
+Sebep, takılma kuralının tek satırındaydı:
+
+```rust
+if self.age > SETTLE && speed < STALL_SPEED && self.hold <= 0.0 { self.stalled += TICK; }
+```
+
+`speed` **işaretli**. Geri vitesini yeni bitirmiş araba negatif hız taşır, `speed < 0,7` daha ilk
+tikte doğrudur. Geriden +0,7 m/s'ye dönmek tam gazda bile iki saniyeden fazla sürer, `STALL_FOR`
+ise 1,5 — yani **her geri vites bir sonrakini garantiliyordu**. Manevra kendi tetikleyicisini
+üretiyor, araba pilota itaat ettiği için cezalandırılıyordu. 90 saniyenin 35'i geri viteste,
+115 kaçış, hiçbiri tamamlanamaz.
+
+Geriye yuvarlanan araba duruyor sayılmasın diye konan muafiyet, sekiz rotada **her ayarda** tabanı
+geçti:
+
+| eşik (m/s) | kapsanan | ayrık düğüm |
+|---|---|---|
+| kapalı | 833 | 1329 |
+| 0,2 | 840 | 1345 |
+| **0,5** | **869** | **1364** |
+| 1,0 | 860 | 1342 |
+| 2,0 | 851 | 1335 |
+
+Yükselip inen tek tepeli eğri, gerçek bir sınır bulunduğunda beklenen şekil: küçükte hâlâ
+sürünen araba mahkûm ediliyor, büyükte gerçekten sıkışmış olan bir tutam geri vitesin arkasına
+saklanıyor. **0,5 girdi.**
+
+### Aynı turda çürüyen: viraj gaz kesmesini hızla rampalamak
+
+İlk bulduğum mekanizma buydu ve aritmetiği hâlâ doğru: tam kilitte gaz `1 − 0,85·0,75 = 0,36`'ya
+iner, bu durgun halde ~0,29 m/s² eder, 1,5 saniyede 0,44 m/s — eşik ise 0,7. Yani sert direksiyon
+tutan araba kendi takılma eşiğini aşamaz. Doğru, ama arabaların takılma **sebebi bu değildi**.
+
+Gerçek sebep düzeldikten *sonra* ölçülünce rampa çöktü: 4 ve 8 m/s'de **821** ve **690**, düz
+kesmenin **869**'una karşı. Durgun halde tam kilitte tam gaz arabayı kurtarmıyor, fırlatıyor. İki
+mekanizma izden bakınca birbirine benziyordu; ayıran tek şey süpürme oldu. Çürütme
+`CORNER_LIFT`'in yanına yazıldı, kod silindi.
+
+**Kalıcı alet:** `NFS_FLOOR=<k>` (+ `NFS_FLOORSTEER`) `nfs_sim`'de kaldı. Pilotun akıl yürütmesi
+ile arabanın hareket edebilmesi iki ayrı iddia, ve `pilot.drive`'dan geçen her ölçüm ikisini
+birlikte sınıyor. Bu turu çözen şey oydu.
+
 ### Yönü elemek (çürüdü)
 
 Bunun üzerine yazılan mekanizma — **düğümü değil yönü elemek** — çürüdü, ve nasıl çürüdüğü asıl

@@ -107,6 +107,16 @@ const STALL_SPEED: f32 = 0.7;
 const STALL_FOR: f32 = 1.5;
 /// How long a car is left alone at the start before it can be called stuck.
 const SETTLE: f32 = 3.0;
+/// Backwards speed, in m/s, above which a car is held to be moving rather than stalled. 0 turns
+/// the exemption off, which is the shape the stall rule was measured in before it existed.
+///
+/// **Swept over eight routes and every setting beats having no exemption at all** on waypoints
+/// driven past: 840, 869, 860 and 851 at 0.2, 0.5, 1.0 and 2.0 m/s against **833** with it off,
+/// and distinct nodes agree (1345 / 1364 / 1342 / 1335 against 1329). The curve rises to 0.5 and
+/// falls away either side, which is what a threshold should look like when it is finding a real
+/// boundary rather than being tuned: too small and a car still crawling backwards is condemned,
+/// too large and one genuinely stuck against something gets to hide behind a trickle of reverse.
+const STALL_BACK: f32 = 0.5;
 /// How near the waypoint being held counts as having reached it, in metres.
 ///
 /// Swept over eight routes and **all eight settings beat having no second arm at all** on waypoints
@@ -146,6 +156,16 @@ const BRAKE_SPEED: f32 = 9.0;
 const BRAKE_GAIN: f32 = 1.5;
 
 /// How much steering costs throttle.
+///
+/// **Ramping this in with speed is refuted, and the reasoning that led there is worth keeping
+/// because it was half right.** At full lock the term takes the pedal to 1 − 0.85·0.75 = 0.36,
+/// which from rest is about 0.29 m/s²; in the 1.5 s of [`STALL_FOR`] that reaches 0.44 m/s
+/// against a [`STALL_SPEED`] of 0.7, so a car that has to turn hard to get going cannot clear its
+/// own stall threshold. That arithmetic is correct and it is not the reason the cars were stuck —
+/// [`STALL_BACK`] was. Charging the lift only above 4 or 8 m/s, measured on top of that fix,
+/// gives **821** and **690** waypoints driven past against **869** with it charged flat. Full
+/// pedal at full lock from rest does not rescue a car, it launches one; the two mechanisms looked
+/// alike from the trace and only the sweep told them apart.
 const CORNER_LIFT: f32 = 0.75;
 
 /// How far ahead to look for another car, as a multiple of speed in m/s, and the floor under it.
@@ -447,15 +467,20 @@ impl Pilot {
     /// nearness to the same waypoint, and a blacklist takes away one *node* while the direction
     /// stays exactly as attractive as it was.
     #[must_use]
+    pub fn swaps(&self) -> (usize, usize) {
+        (self.swaps, self.swaps_same)
+    }
+
     /// How many geometric escapes were started, and the total ground covered during them.
+    ///
+    /// The pair is the point. An escape that never fires and one that fires constantly and gets
+    /// nowhere are the same zero in every summary, and they want opposite fixes — the first a
+    /// looser trigger, the second an entirely different mechanism. Measured on 4002 the answer was
+    /// 44-126 escapes a car for 0.0-5.5 m, which is how the search moved off the pilot's steering
+    /// and onto why the cars could not move at all.
     #[must_use]
     pub fn escapes(&self) -> (usize, f32) {
         (self.escapes, self.escape_moved)
-    }
-
-    #[must_use]
-    pub fn swaps(&self) -> (usize, usize) {
-        (self.swaps, self.swaps_same)
     }
 
     /// Ways out of the node re-picked from, summed over give-ups, and how many of them pointed
@@ -733,7 +758,20 @@ impl Pilot {
         // exactly the ones that never took one, and gating on progress meant the pilots that were
         // stuck from the start were the only ones that could not try to get out.
         self.age += TICK;
-        if self.age > SETTLE && speed < STALL_SPEED && self.hold <= 0.0 {
+        // **A car rolling backwards is not stalled — it is obeying.** `speed` is signed, so a car
+        // that has just finished its 1.2 s of reverse is carrying negative speed, and `speed <
+        // STALL_SPEED` counts that as a stall from the first tick. Getting from about −1.5 m/s back
+        // up through +0.7 takes something over two seconds even at full pedal, and [`STALL_FOR`] is
+        // 1.5: the manoeuvre therefore *guarantees* the next stall that starts it again. Measured
+        // on 4002, that is what the cars were doing — 35 s of a 90 s race spent in reverse and 115
+        // escapes, none of which could ever have completed. Rolling backwards is not standing
+        // still, and only standing still is a stall.
+        let stall_back: f32 = std::env::var("NFS_STALLBACK")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(STALL_BACK);
+        let moving_back = stall_back > 0.0 && speed <= -stall_back;
+        if self.age > SETTLE && speed < STALL_SPEED && !moving_back && self.hold <= 0.0 {
             self.stalled += TICK;
         } else {
             self.stalled = 0.0;

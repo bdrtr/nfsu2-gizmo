@@ -27,7 +27,7 @@
 use gizmo::physics::world::PhysicsWorld;
 use gizmo::prelude::*;
 use gizmo::renderer::Renderer;
-use nfsu2::rig::{spawn_car, CarRig, Pilot, Placement, FIXED_DT};
+use nfsu2::rig::{spawn_car, CarRig, Controls, Pilot, Placement, FIXED_DT};
 use nfsu2::scene;
 use nfsu2::world as city;
 
@@ -409,6 +409,7 @@ async fn run() {
     let trace: f32 = std::env::var("NFS_TRACE").ok().and_then(|v| v.parse().ok()).unwrap_or(0.0);
     let mut next_trace = trace;
     let watch: Option<usize> = std::env::var("NFS_WATCH").ok().and_then(|v| v.parse().ok());
+    let floor: Option<usize> = std::env::var("NFS_FLOOR").ok().and_then(|v| v.parse().ok());
     let fence = std::env::var("NFS_FENCE").ok().is_none_or(|v| v != "0");
     let mut held = 0usize;
     // When each car last got further round the course, and how far it has been from the node it
@@ -446,6 +447,21 @@ async fn run() {
     let mut footed = vec![0usize; field.len()];
     let mut touching = vec![0usize; field.len()];
     let mut touched = vec![0usize; field.len()];
+    // How much of its own weight the car's wheels were carrying while it stood still. Four
+    // grounded wheels and no load on any of them is a car sitting on its belly, which no steering
+    // rule can reach; four loaded ones that still go nowhere are pinned against something.
+    let mut loaded = vec![0.0f32; field.len()];
+    // What the drivetrain delivered while it stood there. Asked-for pedal and delivered torque
+    // are different numbers, and only the second one says whether standing still is a drivetrain
+    // failure or a traction one.
+    let mut geared = vec![0.0f32; field.len()];
+    // Steps spent in neutral, not the mean gear: a car alternating between neutral and second
+    // averages the same 1.5 as one sitting in a gear that does not exist, and only the fraction
+    // tells those apart.
+    let mut neutral = vec![0usize; field.len()];
+    let mut revved = vec![0.0f32; field.len()];
+    let mut torqued = vec![0.0f32; field.len()];
+    let mut spun = vec![0.0f32; field.len()];
     let rescue = std::env::var("NFS_RESCUE").is_ok_and(|v| v != "0");
     let mut ticks = vec![0usize; field.len()];
     let mut queued = vec![0usize; field.len()];
@@ -533,6 +549,25 @@ async fn run() {
             // being driven badly — it is not being driven. That is a third state next to "asked for
             // throttle" and "asked for brake", and it has to be counted or it hides inside them.
             spoke[k] = false;
+            // NFS_FLOOR=<k>: take the pilot out of the loop for one car and hold the throttle down,
+            // wheels straight. The pilot's reasoning and the car's ability to move are two separate
+            // claims, and every measurement that goes through `pilot.drive` tests them together —
+            // a car that will not move under a pedal nobody is second-guessing has a fault that no
+            // steering rule, waypoint or escape can be responsible for.
+            if floor == Some(k) {
+                // NFS_FLOORSTEER holds a lock along with the pedal. Full throttle with the wheels
+                // straight tests two things at once — that the car can move and that the pilot's
+                // pedal was the thing stopping it — and only holding the lock separates them.
+                let st: f32 = std::env::var("NFS_FLOORSTEER")
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(0.0);
+                let c = Controls { throttle: 1.0, brake: 0.0, steer: st, toggle_auto_shift: false };
+                cmd[k] = (c.throttle, c.brake, c.steer);
+                spoke[k] = true;
+                rig.drive(&mut world, &c);
+                continue;
+            }
             if let Some(c) =
                 pilot.drive(
                     pose.position,
@@ -663,6 +698,13 @@ async fn run() {
                 let (down, _) = rig.wheels_down(&world);
                 touching[k] += down;
                 touched[k] += 1;
+                loaded[k] += rig.wheel_load(&world);
+                let (gear, rpm, torque, spin) = rig.drivetrain(&world);
+                geared[k] += gear as f32;
+                neutral[k] += usize::from(gear == 1);
+                revved[k] += rpm;
+                torqued[k] += torque;
+                spun[k] += spin;
             }
             let f = &mut falls[k];
             f.below = g.below;
@@ -857,6 +899,32 @@ async fn run() {
             }
             let nose = p.rotation * Vec3::NEG_Z;
             let facing = nose.z.atan2(nose.x).to_degrees().rem_euclid(360.0);
+            // The ground straight ahead, metre by metre. The twelve-ray probe walks its segments
+            // three metres at a time and only knows the surfaces that made it into `Walls`, so a
+            // kerb, a bollard or a low barrier half a metre in front of the bumper passes through
+            // that sieve untouched and the direction still reads "open". A car pushing 3600 N into
+            // something it cannot climb is exactly what that blind spot would look like, and a
+            // one-metre profile of its own nose line is what settles it.
+            let ahead = Vec3::new(nose.x, 0.0, nose.z).normalize_or_zero();
+            let under = |q: Vec3, from: f32| {
+                ground
+                    .heights_at(q.x, q.z)
+                    .into_iter()
+                    .min_by(|x, y| (x - from).abs().total_cmp(&(y - from).abs()))
+            };
+            let mut here = under(p.position, p.position.y).unwrap_or(p.position.y);
+            let mut profile = Vec::new();
+            for m in 1..=10 {
+                let q = p.position + ahead * m as f32;
+                match under(q, here) {
+                    Some(h) => {
+                        profile.push(format!("{:+.1}", h - here));
+                        here = h;
+                    }
+                    None => profile.push("  ?".into()),
+                }
+            }
+            println!("      ground ahead, metre by metre: {}", profile.join(" "));
             println!(
                 "  car {k}: {open}/12 directions open past 8 m · best {best:>5.1} m at \
                  {best_deg:>5.0}° · car faces {facing:>5.0}°"
@@ -873,7 +941,11 @@ async fn run() {
             println!(
                 "  car {k}: still for {s:>3.0}% of the race · {q:>3.0}% of that behind another car · \
                  on its side for {:>3.0}% · fence held it {:>3} times · \
-                 four wheels down for {:>3.0}% of the standing, {:>3.1} wheels on average · \
+                 four wheels down for {:>3.0}% of the standing, {:>3.1} wheels on average \
+                 carrying {:>4.2} of its own weight · \
+                 in gear {:>4.1} ({:>3.0}% of it neutral) at {:>5.0} rpm delivering {:>6.0} Nm \
+                 into wheels turning \
+                 {:>5.1} rad/s · \
                  asked for {:>4.2} throttle and {:>4.2} brake while standing, told nothing \
                  at all {:>3.0}% of it · \
                  reversed for {:>4.1}s and went {:>5.1} m along its own nose doing it · \
@@ -886,6 +958,12 @@ async fn run() {
                 fenced[k],
                 if still[k] > 0 { 100.0 * footed[k] as f32 / still[k] as f32 } else { 0.0 },
                 if touched[k] > 0 { touching[k] as f32 / touched[k] as f32 } else { 0.0 },
+                if touched[k] > 0 { loaded[k] / touched[k] as f32 } else { 0.0 },
+                if touched[k] > 0 { geared[k] / touched[k] as f32 } else { 0.0 },
+                if touched[k] > 0 { 100.0 * neutral[k] as f32 / touched[k] as f32 } else { 0.0 },
+                if touched[k] > 0 { revved[k] / touched[k] as f32 } else { 0.0 },
+                if touched[k] > 0 { torqued[k] / touched[k] as f32 } else { 0.0 },
+                if touched[k] > 0 { spun[k] / touched[k] as f32 } else { 0.0 },
                 if still[k] > 0 { asked[k].0 / still[k] as f32 } else { 0.0 },
                 if still[k] > 0 { asked[k].1 / still[k] as f32 } else { 0.0 },
                 if still[k] > 0 { 100.0 * silent[k] as f32 / still[k] as f32 } else { 0.0 },

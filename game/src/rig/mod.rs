@@ -529,6 +529,59 @@ impl CarRig {
         })
     }
 
+    /// How much of the car's weight its wheels are actually carrying, as a fraction.
+    ///
+    /// [`Self::wheels_down`] asks whether the suspension rays *found* ground, which a car resting
+    /// on its own belly answers "four" to — the ground is right there underneath it, the rays hit
+    /// it, and not one of the wheels is holding the car up. That is the failure this separates:
+    /// a car pinned against a wall stands on its wheels with a normal load and simply cannot go
+    /// forward, while a beached one has nothing under load at all and could not move in *any*
+    /// direction if it wanted to.
+    ///
+    /// One at rest on level ground reads ~1.0. Zero wheels, no controller, or a weightless car
+    /// reads 0.0 rather than dividing by it.
+    #[must_use]
+    pub fn wheel_load(&self, world: &World) -> f32 {
+        let bodies = world.borrow::<RigidBody>();
+        let weight = bodies.get(self.chassis).map_or(0.0, |b| b.mass * 9.81);
+        if weight <= 0.0 {
+            return 0.0;
+        }
+        let vehicles = world.borrow::<VehicleController>();
+        vehicles.get(self.chassis).map_or(0.0, |v| {
+            v.wheels.iter().map(|w| w.suspension_force).sum::<f32>() / weight
+        })
+    }
+
+    /// What the drivetrain is actually delivering: gear, engine speed, and the total drive
+    /// torque at the wheels.
+    ///
+    /// The fork this exists to settle. A car that stands still with four loaded wheels and open
+    /// road in front of it is either being given no drive at all — in which case the fault is in
+    /// the gearbox or the pilot's pedal, and no amount of grip would help — or it is being given
+    /// drive and cannot convert it into motion, which is a contact-and-friction question. Reading
+    /// the torque says which, and nothing else does: the pedal is what was *asked* for, and by the
+    /// time it has been through a clutch, a ratio and a torque curve, asked and delivered are not
+    /// the same number.
+    ///
+    /// Torque is summed as magnitudes so reverse does not cancel forward — the question is whether
+    /// anything is being delivered, not which way, and the mean wheel spin comes back with it: a
+    /// wheel turning under torque while the car stays put is slipping, and one not turning at all
+    /// under the same torque is being held, which are opposite faults.
+    #[must_use]
+    pub fn drivetrain(&self, world: &World) -> (usize, f32, f32, f32) {
+        let vehicles = world.borrow::<VehicleController>();
+        vehicles.get(self.chassis).map_or((0, 0.0, 0.0, 0.0), |v| {
+            (
+                v.current_gear,
+                v.engine_rpm,
+                v.wheels.iter().map(|w| w.drive_torque.abs()).sum(),
+                v.wheels.iter().map(|w| w.angular_velocity.abs()).sum::<f32>()
+                    / v.wheels.len().max(1) as f32,
+            )
+        })
+    }
+
     /// Watch the car's footing for one step and remember the last place it properly stood.
     ///
     /// All the bookkeeping [`Self::keep_in_world`] needs, with none of the rescuing — so a harness
