@@ -877,6 +877,7 @@ async fn run() {
                  asked for {:>4.2} throttle and {:>4.2} brake while standing, told nothing \
                  at all {:>3.0}% of it · \
                  reversed for {:>4.1}s and went {:>5.1} m along its own nose doing it · \
+                 escaped {:>3} times and moved {:>6.1} m doing it · \
                  gave up {:>3} times and {:>3} of those pointed it the same way again, out of \
                  {:>4} ways on of which {:>4} pointed elsewhere and {:>4} were not already \
                  given up on · \
@@ -890,6 +891,8 @@ async fn run() {
                 if still[k] > 0 { 100.0 * silent[k] as f32 / still[k] as f32 } else { 0.0 },
                 back_ticks[k] as f32 * FIXED_DT,
                 back_move[k],
+                field.get(k).map_or(0, |(_, p)| p.escapes().0),
+                field.get(k).map_or(0.0, |(_, p)| p.escapes().1),
                 field.get(k).map_or(0, |(_, p)| p.swaps().0),
                 field.get(k).map_or(0, |(_, p)| p.swaps().1),
                 field.get(k).map_or(0, |(_, p)| p.swap_choice().0),

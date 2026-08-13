@@ -308,6 +308,15 @@ pub struct Pilot {
     /// the moment it gives up, **six to ten of twelve directions are clear for the full
     /// twenty metres of the probe**. So the escape stops asking the graph and asks the city.
     escape: Option<(Vec3, f32)>,
+    /// How many escapes were started, and how far the car actually moved during them.
+    ///
+    /// The rule cut the early-stopper count 18 → 15 and the field's coverage 799 → 833, but
+    /// the "nothing else explains it" bucket stayed at eight cars — so for those it is either
+    /// not firing or firing and failing, and those want opposite fixes.
+    escapes: usize,
+    escape_moved: f32,
+    /// Where the current escape started, so its displacement can be measured when it ends.
+    escape_from: Option<Vec3>,
     /// Links the node being re-picked from had, summed over give-ups, and how many of them pointed
     /// away from the abandoned one. The difference between "no way out" and "no way that is
     /// different".
@@ -437,6 +446,13 @@ impl Pilot {
     /// same thing again. It is structural rather than bad luck — `Network::step_avoiding` ranks by
     /// nearness to the same waypoint, and a blacklist takes away one *node* while the direction
     /// stays exactly as attractive as it was.
+    #[must_use]
+    /// How many geometric escapes were started, and the total ground covered during them.
+    #[must_use]
+    pub fn escapes(&self) -> (usize, f32) {
+        (self.escapes, self.escape_moved)
+    }
+
     #[must_use]
     pub fn swaps(&self) -> (usize, usize) {
         (self.swaps, self.swaps_same)
@@ -758,6 +774,8 @@ impl Pilot {
                     // `best.1` artık yönün kendisi değil, o yöndeki tam vektör.
                     if best.1.length() > ESCAPE_MIN {
                         self.escape = Some((at + best.1, far));
+                        self.escapes += 1;
+                        self.escape_from = Some(at);
                     }
                 }
             }
@@ -860,6 +878,9 @@ impl Pilot {
         if let Some((to, left)) = self.escape {
             let left = left - TICK;
             if left <= 0.0 || flat(to - at).length() < ESCAPE_ARRIVED {
+                if let Some(from) = self.escape_from.take() {
+                    self.escape_moved += flat(at - from).length();
+                }
                 self.escape = None;
             } else {
                 self.escape = Some((to, left));

@@ -1426,6 +1426,28 @@ süpürme tersine döndü:
 Bu, dört turdur açık olan maddeyi kapatıyor: **kaçış manevrası pilotun düğüm makinesinin
 dışından geldi ve işe yaradı.**
 
+**Ama kimlere yaradığı ayrı bir bulgu, ve kalan kovayı yeniden tanımlıyor.** Kural girdikten
+sonra erken duran araba 18 → 15'e indi, fakat "başka hiçbir şey açıklamıyor" kovası **sekizde
+kaldı**. Kaçışın kendi sayacı takıldı ve cevap net:
+
+| araba | kaçış sayısı | kaçış boyunca alınan yol |
+|---|---:|---:|
+| çoğu | 44-126 kez | **0,0 m** |
+| en iyisi | 95 kez | 5,5 m |
+
+Yani kural **ateşleniyor** (araba başına yüze yakın kez) ve arabayı hiçbir yere götürmüyor. Bu
+kolu ayırt etmek önemliydi: "hiç ateşlenmiyor" ile "ateşleyip başaramıyor" zıt düzeltmeler
+ister.
+
+Ve başaramamasının sebebi kaçışta değil: kaçış **nereye sürüleceğini** değiştirir, oysa bu
+arabalar hiç hareket edemiyor — daha önce ölçülmüştü, bazıları otuz saniye geri viteste
+kalıp **−0,0 m** alıyor. Ne ileri ne geri. **Kamalanmışlar**, ve kamalanmış bir arabaya
+hiçbir pilot kuralı yaramaz.
+
+Alan genelindeki kazanç bundan bağımsız ve gerçek: kaçış, yanlış nişan alan ama *hareket
+edebilen* arabalara yaradı. Kalan sekiz araba artık bir pilot sorunu değil, bir **fizik/
+geometri** sorunu olarak sınıflanmalı — ve bir sonraki tur onu öyle ele almalı.
+
 ### Yönü elemek (çürüdü)
 
 Bunun üzerine yazılan mekanizma — **düğümü değil yönü elemek** — çürüdü, ve nasıl çürüdüğü asıl
