@@ -431,6 +431,13 @@ async fn run() {
     let mut still = vec![0usize; field.len()];
     let mut rolled = vec![0usize; field.len()];
     let mut rescued = vec![0usize; field.len()];
+    let mut cmd = vec![(0.0f32, 0.0f32, 0.0f32); field.len()];
+    let mut spoke = vec![false; field.len()];
+    let mut silent = vec![0usize; field.len()];
+    let mut asked = vec![(0.0f32, 0.0f32); field.len()];
+    let mut footed = vec![0usize; field.len()];
+    let mut touching = vec![0usize; field.len()];
+    let mut touched = vec![0usize; field.len()];
     let rescue = std::env::var("NFS_RESCUE").is_ok_and(|v| v != "0");
     let mut ticks = vec![0usize; field.len()];
     let mut queued = vec![0usize; field.len()];
@@ -500,7 +507,7 @@ async fn run() {
             field.iter().filter_map(|(r, _)| r.pose(&world).map(|p| p.position)).collect();
         // Controls first for the whole field, then one physics step: every car sees the same
         // world state, which a loop that stepped physics per car would not give.
-        for (rig, pilot) in &mut field {
+        for (k, (rig, pilot)) in field.iter_mut().enumerate() {
             if race.holding() {
                 rig.drive(
                     &mut world,
@@ -514,6 +521,10 @@ async fn run() {
                 continue;
             }
             let Some(pose) = rig.pose(&world) else { continue };
+            // A pilot with no node returns nothing at all, and a car that is told nothing is not
+            // being driven badly — it is not being driven. That is a third state next to "asked for
+            // throttle" and "asked for brake", and it has to be counted or it hides inside them.
+            spoke[k] = false;
             if let Some(c) =
                 pilot.drive(
                     pose.position,
@@ -525,6 +536,11 @@ async fn run() {
                     Some((&walls, &ground)),
                 )
             {
+                // What the pilot is *asking* for, kept so a car that is not moving can be asked
+                // whether it is being told to go. A car standing still under full throttle and a
+                // car standing still because nobody pressed anything are different failures.
+                cmd[k] = (c.throttle, c.brake, c.steer);
+                spoke[k] = true;
                 rig.drive(&mut world, &c);
             }
         }
@@ -547,6 +563,7 @@ async fn run() {
         // and catching it are different jobs, and only the first one answers why.
         for (k, (rig, pilot)) in field.iter_mut().enumerate() {
             let Some(p) = rig.pose(&world) else { continue };
+            let mut still_now = false;
             // Counted only once the grid has been left alone to settle, for the same reason the
             // pilot's own stall rule waits: a car being dropped on the line is not a car that has
             // stopped.
@@ -562,6 +579,7 @@ async fn run() {
                 }
                 if p.speed.abs() < STILL_SPEED {
                     still[k] += 1;
+                    still_now = true;
                     // Standing still *behind somebody* is a different failure from standing still
                     // against a wall, and it is the one that needs no new mechanism — the traffic
                     // rule is already doing what it was asked to.
@@ -613,6 +631,22 @@ async fn run() {
             } else {
                 rig.watch_ground(&world, p, FIXED_DT)
             };
+            // **Standing still with the wheels off the ground is a different failure from standing
+            // still with them on it.** On the ground means the car is being driven into something
+            // it cannot climb, or is not being driven at all; off it means the car is resting on
+            // its floor — high-centred on a kerb — where no amount of throttle reaches the road.
+            // The two want different work and the stopped count cannot tell them apart.
+            if still_now {
+                if g.on_all_four {
+                    footed[k] += 1;
+                }
+                asked[k].0 += cmd[k].0;
+                asked[k].1 += cmd[k].1;
+                silent[k] += usize::from(!spoke[k]);
+                let (down, _) = rig.wheels_down(&world);
+                touching[k] += down;
+                touched[k] += 1;
+            }
             let f = &mut falls[k];
             f.below = g.below;
             f.ever = g.ever;
@@ -781,9 +815,18 @@ async fn run() {
             let q = if still[k] > 0 { 100.0 * queued[k] as f32 / still[k] as f32 } else { 0.0 };
             println!(
                 "  car {k}: still for {s:>3.0}% of the race · {q:>3.0}% of that behind another car · \
-                 on its side for {:>3.0}% · fence held it {:>3} times · last gained at {:>4.1}s",
+                 on its side for {:>3.0}% · fence held it {:>3} times · \
+                 four wheels down for {:>3.0}% of the standing, {:>3.1} wheels on average · \
+                 asked for {:>4.2} throttle and {:>4.2} brake while standing, told nothing \
+                 at all {:>3.0}% of it · \
+                 last gained at {:>4.1}s",
                 100.0 * rolled[k] as f32 / t as f32,
                 fenced[k],
+                if still[k] > 0 { 100.0 * footed[k] as f32 / still[k] as f32 } else { 0.0 },
+                if touched[k] > 0 { touching[k] as f32 / touched[k] as f32 } else { 0.0 },
+                if still[k] > 0 { asked[k].0 / still[k] as f32 } else { 0.0 },
+                if still[k] > 0 { asked[k].1 / still[k] as f32 } else { 0.0 },
+                if still[k] > 0 { 100.0 * silent[k] as f32 / still[k] as f32 } else { 0.0 },
                 moved_at[k]
             );
         }

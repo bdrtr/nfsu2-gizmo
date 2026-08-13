@@ -1328,9 +1328,24 @@ Mütevazı ama bedava. **Sim'in varsayılanı kapalı bırakıldı**: bu dosyada
 ölçüldü ve varsayılanı sessizce değiştirmek onları kıyaslanamaz yapardı. Rakiplere ağı `nfs_cruise`
 tarafında da bağlamak açık iş.
 
-**Açık kalan, ve hâlâ en büyük kova:** dik duran, önünde araba olmayan, çitin dokunmadığı, ama
-yarışın %33-93'ünde hiç kıpırdamayan **sekiz araba**. Sıradaki soru onlara sorulacak — dört tekeri
-yerde mi, yoksa bir şeye mi oturmuşlar.
+**En büyük kova — ve sorusu aynı turda cevaplandı.** Dik duran, önü boş, çitin dokunmadığı, ama
+yarışın %33-93'ünde kıpırdamayan sekiz arabaya üç soru soruldu ve üçü de beklediğimin tersini
+söyledi:
+
+| soru | cevap |
+|---|---|
+| bir şeye mi oturmuşlar (yüksek merkezli) | **hayır** — durdukları sürenin %99-100'ünde dört teker yerde, ortalama 4,0 temas |
+| duvara tam gazla mı yaslanıyorlar | **hayır** — duran arabalarda ortalama gaz **0,00** civarı (−0,10 ile +0,02), fren sıfır |
+| pilot hiç konuşmuyor mu olabilir | **hayır** — `drive` hiç `None` dönmüyor, sessizlik oranı **%0** |
+
+Üçü birleşince tek bir açıklama kalıyor, ve aritmetiği de tutuyor: pilotun **stall → geri git**
+döngüsü. Kural 1,5 saniye durgunluktan sonra tetikleniyor ve 1,2 saniye `-0,7` gazla geri gidiyor,
+sonra baştan; bu döngünün ortalaması `(1,5 × ~0,5 + 1,2 × −0,7) / 2,7 ≈ −0,03`, ki ölçülen aralık
+bu. Yani araba "sürülmüyor" değil — **sürekli kurtulmaya çalışıyor ve hiç kurtulamıyor.**
+
+Kural tam bu durum için yazılmıştı ("bir daha aynı engele koşmasın diye düğümü de kara listeye al")
+ve sekiz arabada doksan saniye boyunca çalışmıyor. Sıradaki iş burası, ve artık ne olmadığını
+biliyoruz: zemin değil, temas değil, sessizlik değil, trafik değil, çit değil, devrilme değil.
 ---
 
 ## 1. Ana fikir
