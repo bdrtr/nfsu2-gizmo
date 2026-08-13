@@ -275,6 +275,12 @@ pub struct Pilot {
     /// within 45° of the one abandoned — that is, sent the car the same way again.
     swaps: usize,
     swaps_same: usize,
+    /// Links the node being re-picked from had, summed over give-ups, and how many of them pointed
+    /// away from the abandoned one. The difference between "no way out" and "no way that is
+    /// different".
+    swap_links: usize,
+    swap_options: usize,
+    swap_free: usize,
     /// The point the steering is actually aimed at, kept only so a harness can see it.
     ///
     /// Where a car is going and which node it holds are different facts, and reading one for the
@@ -375,6 +381,16 @@ impl Pilot {
     /// Reported because the harvest turned out to be worth counting and worth **not** trusting: 369
     /// nodes over eight routes, 63 of 64 cars leaving at least one, and sharing the ones several
     /// cars agree on is refuted (`ROADMAP.md`).
+    ///
+    /// **Making it forget is refuted too, and that is the surprise.** At a give-up the node being
+    /// re-picked from has 4.22 ways out, 1.56 of them point somewhere other than the one abandoned,
+    /// and only **0.12** of those are not already on this list — so 92 % of a car's alternatives are
+    /// nodes it crossed off earlier, and the list looked like the thing strangling the escape. It is
+    /// not: expiring entries after 3, 6, 12 and 25 s loses on every column at every setting —
+    /// waypoints 799 → 785 / 758 / 787 / 773, cars away 63/64 → 60-61, distance 5,394 → 5,074-5,218
+    /// — while junctions leap to 2,038-2,551 against 1,566 with distinct nodes unmoved. That pairing
+    /// is this project's signature for oscillation rather than progress: a car returns to a node it
+    /// gave up on, fails there again, and gives up again. The permanence is load-bearing.
     #[must_use]
     pub fn given_up(&self) -> &[u32] {
         &self.blocked
@@ -391,6 +407,13 @@ impl Pilot {
     #[must_use]
     pub fn swaps(&self) -> (usize, usize) {
         (self.swaps, self.swaps_same)
+    }
+
+    /// Ways out of the node re-picked from, summed over give-ups, and how many of them pointed
+    /// away from the one abandoned.
+    #[must_use]
+    pub fn swap_choice(&self) -> (usize, usize, usize) {
+        (self.swap_links, self.swap_options, self.swap_free)
     }
 
     /// How many of the course's waypoints the car has actually driven past.
@@ -689,6 +712,27 @@ impl Pilot {
                     self.swaps += 1;
                     if bearing(bad).dot(bearing(other)) > 0.7 {
                         self.swaps_same += 1;
+                    }
+                    // **How much choice there was**, as opposed to what was taken. Shunning the
+                    // abandoned heading was refuted with a fallback rate that said the escape
+                    // almost never has anywhere else to go (`ROADMAP.md`), but that was inferred
+                    // rather than measured, and two very different worlds produce it: a node with
+                    // one way out, or a node with four ways out that all point the same way. The
+                    // next mechanism depends on which, so it is counted here.
+                    if let Some(j) = net.node(from) {
+                        let away = bearing(bad);
+                        self.swap_links += j.links.len();
+                        self.swap_options +=
+                            j.links.iter().filter(|l| bearing(**l).dot(away) <= 0.7).count();
+                        // And of those, the ones not already given up on. The difference between
+                        // these two is the whole question: a graph that offers no alternative and
+                        // a graph whose alternatives this car has already crossed off are the same
+                        // to the escape and want opposite fixes.
+                        self.swap_free += j
+                            .links
+                            .iter()
+                            .filter(|l| bearing(**l).dot(away) <= 0.7 && !self.blocked.contains(l))
+                            .count();
                     }
                     self.at = Some(other);
                     self.from = Some(from);

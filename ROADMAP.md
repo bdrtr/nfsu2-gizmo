@@ -1402,13 +1402,40 @@ filtre **en fazla onda bir** iş görüyor.
 düğümün başka yöne çıkan bir dalı yok — o noktada graf fiilen bir koridor. Düğümü elemek de yönü
 elemek de aynı yere çıkıyor, çünkü ikisi de *alternatif varsayıyor.*
 
-Bu, kaçış kuralı hakkındaki bütün diziyi yeniden çerçeveliyor: sorun "yanlış dalı seçiyor" değil,
-**"dal yok"**. Sıradaki aday bu yüzden başka bir cinsten olmak zorunda — grafta seçim yapmayan bir
-şey: kaçış boyunca hedefi tamamen bırakıp arabayı serbest sürdürmek, ya da düğüm dizisini terk edip
-fizikten kaçış yönü türetmek gibi. Ölçü yerinde kalıyor: `Pilot::swaps` vazgeçme sayısını ve kaçının
-aynı yöne çıktığını veriyor, ve bu turda o sayacın kendisi de bir şey öğretti — **eşiği mekanizmanın
-eşiğinden bağımsız tutmak gerekiyor**, yoksa (shun ≥ 45'te olduğu gibi) sayaç mekanizmanın tanımı
-gereği doğru çıkar ve ölçmeyi bırakır.
+Buradan "demek ki dal yok" diye bir sonuç çıkardım, ve **o bir çıkarımdı, ölçüm değildi.** Ölçünce
+yanlış çıktı — vazgeçme anında düğümün **4,22 dalı** var ve **1,56'sı başka yöne bakıyor** (%37).
+Alternatif var.
+
+Doğru cevap üçüncü ölçümde geldi: o dalların **%92'si zaten kara listede** (vazgeçme başına 1,56
+başka-yöne dalın yalnız **0,12'si** listede değil). Yani araba kendi geçmişi tarafından köşeye
+sıkıştırılmış. Kara liste hiç unutmuyordu — `blocked` yalnızca büyüyen bir liste — ve hepsi
+tükenince `step_avoiding`'in son çaresi listeyi tümden yok sayıp arabayı yine aynı yöne gönderiyor.
+Kendi kendini besleyen bir kilit.
+
+**Ve kara listeye unutma eklemek de çürüdü.** Girişler 3, 6, 12 ve 25 saniye sonra düşürüldü:
+
+| unutma | giden | düşen | mesafe | **yol noktası** | kavşak | ayrı düğüm | kara liste |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| **0 (hiç)** | **63/64** | 2 | **5.394 m** | **799** | 1566 | 1247 | 334 |
+| 3 sn | 60/64 | 1 | 5.209 | 785 | 2551 | 1230 | 56 |
+| 6 sn | 60/64 | 0 | 5.218 | 758 | 2128 | 1218 | 109 |
+| 12 sn | 61/64 | 1 | 5.074 | 787 | 2226 | 1281 | 166 |
+| 25 sn | 61/64 | 3 | 5.172 | 773 | 2038 | 1315 | 202 |
+
+Dördü de yol noktasında, giden arabada, mesafede ve erken durmada kaybediyor. Nasıl kaybettiği de
+tanıdık: kavşak 1.566'dan 2.038-2.551'e fırlarken ayrı düğüm kıpırdamıyor — bu projede o ikili
+"ilerleme değil, aynı yerde salınım" demek. Araba vazgeçtiği düğüme dönüyor, yine takılıyor, yine
+vazgeçiyor. **Kara listenin kalıcılığı boşuna değilmiş: daha kötü bir salınımı tutuyormuş.**
+
+Böylece kaçış dizisi kapanıyor ve vardığı yer yapısal: **ne farklı seçmek, ne unutmak işe yarıyor,
+çünkü ikisi de aynı makinenin içinde oynuyor.** Pilotun düğüm seçme makinesi yerel bir optimumda —
+düğüm eleyen, yön eleyen ve liste unutan üç varyantın üçü de çürüdü. Sıradaki adayın bu makinenin
+*dışından* gelmesi gerekiyor: kaçış boyunca grafı tamamen bırakıp arabayı serbest sürdürmek, ya da
+kaçış yönünü düğümlerden değil şehrin geometrisinden türetmek.
+
+Bir de alet dersi, iki tane: sayacın eşiği mekanizmanın eşiğinden **bağımsız** olmalı (shun ≥ 45'te
+45°'lik sayaç tanım gereği doğru çıkıp ölçmeyi bıraktı), ve bir çıkarımı ölçüm yerine koymamalı —
+bu turda "dal yok" sonucu tam olarak öyle üretilmişti ve yanlıştı.
 ---
 
 ## 1. Ana fikir
