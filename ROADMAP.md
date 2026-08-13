@@ -1357,11 +1357,34 @@ geçiriyor — yarışın dörtte biri ile yarısı arası. Geri git, ileri dön
 İki alt grup ayrılıyor: uzun mesafe geri gidip aynı yere dönenler, ve **geri viteste bile
 kıpırdamayanlar** (otuz saniyede −0,0 ile −6 m; arkalarında da bir şey var).
 
-Yani kusur kurtulma manevrasında değil, **kurtulduktan sonra nereye gidildiğinde**. Kural düğümü
-kara listeye alıyor ve alan sekiz rotada 334 düğüm bırakmış durumda, ama araba yine aynı engele
-dönüyor — demek ki engel düğümün *üstünde* değil, oradan çıkan **her** yolun üstünde, ya da yeni
-seçilen düğüm arabayı geri getiriyor. Sıradaki tur burayı ölçmeli: kara listeden sonra seçilen
-düğüm, terk edilenden gerçekten farklı bir yöne mi çıkarıyor.
+Yani kusur kurtulma manevrasında değil, **kurtulduktan sonra nereye gidildiğinde**. Ve o da aynı
+turda ölçüldü: vazgeçme anında, terk edilen düğümün ve yerine seçilenin arabadan görülen yönleri
+karşılaştırıldı (45°'den dar açı "aynı yön" sayıldı).
+
+| araba | vazgeçme | aynı yön |
+|---|---:|---:|
+| 4001 no 7 | 126 | **125** |
+| 4001 no 3 | 126 | **124** |
+| 4002 no 2 | 115 | 110 |
+| 4021 no 5 | 91 | **91** |
+| 4041 no 2 | 89 | **89** |
+| geri kalan on üç | 39-117 | **%94-100** |
+
+Tek istisna devrilmiş araba (117 vazgeçme, 0 aynı yön) ve o zaten hiçbir yere gitmiyor.
+
+**Vazgeçme, arabayı %94-100 oranında aynı yöne gönderiyor** — ve sebebi yapısal, tesadüf değil:
+`step_avoiding` aynı `toward` hedefine en yakın dalı seçiyor, kara liste ise yalnız **bir düğümü**
+eliyor. Hedef değişmediğine göre ikinci en iyi dal da doğal olarak aynı yöne bakar. Yani manevra
+"bu düğümden vazgeç" diyor, oysa arabanın çarptığı şey düğüm değil **o yön**.
+
+Sayının büyüklüğü de bunu tamamlıyor: arabalar doksan saniyede **39 ilâ 126 kez** vazgeçiyor, yani
+saniyede yarım kez. Kara listenin uzunluğu (sekiz rotada 334 düğüm) bunun çok altında, çünkü
+vazgeçmelerin çoğu zaten listede olan düğümleri yeniden seçiyor.
+
+Bir sonraki mekanizmanın ne yapması gerektiği artık tarif edilebiliyor: **düğümü değil yönü elemek**,
+ya da vazgeçme sırasında hedefi geçici olarak bırakmak. Ölçüsü de hazır — `Pilot::swaps` vazgeçme
+sayısını ve kaçının aynı yöne çıktığını veriyor, yani bir düzeltmenin işe yarayıp yaramadığı doğrudan
+görülecek.
 ---
 
 ## 1. Ana fikir

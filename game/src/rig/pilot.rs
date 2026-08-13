@@ -271,6 +271,10 @@ pub struct Pilot {
     wall_shift: f32,
     /// Ticks left before the shift is worked out again.
     wall_due: u8,
+    /// How many times giving up on a node has re-picked another, and how many of those pointed
+    /// within 45° of the one abandoned — that is, sent the car the same way again.
+    swaps: usize,
+    swaps_same: usize,
     /// The point the steering is actually aimed at, kept only so a harness can see it.
     ///
     /// Where a car is going and which node it holds are different facts, and reading one for the
@@ -374,6 +378,19 @@ impl Pilot {
     #[must_use]
     pub fn given_up(&self) -> &[u32] {
         &self.blocked
+    }
+
+    /// How many times it gave up on a node and took another, and how many of those took it the
+    /// **same way again** — the cost of the escape and its yield, side by side.
+    ///
+    /// Measured because the second number turned out to be almost the first: 94-100 % of the
+    /// re-picks point within 45° of the node just abandoned, so a car backs off and drives at the
+    /// same thing again. It is structural rather than bad luck — `Network::step_avoiding` ranks by
+    /// nearness to the same waypoint, and a blacklist takes away one *node* while the direction
+    /// stays exactly as attractive as it was.
+    #[must_use]
+    pub fn swaps(&self) -> (usize, usize) {
+        (self.swaps, self.swaps_same)
     }
 
     /// How many of the course's waypoints the car has actually driven past.
@@ -660,6 +677,19 @@ impl Pilot {
                 }
                 let from = self.from.unwrap_or(bad);
                 if let Some(other) = net.step_avoiding(from, None, toward, &self.blocked) {
+                    // **Whether giving up actually points anywhere else.** Blacklisting the node
+                    // and re-picking is only worth the reverse it costs if the replacement lies in
+                    // a different direction from the car; a node the same way on is the same
+                    // obstacle with another name, and the field spends a quarter to a half of a
+                    // race backing off and returning. Counted rather than assumed, and 45° is the
+                    // line: past that the car has genuinely been sent somewhere else.
+                    let bearing = |i: u32| {
+                        net.node(i).map_or(Vec3::ZERO, |j| flat(j.at - at).normalize_or_zero())
+                    };
+                    self.swaps += 1;
+                    if bearing(bad).dot(bearing(other)) > 0.7 {
+                        self.swaps_same += 1;
+                    }
                     self.at = Some(other);
                     self.from = Some(from);
                 }
