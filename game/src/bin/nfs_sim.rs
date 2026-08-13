@@ -433,6 +433,14 @@ async fn run() {
     let mut rescued = vec![0usize; field.len()];
     let mut cmd = vec![(0.0f32, 0.0f32, 0.0f32); field.len()];
     let mut spoke = vec![false; field.len()];
+    // **Does the escape actually escape.** The stall rule reverses at -0.7 throttle; whether the
+    // car then moves backwards is a different question from whether it was told to, and negative
+    // throttle in a forward gear is a brake rather than a reverse. Counted as displacement along
+    // the car's own nose, so backwards is negative and a car that reverses two metres and drives
+    // back into the same wall does not read the same as one that never moved.
+    let mut back_ticks = vec![0usize; field.len()];
+    let mut back_move = vec![0.0f32; field.len()];
+    let mut prev_pos: Vec<Option<Vec3>> = vec![None; field.len()];
     let mut silent = vec![0usize; field.len()];
     let mut asked = vec![(0.0f32, 0.0f32); field.len()];
     let mut footed = vec![0usize; field.len()];
@@ -636,6 +644,15 @@ async fn run() {
             // it cannot climb, or is not being driven at all; off it means the car is resting on
             // its floor — high-centred on a kerb — where no amount of throttle reaches the road.
             // The two want different work and the stopped count cannot tell them apart.
+            if cmd[k].0 < 0.0 {
+                back_ticks[k] += 1;
+                if let Some(b) = prev_pos[k] {
+                    let nose = p.rotation * Vec3::NEG_Z;
+                    let f = Vec3::new(nose.x, 0.0, nose.z).normalize_or_zero();
+                    back_move[k] += (p.position - b).dot(f);
+                }
+            }
+            prev_pos[k] = Some(p.position);
             if still_now {
                 if g.on_all_four {
                     footed[k] += 1;
@@ -819,6 +836,7 @@ async fn run() {
                  four wheels down for {:>3.0}% of the standing, {:>3.1} wheels on average · \
                  asked for {:>4.2} throttle and {:>4.2} brake while standing, told nothing \
                  at all {:>3.0}% of it · \
+                 reversed for {:>4.1}s and went {:>5.1} m along its own nose doing it · \
                  last gained at {:>4.1}s",
                 100.0 * rolled[k] as f32 / t as f32,
                 fenced[k],
@@ -827,6 +845,8 @@ async fn run() {
                 if still[k] > 0 { asked[k].0 / still[k] as f32 } else { 0.0 },
                 if still[k] > 0 { asked[k].1 / still[k] as f32 } else { 0.0 },
                 if still[k] > 0 { 100.0 * silent[k] as f32 / still[k] as f32 } else { 0.0 },
+                back_ticks[k] as f32 * FIXED_DT,
+                back_move[k],
                 moved_at[k]
             );
         }

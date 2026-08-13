@@ -1344,8 +1344,24 @@ sonra baştan; bu döngünün ortalaması `(1,5 × ~0,5 + 1,2 × −0,7) / 2,7 �
 bu. Yani araba "sürülmüyor" değil — **sürekli kurtulmaya çalışıyor ve hiç kurtulamıyor.**
 
 Kural tam bu durum için yazılmıştı ("bir daha aynı engele koşmasın diye düğümü de kara listeye al")
-ve sekiz arabada doksan saniye boyunca çalışmıyor. Sıradaki iş burası, ve artık ne olmadığını
-biliyoruz: zemin değil, temas değil, sessizlik değil, trafik değil, çit değil, devrilme değil.
+ve sekiz arabada doksan saniye boyunca çalışmıyor. Artık ne olmadığını biliyoruz: zemin değil,
+temas değil, sessizlik değil, trafik değil, çit değil, devrilme değil.
+
+**Ve bir soru daha kapandı: geri vites çalışıyor.** Negatif gazın vitesi çevirmeyip fren gibi
+davranması makul bir şüpheydi ve yanlış çıktı — geri gitme komutu verilen arabaların burnu boyunca
+aldığı yol ölçüldü ve gerçekten geri gidiyorlar: −21,0 · −22,4 · −28,7 · −12,1 · −10,4 m, biri
+−78,8 m. Yani manevra icra ediliyor.
+
+Asıl sayı onun yanında: bu arabalar **doksan saniyenin 21-38 saniyesini geri geri giderek**
+geçiriyor — yarışın dörtte biri ile yarısı arası. Geri git, ileri dön, aynı şeye çarp, baştan.
+İki alt grup ayrılıyor: uzun mesafe geri gidip aynı yere dönenler, ve **geri viteste bile
+kıpırdamayanlar** (otuz saniyede −0,0 ile −6 m; arkalarında da bir şey var).
+
+Yani kusur kurtulma manevrasında değil, **kurtulduktan sonra nereye gidildiğinde**. Kural düğümü
+kara listeye alıyor ve alan sekiz rotada 334 düğüm bırakmış durumda, ama araba yine aynı engele
+dönüyor — demek ki engel düğümün *üstünde* değil, oradan çıkan **her** yolun üstünde, ya da yeni
+seçilen düğüm arabayı geri getiriyor. Sıradaki tur burayı ölçmeli: kara listeden sonra seçilen
+düğüm, terk edilenden gerçekten farklı bir yöne mi çıkarıyor.
 ---
 
 ## 1. Ana fikir
