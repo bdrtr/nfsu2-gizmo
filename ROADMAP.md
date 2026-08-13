@@ -1229,6 +1229,55 @@ teşhis doğruydu ama eşiği rotanın kendi geometrisi belirliyor.
 
 Bir de yolda görüldü: kod `Self::lost`'a yönlendiriyor ama **öyle bir metot yok** — "kursu
 kaybetmiş arabanın cevabı" yazılmamış, yönlendirme boşa gidiyor.
+
+### Çit hakkını veriyor ama nişanı kötü: dört rotada kimseyi kurtarmıyor, ikisinde ağır ödetiyor
+
+Sekizin en zayıfı hâlâ 4002 (223 m). Duvar artık sebebi değil — nişan kuralı orada işini yapıyor,
+duvara nişan oranı **%65'ten %14'e** düşüyor (`NFS_AIMCLEAR=0` ile karşılaştırıldı). Bağlayıcı kısıt
+başka çıktı, ve bir sütun onu ele veriyordu: `held`, yani çitin kaç kez devreye girdiği. 4002'de
+**122**, üstelik toplam 38 kavşak alınırken. Kıyas: 4001'de 13 tutuş / 150 kavşak, 4102'de 3 / 322.
+
+Çit kurulduğunda süpürülmüş ve hakkını vermişti (10 düşen → 1), ama o günden beri bir daha
+ölçülmemişti — ve bugünkü iki yeni pilot kuralı arabaları başka yerlere götürdüğü için bedeli de
+değişmiş olabilirdi. Ölçüldü:
+
+| | giden | **düşen** | mesafe | yol noktası | ayrı düğüm | t<30 duran |
+|---|---:|---:|---:|---:|---:|---:|
+| **çit açık** | 63/64 | **2** | 5.394 m | 799 | 1.247 | 18 |
+| çit kapalı | 63/64 | **9** | 5.885 | 861 | 1.287 | 12 |
+
+Yani hâlâ hakkını veriyor: yedi arabayı haritadan kurtarıyor, karşılığında 62 yol noktası ve 491 m
+alıyor. Ama nişanı kötü olduğu rota rota bakınca çıkıyor:
+
+| rota | düşen (açık) | düşen (kapalı) | mesafe (açık) | mesafe (kapalı) | held |
+|---|---:|---:|---:|---:|---:|
+| **4041** | 2 | **6** | 966 | 921 | 73 |
+| 4021 | 0 | 1 | 633 | 610 | 1 |
+| 4061 | 0 | 1 | 898 | 898 | 84 |
+| 4121 | 0 | 1 | 704 | 711 | 18 |
+| 4081 | 0 | 0 | 583 | 593 | 34 |
+| 4102 | 0 | 0 | 503 | 503 | 3 |
+| **4001** | 0 | 0 | **884** | **1.086** | 13 |
+| **4002** | 0 | 0 | **223** | **563** | **122** |
+
+**Dört rotada kimseyi kurtarmıyor**, ve ikisinde bedeli ağır: 4001 −202 m, 4002 −340 m. Kurtardığı
+yer zaten teşhisi konmuş olan 4041 — "yarış çizgisi boşluğun kenarından geçiyor" — orada 6 → 2.
+4002'deki 122 tutuşun hiçbir şey önlemediği **kanıtlı**, çünkü çit kapalıyken orada da düşen sıfır.
+
+**Mekanizma koddan okunuyor.** `hold_at_edge` önce gidiş yönünde zeminin bitip bitmediğine bakıyor;
+bitiyorsa `edge_at`'in on iki yönlü halkası boşluk yönlerini toplayıp dışa bakan normal `n`'i
+veriyor, ve hızın `n` üzerindeki bileşeni siliniyor. Tasarım "kenara değen araba boyunca kayar"
+diyor ve yanal bir kenarda öyle de oluyor. Ama boşluk **ileride** olduğunda — dar bir viyadükte
+sağ ve sol birbirini götürür, geriye ileri kalır — silinen bileşen arabanın **bütün ileri hızı**
+oluyor. 4002'nin arabalarının 0 km/h'de durmasının biçimi bu.
+
+Boşluğun neden ileride göründüğü ise **henüz ölçülmedi**; en makul aday yolun bitmesi değil
+*dönmesi*: sondaj düz bir çizgi ve yükseklik penceresi 8 m, yükseltilmiş bir yolun dönen dış
+kenarında bu ikisi "yol burada bitiyor" der. Bunu ayıracak ölçüm yazılmadı, ve çiti düzeltecek
+şeyin önce bunu ayırması gerekiyor: **"yol bitiyor" ile "yol dönüyor" aynı sondajda aynı görünüyor.**
+
+Çit bu yüzden olduğu gibi bırakıldı — kaldırmak yedi arabayı haritadan atmak demek, ve nişanını
+düzeltmek ayrı bir tur.
 ---
 
 ## 1. Ana fikir

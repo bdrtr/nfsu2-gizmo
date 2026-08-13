@@ -629,6 +629,25 @@ impl CarRig {
         if ground.gap_along(from, from + dir * look, SLACK, 2.0).is_none() {
             return false;
         }
+        // **Measured again on 2026-08-13, and it is badly aimed.** The fence still earns its place
+        // over eight routes — 2 cars off the world against **9** with it off — but it costs 62
+        // waypoints and 491 m for that, and the cost is not where the saving is. On **four of the
+        // eight routes it saves nobody**, and on two of those it is expensive: `Paths4001` loses
+        // 202 m to it and `Paths4002` **340 m**, the latter while firing 122 times in a race where
+        // turning the fence off drops nobody at all. Everything it actually saves is on `Paths4041`
+        // (6 → 2), the route whose race line runs along the lip of the void, plus one car each on
+        // three others.
+        //
+        // The shape of the fault is below rather than here: `n` is the **sum** of the directions
+        // with no ground, so where a car is on something narrow with air on both sides those two
+        // cancel and what is left points along the road. `outward` is then the whole of the car's
+        // forward speed and this deletes it — which is why 4002's field ends the race at 0 km/h
+        // instead of sliding along an edge the way a fence is supposed to let it.
+        //
+        // Why the ground looks as though it stops ahead is **not measured yet**, and the fix has to
+        // start there: a straight probe inside an 8 m height window cannot tell a road that *ends*
+        // from a road that *turns*, and on a raised carriageway the second is far more likely. See
+        // `ROADMAP.md`.
         let Some(n) = ground.edge_at(from, look, SLACK) else { return false };
         let outward = flat.dot(n);
         if outward <= 0.0 {
