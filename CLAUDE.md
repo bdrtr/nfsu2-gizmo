@@ -46,7 +46,7 @@ worth keeping in mind:
 
 ```toml
 gizmo = { package = "gizmo-engine", git = "https://github.com/bdrtr/Gizmo",
-          rev = "4d1a8cb7dab9df9e97b9e4c08255cbd56cef568f", ... }
+          rev = "48ac99e8bc4f27f9943e1d282a112e13cc1efaf0", ... }
 ```
 
 The game is being developed against a fixed engine version while Gizmo evolves independently.
@@ -59,6 +59,9 @@ crates.io `gizmo-engine 0.8.0` is still insufficient (`Collider::trimesh`, cache
 - **An engine gap found while working belongs in `MOTOR-NOTLARI.md`**, in engine-general language,
   together with whatever workaround the game took. That file is the queue replayed when the pin
   moves; a workaround nobody wrote down is a workaround nobody removes.
+- **This file is not the authority on the pin** — `game/Cargo.toml` is, with `MOTOR-NOTLARI.md`'s
+  Pin table alongside it. The commit above is a copy and copies go stale: it sat two pins behind
+  for two days and was read as current once. Check the manifest.
 - The root `Cargo.toml` has a commented-out `[patch."https://github.com/bdrtr/Gizmo"]` block for
   temporarily building against the local tree. It overrides the `rev`. Comment it back when done —
   `cargo tree -p gizmo-engine` says which source is live.
