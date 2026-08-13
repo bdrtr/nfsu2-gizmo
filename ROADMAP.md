@@ -940,6 +940,30 @@ Düşen sütunu bu ölçekte sinyal değil gürültü (0, 2, 3, 0, 3, 3); 2,0'ı
 Yan etkiler açıklamayla tutarlı: ızgarayı hiç terk edemeyen araba **2 → 1**, pilotların vazgeçtiği
 düğüm **369 → 308**, t=30'dan önce duran **39 → 31**.
 
+### Ve etrafından dolanmak — kuyruğun bedelini geri alıyor
+
+Takip mesafesi dürüsttü ama kuyruk bırakıyordu: öndeki takılırsa arkasındaki yedi araba da duruyor.
+Tıkayan arabanın hangi yanda olduğu zaten ölçülüyordu, geriye onu kullanmak kaldı — nişan noktasını
+ters yana, yaklaştıkça daha çok kaydır. Başka hiçbir şey değişmiyor, yani yol açılınca araba çizgiye
+kendi kendine dönüyor.
+
+| kaydırma | giden | düşen | mesafe | geçilen yol noktası | t<30 duran |
+|---|---:|---:|---:|---:|---:|
+| yok | 63/64 | 0 | 3.611 m | 589 | 31 |
+| **1,5 m** | **63/64** | **0** | **4.187** | **605** | 32 |
+| 2,0 | 63/64 | 3 | 4.260 | 605 | 28 |
+| 2,5 | 63/64 | 4 | 3.559 | 577 | 27 |
+| 3,0 | 63/64 | 2 | 3.866 | 617 | 27 |
+| 5,0 | 62/64 | 3 | 4.029 | 609 | 30 |
+
+Kapsama 1,5'ten yukarısı için 605-617 platosunda, yani geniş kaydırmalar en fazla bir düzine yol
+noktası alıyor — karşılığında iki ilâ dört arabayı haritadan atarak. **1,5 m tek ayarsız seçenek**:
+kimseyi düşürmeden bir şey değiştiren tek değer, ve arkasında ölçüm dışında bir okuma da var — bir
+araba genişliğinin yarısından biraz fazlası, aynı şeritteki arabayı temizleyen en küçük kayma.
+
+Ve takip mesafesinin bedelini geri veriyor: mesafe 3.611 → **4.187 m**, hiç trafik modeli yokken
+alınan 4.129'un bile üstünde. Kuyruk bedeldi; dolanmak onu ödemeyi bırakmak.
+
 **Yapışan düğüm için "geçtiyse bırak" ise çürüdü — bin kat.** Nişan düzeltmesinin simetriği gibi
 duruyor (düğüm arabanın arkasında kaldıysa ilerlet) ve sekiz parkurda kavşağı 848 → **854.536**
 yapıyor, mesafeyi 3.652 → 2.699 m'ye düşürüyor. Bu, kodda zaten yazılı olan "yeterince yakınsa

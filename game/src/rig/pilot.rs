@@ -113,6 +113,30 @@ const TRAFFIC_LOOK_MIN: f32 = 8.0;
 /// carriageway does not.
 const TRAFFIC_HALF_WIDTH: f32 = 2.2;
 
+/// How far sideways the aim point is pushed to get round a car in the way, in metres.
+///
+/// Swept over eight routes on top of the following distance:
+///
+/// | offset | away | off the world | distance | waypoints driven past | stopped before t=30 |
+/// |---|---:|---:|---:|---:|---:|
+/// | none | 63/64 | 0 | 3,611 m | 589 | 31 |
+/// | **1.5** | **63/64** | **0** | **4,187** | **605** | 32 |
+/// | 2.0 | 63/64 | 3 | 4,260 | 605 | 28 |
+/// | 2.5 | 63/64 | 4 | 3,559 | 577 | 27 |
+/// | 3.0 | 63/64 | 2 | 3,866 | 617 | 27 |
+/// | 5.0 | 62/64 | 3 | 4,029 | 609 | 30 |
+///
+/// Coverage sits on a plateau of 605-617 for anything from 1.5 m up, so the wider offsets buy at
+/// most a dozen waypoints — and cost two to four cars off the world for them. One and a half metres
+/// is the only setting that moves anything without that, and it is the one with a reading behind it
+/// as well as a measurement: a little over half a car's width, which is the smallest shift that
+/// actually clears a car in the same lane.
+///
+/// It also gives back what the following distance cost. Distance covered goes 3,611 → 4,187 m,
+/// above even the 4,129 the field managed with no traffic model at all — the queue was the price,
+/// and going round is what stops paying it.
+const PASS_OFFSET: f32 = 1.5;
+
 /// One rival's driver.
 #[derive(Clone, Debug, Default)]
 pub struct Pilot {
@@ -521,6 +545,52 @@ impl Pilot {
             }
         }
 
+        // **The car in front.** Until now a rival would drive into the back of another one, which
+        // the module said out loud and which turned out to cost more than it looked: part of the
+        // field never leaves a grid that is four abreast with 1.3 m of clear air, and when the
+        // pilots' blacklists were harvested for graph truth the nodes several cars agreed on sat a
+        // median 7.6-47.7 m from the start line — they were giving up on each other, not on the
+        // road.
+        //
+        // The crudest rule that is about the right thing: anything in a corridor of its own width,
+        // ahead, inside a following distance. `traffic` may contain this car's own position — its
+        // own `along` is zero, which is not ahead — so the caller does not have to exclude it.
+        let look_mul: f32 = std::env::var("NFS_TRAFFIC")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(TRAFFIC_LOOK_PER_SPEED);
+        let side = Vec3::new(-f.z, 0.0, f.x);
+        let mut blocking: Option<(f32, f32)> = None;
+        let mut blocked_side = 0.0f32;
+        if look_mul > 0.0 {
+            let look = (speed * look_mul).max(TRAFFIC_LOOK_MIN);
+            let near = traffic
+                .iter()
+                .filter_map(|o| {
+                    let d = flat(*o - at);
+                    let (fwd, lat) = (d.dot(f), d.dot(side));
+                    (fwd > 0.0 && fwd <= look && lat.abs() <= TRAFFIC_HALF_WIDTH).then_some((fwd, lat))
+                })
+                .min_by(|a, b| a.0.total_cmp(&b.0));
+            if let Some((g, lat)) = near {
+                blocking = Some((g, look));
+                blocked_side = lat;
+            }
+        }
+
+        // **Going round it.** Queueing is honest but it is also the whole field stopping behind one
+        // stuck car, and the aim point is the cheap place to say "not through that". Shift it away
+        // from whichever side the obstacle is on, by more the closer it is; nothing else changes, so
+        // the car comes back to the line by itself as soon as the way is clear.
+        let pass: f32 =
+            std::env::var("NFS_PASS").ok().and_then(|v| v.parse().ok()).unwrap_or(PASS_OFFSET);
+        if pass > 0.0 {
+            if let Some((g, look)) = blocking {
+                let urgency = (1.0 - g / look).clamp(0.0, 1.0);
+                aim -= side * blocked_side.signum() * pass * urgency;
+            }
+        }
+
         self.aim = Some(aim);
         let to = flat(aim - at).normalize_or_zero();
         let angle = f.cross(to).y.atan2(f.dot(to));
@@ -555,27 +625,11 @@ impl Pilot {
         // The crudest rule that is about the right thing: anything in a corridor of its own width,
         // ahead, inside a following distance. `traffic` may contain this car's own position — its
         // own `along` is zero, which is not ahead — so the caller does not have to exclude it.
-        let look_mul: f32 = std::env::var("NFS_TRAFFIC")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(TRAFFIC_LOOK_PER_SPEED);
-        if look_mul > 0.0 {
-            let look = (speed * look_mul).max(TRAFFIC_LOOK_MIN);
-            let side = Vec3::new(-f.z, 0.0, f.x);
-            let gap = traffic
-                .iter()
-                .filter_map(|o| {
-                    let d = flat(*o - at);
-                    let (fwd, lat) = (d.dot(f), d.dot(side));
-                    (fwd > 0.0 && fwd <= look && lat.abs() <= TRAFFIC_HALF_WIDTH).then_some(fwd)
-                })
-                .min_by(f32::total_cmp);
-            if let Some(g) = gap {
-                // Nothing at the far end of the look, everything at nose to tail.
-                let close = (1.0 - g / look).clamp(0.0, 1.0);
-                throttle *= 1.0 - close;
-                brake = brake.max((close - 0.5).max(0.0) * 2.0);
-            }
+        if let Some((g, look)) = blocking {
+            // Nothing at the far end of the look, everything at nose to tail.
+            let close = (1.0 - g / look).clamp(0.0, 1.0);
+            throttle *= 1.0 - close;
+            brake = brake.max((close - 0.5).max(0.0) * 2.0);
         }
 
         Some(Controls { throttle, brake, steer: self.steer, toggle_auto_shift: false })
