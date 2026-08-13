@@ -729,6 +729,35 @@ sabit, mesafe kaybeden 4102'de ise 1,28 → **1,00**, yani orada aldığı her k
 Düşen sayısı kıpırdamadı, ki beklenen: bu pilotun nereye baktığını düzeltiyor, şehrin yol kenarına
 zemin koymuyor.
 
+### Bariyer onun sekizini yakalardı — ikisini yakalamazdı
+
+Bariyeri yapmadan önce sorulacak soru: düşen arabalar koridoru **önceden** terk ediyor mu?
+`Corridor` zaten duruyor — `nfs_cruise` "parkurun dışı" ile "dünyanın dışı"nı onunla ayırıyor,
+yarı genişliği 12 m ve ölçülmüş (kaldırımdan yana yürüyerek: Bayview'ın şeritleri üç rota dosyasında
+medyan 9-11 m açılıyor). `nfs_sim` artık her düşen için, dünyanın onu bıraktığı anda parkurun kaç
+metre dışında ve **kaç saniyedir** dışında olduğunu yazıyor.
+
+| araba | parkurdan | ne kadardır |
+|---|---:|---:|
+| 4041 car 6 | **8 m** | **0,0 s** |
+| 4041 car 3 | **10 m** | **0,0 s** |
+| 4021 ×3 | 15-16 m | 0,3 s |
+| 4041 car 5 | 27 m | 2,1 s |
+| 4041 car 1 | 41 m | 3,2 s |
+| 4121 car 6 | 47 m | 4,8 s |
+| 4102 car 5 | 52 m | 3,3 s |
+| 4041 car 2 | 95 m | 7,4 s |
+
+**İkisi hâlâ parkurun içindeyken düşüyor.** 4041'de yarış çizgisinin kendisi boşluğun kenarından
+geçiyor; 12 m'lik bir çit o iki arabayı kurtarmazdı. Kalan sekiz için yeterdi — üçünü kıl payı
+(0,3 s dışarıda), beşini rahat rahat (2-7 saniyedir dışarıdalar).
+
+Yani bariyer yapılmaya değer **ve tek başına yetmiyor.** Kenarı olmayan yol kenarı ayrı bir sorun ve
+kendi çözümünü istiyor.
+
+Bu arada `COURSE_HALF_WIDTH` artık `nfs_cruise`'un özel sabiti değil, kütüphanede: şehir hakkında
+ölçülmüş bir sayı, ve artık iki çağıranın aynı fikirde olması gerekiyor.
+
 **Yapışan düğüm için "geçtiyse bırak" ise çürüdü — bin kat.** Nişan düzeltmesinin simetriği gibi
 duruyor (düğüm arabanın arkasında kaldıysa ilerlet) ve sekiz parkurda kavşağı 848 → **854.536**
 yapıyor, mesafeyi 3.652 → 2.699 m'ye düşürüyor. Bu, kodda zaten yazılı olan "yeterince yakınsa

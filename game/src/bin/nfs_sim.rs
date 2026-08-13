@@ -69,6 +69,14 @@ struct Contact {
     /// Speed in m/s. Passing through a triangle is a speed failure and driving off an edge is not,
     /// so the number is worth carrying before anything is concluded from it.
     speed: f32,
+    /// Plan-view distance to the nearest of the race's own paths.
+    off: f32,
+    /// How long it had been outside the course corridor by then, unbroken.
+    ///
+    /// The question a barrier has to answer before it is worth building: a car that fell the instant
+    /// it left the course needs a fence at the kerb, and one that had been off it for seconds needs
+    /// something that noticed earlier. They are not the same fix and the numbers say which.
+    off_for: f32,
 }
 
 /// One car's fall, as far as the sim can witness it.
@@ -87,6 +95,8 @@ struct Fall {
     /// Whether it ever stood anywhere at all. False means the grid place itself has never been
     /// shown to be ground.
     ever: bool,
+    /// Unbroken seconds spent outside the course corridor, right now.
+    off_for: f32,
 }
 
 const DEFAULT_CAR: &str =
@@ -207,6 +217,12 @@ async fn run() {
         .unwrap_or(0);
     let catalogue = gizmo_nfs::world::routes::events(&bytes).unwrap_or_default();
     let ev = catalogue.iter().find(|e| e.id == event);
+
+    // The race's own line, as something to ask "is this car still on the course" of. The same
+    // construction `nfs_cruise` draws, so the sim and the game cannot disagree about where the
+    // course is.
+    let corridor =
+        city::Corridor::of(&city::build_route(&nodes, &city::road_ground(&objects)), city::COURSE_HALF_WIDTH);
 
     let net = city::Network::of(&nodes, &ground);
     let (edges, dead, steep, walled) = net.shape();
@@ -465,6 +481,12 @@ async fn run() {
             let f = &mut falls[k];
             f.below = g.below;
             f.ever = g.ever;
+            let off = corridor.locate(p.position).map_or(f32::INFINITY, |x| x.distance);
+            if off > city::COURSE_HALF_WIDTH {
+                f.off_for += FIXED_DT;
+            } else {
+                f.off_for = 0.0;
+            }
             if g.stood {
                 let moved = was[k].map_or(Vec3::ZERO, |b| p.position - b);
                 let going = Vec3::new(moved.x, 0.0, moved.z).normalize_or_zero();
@@ -477,7 +499,9 @@ async fn run() {
                 } else {
                     going
                 };
-                f.last = Some(Contact { t: now, at: p.position, going, speed: p.speed });
+                let off_for = f.off_for;
+                f.last =
+                    Some(Contact { t: now, at: p.position, going, speed: p.speed, off, off_for });
                 f.peak = 0.0;
             } else {
                 f.peak = f.peak.max(-g.below);
@@ -588,13 +612,16 @@ async fn run() {
         let over = (Vec3::new(at.x, 0.0, at.z) - Vec3::new(c.at.x, 0.0, c.at.z)).length();
         println!(
             "  car {k}: let go at t={:>5.1}s ({:>7.0},{:>6.1},{:>7.0}) doing {:>4.0} km/h, \
-             {:>4.1} m of air · now {:>5.0} m down and {over:>4.0} m away{} · {verdict}",
+             {:>4.1} m of air · {:>4.0} m off the course for {:>4.1} s · \
+             now {:>5.0} m down and {over:>4.0} m away{} · {verdict}",
             c.t,
             c.at.x,
             c.at.y,
             c.at.z,
             c.speed * 3.6,
             falls[k].peak,
+            c.off,
+            c.off_for,
             falls[k].below,
             if bounds.contains(at) { ", inside the map" } else { ", outside the map" },
         );

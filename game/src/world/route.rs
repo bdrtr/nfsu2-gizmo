@@ -546,6 +546,17 @@ pub struct Corridor {
     half_width: f32,
 }
 
+/// How far off the nearest path still counts as on the course.
+///
+/// Measured rather than chosen: walking sideways from every path point until the road stops
+/// answering at that level, Bayview's carriageways reach out a median of 9-11 m across three route
+/// files. Twelve sits above that and well under the 60 m a junction opens out to.
+///
+/// Lives here rather than in a binary because it is a fact about the city, and two callers now need
+/// to agree on it — the game, which uses it to tell "off the course" from "out of the world", and
+/// the sim, which uses it to ask whether a car that fell had left the course first.
+pub const COURSE_HALF_WIDTH: f32 = 12.0;
+
 /// Grid pitch for [`Corridor`]. Nodes of a path are 29 m apart at the median, so a cell this size
 /// holds a handful of segments and a query touches nine of them.
 pub const CORRIDOR_CELL: f32 = 64.0;

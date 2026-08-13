@@ -47,6 +47,7 @@ pub use load::{
 pub use route::{
     build as build_route, densify, free_roam_spots, free_roam_start, is_road, ribbon, road_ground,
     start_grid, start_grid_facing, start_of, start_slots, Checkpoints, Corridor, Fix, RoutePath,
+    COURSE_HALF_WIDTH,
     FREE_ROAM_TRACK,
 };
 pub use tiers::SharedTextures;

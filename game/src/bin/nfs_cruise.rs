@@ -154,12 +154,7 @@ struct Course {
     name: String,
 }
 
-/// How far off the nearest path still counts as on the course.
-///
-/// Measured rather than chosen: walking sideways from every path point until the road stops
-/// answering at that level, Bayview's carriageways reach out a median of 9-11 m across three route
-/// files. Twelve sits above that and well under the 60 m a junction opens out to.
-const COURSE_HALF_WIDTH: f32 = 12.0;
+use nfsu2::world::COURSE_HALF_WIDTH;
 
 /// How long the car may be off the course before the HUD stops being polite about it.
 const OFF_COURSE_GRACE: f32 = 4.0;
