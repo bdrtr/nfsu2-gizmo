@@ -1381,10 +1381,34 @@ Sayının büyüklüğü de bunu tamamlıyor: arabalar doksan saniyede **39 ilâ
 saniyede yarım kez. Kara listenin uzunluğu (sekiz rotada 334 düğüm) bunun çok altında, çünkü
 vazgeçmelerin çoğu zaten listede olan düğümleri yeniden seçiyor.
 
-Bir sonraki mekanizmanın ne yapması gerektiği artık tarif edilebiliyor: **düğümü değil yönü elemek**,
-ya da vazgeçme sırasında hedefi geçici olarak bırakmak. Ölçüsü de hazır — `Pilot::swaps` vazgeçme
-sayısını ve kaçının aynı yöne çıktığını veriyor, yani bir düzeltmenin işe yarayıp yaramadığı doğrudan
-görülecek.
+Bunun üzerine yazılan mekanizma — **düğümü değil yönü elemek** — çürüdü, ve nasıl çürüdüğü asıl
+bulgu. Vazgeçme anında, terk edilen düğümün yönüne `shun` derece içinde kalan bütün dallar o seçim
+için elendi, kalanların hedefe en yakını alındı; hiçbiri kalmazsa eski davranışa düşüyordu.
+
+| shun | 0 | 30° | 45° | 60° | 90° |
+|---|---:|---:|---:|---:|---:|
+| yol noktası | 799 | 817 | 795 | 790 | 814 |
+| ayrı düğüm | 1.247 | 1.287 | 1.258 | 1.239 | 1.278 |
+| **aynı yön oranı** | **%90** | %89 | **%90** | **%90** | **%89** |
+
+Karar sütununda eğilim yok — 817, 795, 790, 814 — yani 800 civarında gürültü. Ama çürütmeyi
+kesinleştiren şey ikinci satır: **shun=90'da bile aynı yön oranı %89.** Doksan derece, terk edilen
+düğüme bakan bütün ön yarıküreyi elemek demek; buna rağmen seçimlerin %89'u hâlâ o düğümün 45°
+içinde kalıyorsa, filtre **neredeyse her seferinde geri düşüyor** demektir. Ve sayı bunu üstten
+sınırlıyor: shun ≥ 45'te filtre başarsaydı seçim 45°'nin dışına düşer ve sayaca hiç girmezdi, yani
+filtre **en fazla onda bir** iş görüyor.
+
+**Yani kusur pilotun seçiminde değil, seçecek bir şey olmamasında.** Araba sıkıştığında geldiği
+düğümün başka yöne çıkan bir dalı yok — o noktada graf fiilen bir koridor. Düğümü elemek de yönü
+elemek de aynı yere çıkıyor, çünkü ikisi de *alternatif varsayıyor.*
+
+Bu, kaçış kuralı hakkındaki bütün diziyi yeniden çerçeveliyor: sorun "yanlış dalı seçiyor" değil,
+**"dal yok"**. Sıradaki aday bu yüzden başka bir cinsten olmak zorunda — grafta seçim yapmayan bir
+şey: kaçış boyunca hedefi tamamen bırakıp arabayı serbest sürdürmek, ya da düğüm dizisini terk edip
+fizikten kaçış yönü türetmek gibi. Ölçü yerinde kalıyor: `Pilot::swaps` vazgeçme sayısını ve kaçının
+aynı yöne çıktığını veriyor, ve bu turda o sayacın kendisi de bir şey öğretti — **eşiği mekanizmanın
+eşiğinden bağımsız tutmak gerekiyor**, yoksa (shun ≥ 45'te olduğu gibi) sayaç mekanizmanın tanımı
+gereği doğru çıkar ve ölçmeyi bırakır.
 ---
 
 ## 1. Ana fikir
