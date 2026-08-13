@@ -153,6 +153,22 @@ impl Network {
         // 4081 from 746 to 333, and the eight-route total from 8.1 km to 6.8 km at every threshold
         // swept. A kerb has a drivable surface on top, so it passes "is there road here" — and
         // every rule sharp enough to catch it cuts crests and dips that are road.
+        //
+        // And the class this filter is *known* to let through — a central reservation, a guardrail,
+        // a retaining wall, all of which have good road on both sides and along the line between —
+        // was written as its own filter, swept and **refuted**. An index of every `Surface::Wall`
+        // triangle was asked "does anything stand across this link at car height", first along the
+        // straight chord and then along the road's own profile. The chord is not even the right
+        // instrument: its cut count does not fall as the height rises (126 links at 0.15 m, 140 at
+        // 0.5, 108 at 1.5), because a chord runs *underground* wherever the road climbs between its
+        // ends and answers with the embankment it is buried in. The profile walk is monotone
+        // (168 → 151 → 127 → 121 → 77) and so measures what it claims — and it loses too, at every
+        // height: 605 waypoints covered with no filter against 564 / 577 / 597 / 595 at 0.5 / 1 /
+        // 2 / 3 m. The whole of the effect is two routes in eight, and they cancel: `Paths4002`'s
+        // leading car gets four times as far (176 → 739 m) while the field's coverage there does
+        // not move (27 → 26), and `Paths4001` loses a third of its coverage (141 → 103) at every
+        // setting, its dead ends going 1 → 6. Removing a link a car cannot drive also removes the
+        // way round it, and this graph cannot spare it. See `ROADMAP.md`.
         let solid = |a: Vec3, b: Vec3| ground.gap_along(a, b, tolerance, STEP).is_none();
         let mut cut: Vec<(usize, u32)> = Vec::new();
         for i in 0..self.nodes.len() {

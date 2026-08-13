@@ -975,6 +975,74 @@ Bir de ölçütün kendisi kodda değil awk'taymış. "Giden araba" `ROADMAP`'te
 beri alıntılanıyor ama hiçbir zaman kodda olmamış — her seferinde araba satırlarından elle
 sayılmış, ve iki ayrı girdinin rakamı da bugünkü çıktıdan üretilemiyor. Tanım artık `nfs_sim`'de:
 en az bir kavşak almış araba, `SUMMARY away=` diye yazılıyor.
+
+### Bariyer filtresi çürüdü — iki kez, ikincisi doğru aletle
+
+`drop_walled` "bu bağ boyunca yol devam ediyor mu" diye soruyor, bunu iyi yapıyor, ve bilerek bir
+sınıfı kaçırıyor: refüj, iki gidiş yönü arasındaki bariyer, rampanın yanındaki istinat duvarı.
+Hepsinin iki yanında da, aradaki çizgi boyunca da sapasağlam yol var — yol testi geçiyor ve ağ
+sürücüye önünde bariyer olan bir dal veriyor. `drop_walled`'ı doğuran iki bağ da zaten tam bu
+şekildeydi; yalnızca oralarda yol *da* bittiği için yakalanmışlardı.
+
+Öyleyse soru doğrudan sorulacak. Her `Surface::Wall` üçgeni 64 m'lik hücrelere indekslendi
+(`Walls`), ve bir bağın iki ucu arasındaki doğru parçası **araba yüksekliğinde** taşınıp üçgenlerle
+kesiştirildi (Möller-Trumbore, parçaya sınırlı). Yükseklik işin bütünü: `Surface::Wall` bir normal
+testi, yani 15 cm'lik kaldırımı bina cephesiyle aynı şekilde yakalıyor, ve bu projede dört filtre
+tam da kaldırıma duyarlı oldukları için çürümüştü.
+
+**Birinci uygulama yanlış aletti, ve bunu süpürmeden önce karakterizasyon söyledi.** Kesilen bağ
+sayısı yükseklikle düşmüyor (4001, 720 bağ):
+
+| lift | 0,15 | 0,3 | 0,5 | 0,75 | 1,0 | 1,5 | 2,0 | 3,0 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| **düz kiriş** | 126 | 132 | 140 | 136 | 137 | 108 | 116 | 123 |
+| **profil yürüyüşü** | 168 | 168 | 168 | 168 | 151 | 127 | 121 | 77 |
+
+3 m'de 15 cm'dekinden fazla şey kesen bir test "şu yükseklikte duran duvar" ölçüyor olamaz. Sebep
+`drop_walled`'ın kendi yorumunda yazılı: iki düğüm arasındaki düz çizgi tümseği takip etmez. Yol
+iki ucun arasında yükseliyorsa kiriş **yerin altında** kalıyor ve gömüldüğü şevin üçgenlerine
+"duvar" diyor. İkincisi bağı yolun kendi profilini izleyerek yürüyor: her 3 m'de yerel zemin —
+yürüyüşün bulunduğu yüksekliğe *en yakın* yüzey, en yükseği değil, çünkü düz bir çatı da
+`Surface::Drivable` — ve test edilen şey iki komşu örneğin kendi zemininin `lift` üstündeki kısa
+parçası. Eğrisi tekdüze, yani iddia ettiği şeyi ölçüyor.
+
+**Ve doğru alet de kaybetti, süpürülen her yükseklikte** (sekiz rota, sekizer araba, 90 sn):
+
+| lift | giden | düşen | mesafe | **geçilen yol noktası** | kavşak | ayrı düğüm | kesilen bağ |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| **0 (kapalı)** | 63/64 | 0 | 4.187 m | **605** | 1245 | **926** | 0 |
+| 0,5 | 63/64 | 1 | 4.385 | 564 | 1401 | 876 | 399 |
+| 1,0 | 63/64 | 0 | 3.804 | 577 | 1181 | 858 | 332 |
+| 2,0 | 63/64 | 0 | 4.105 | 597 | 1203 | 891 | 259 |
+| 3,0 | 63/64 | 0 | 4.062 | 595 | 1189 | 884 | 191 |
+
+Karar sütunu bir kez bile kapalıyı geçmiyor, ayrı düğüm de öyle. Yükseklik büyüdükçe sayıların
+düzelmesi bir eğilim değil, filtrenin kendini kapatması. Düz kiriş sürümü de aynı yerde bitiyor:
+562 / 556 / 561 (0,5 / 1 / 2 m). 0,5'teki kavşak sıçraması (1245 → 1401) ayrı düğüm *düşerken*
+geliyor — ilerleme değil, aynı yerde salınım.
+
+Asıl bulgu etkinin nerede olduğu: **sekiz rotanın altısında bütün sayılar birebir aynı.** Kalan iki
+rota da birbirini götürüyor:
+
+| rota | mesafe (0 → 0,5) | geçilen yol noktası |
+|---|---|---|
+| 4002 | 176 → **739 m** | 27 → 26 |
+| 4001 | 965 → **567 m** | 141 → **103** |
+
+4002 tam da "dosyanın çizgisi ayırıcıların üstünden geçiyor" diye teşhis edilmiş rota, yani
+mekanizma teşhis konmuş yerde gerçekten iş yapıyor — ama yaptığı iş **öndeki tek arabanın metresi**,
+alanın kapsaması kıpırdamıyor. 4001'deki kayıp ise kapsamada ve gerçek. Sebebi de ölçüldü: 4001'in
+çıkışsız düğümleri **1 → 6**. Sürülemeyen bir bağı silmek onun **etrafından dolanan yolu** da
+siliyor, ve bu graf onu kaldıramıyor — bariyere dayanıp sürtünerek ilerleyen bir pilot, dalı hiç
+görmeyen pilottan iyi çıkıyor.
+
+Kod silindi. Kontrol iki kez koştu: `lift=0` hem mekanizma dururken hem silindikten sonra son
+commit'in tablosunu birebir veriyor (605 yol noktası, 4.187 m, 926 ayrı düğüm), yani ölçülen fark
+filtrenin kendisiydi.
+
+**Açık kalan:** 4002'nin ayırıcıları hâlâ orada. Bir sonraki denemenin bunu **bağı silmeden**
+yapması gerekiyor — dalı grafta bırakıp pilota "bunun üstünde bir şey var" demek gibi, ki dolanma
+yolu kaybolmasın.
 ---
 
 ## 1. Ana fikir
