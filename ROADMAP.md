@@ -907,6 +907,39 @@ büyüklüğünde grafa dair söyleyecek bir şeyi kalmıyor.
 Kalan: kara liste pilotun **kendi anlık** deneyimi olarak değerli (o arabaya başka yol denetiyor),
 graf gerçeği olarak değil. Vazgeçilen düğüm sayısı artık araba satırlarında yazıyor.
 
+### Trafik modeli — üç kez kendini gösteren eksik
+
+Aynı şey üç ayrı yerden çıktı: alanın bir kısmı ızgarayı hiç terk edemiyor, kara liste hasadının
+üzerinde anlaşılan düğümleri ızgaranın dibinde toplanıyor, ve pilotun kendi modül dokümanı
+"önündekinin arkasına seve seve girer" diye yazıyor. Üçüncüsünden sonra bu bir üslup notu değil,
+ölçülmüş bir eksik.
+
+En kaba kural kondu: kendi genişliğinde bir koridorda, **önde**, hıza orantılı bir takip mesafesi
+içinde araba varsa gaz kesiliyor ve yaklaştıkça fren geliyor. Etrafından dolanmıyor — yavaş bir
+arabanın arkasında kuyruk olursa kuyruk kalıyor, ki dürüst olan da bu.
+
+Karar ölçütü **geçilen yol noktası**: trafik modelsizliğinin bedelini ödeyen sütun o, ve
+şişirilemiyor.
+
+| çarpan | giden | düşen | mesafe | **geçilen yol noktası** | t<30 duran |
+|---|---:|---:|---:|---:|---:|
+| yok | 62/64 | 0 | **4.129 m** | 462 | 39 |
+| 0,6 | 63/64 | 2 | 3.965 | 584 | 33 |
+| 1,2 | 63/64 | 3 | 3.401 | 526 | 36 |
+| **2,0** | **63/64** | **0** | 3.611 | **589** | **31** |
+| 3,0 | 63/64 | 3 | 3.612 | 587 | 34 |
+| 4,5 | 63/64 | 3 | 3.787 | 572 | 28 |
+
+Kapsama, herhangi bir takip mesafesi olur olmaz sıçrıyor ve sonra platoya oturuyor; 2,0 platonun
+en iyisi. **Mesafe sütunu ters yönde ve bu sürpriz değil**: `furthest` her parkurun en öne geçen
+arabası, ve öndeki arabanın birinin arkasına takılması takip mesafesinin ta kendisi. Alanın parkuru
+*sürdüğünü* söyleyen sütun %27 arttı.
+
+Düşen sütunu bu ölçekte sinyal değil gürültü (0, 2, 3, 0, 3, 3); 2,0'ın sıfıra denk gelmesi şans.
+
+Yan etkiler açıklamayla tutarlı: ızgarayı hiç terk edemeyen araba **2 → 1**, pilotların vazgeçtiği
+düğüm **369 → 308**, t=30'dan önce duran **39 → 31**.
+
 **Yapışan düğüm için "geçtiyse bırak" ise çürüdü — bin kat.** Nişan düzeltmesinin simetriği gibi
 duruyor (düğüm arabanın arkasında kaldıysa ilerlet) ve sekiz parkurda kavşağı 848 → **854.536**
 yapıyor, mesafeyi 3.652 → 2.699 m'ye düşürüyor. Bu, kodda zaten yazılı olan "yeterince yakınsa

@@ -756,11 +756,20 @@ fn update(world: &mut World, state: &mut CruiseState, dt: f32, input: &Input) {
     // The rivals. Same `drive` the player's controls go through — a pilot that reached past it
     // into physics would be racing a different car from the one on screen.
     state.driving = 0;
+    // The rivals see each other, and they see the player: a field that only avoids its own kind
+    // would drive straight through whoever is being raced.
+    let traffic: Vec<Vec3> = state
+        .field
+        .iter()
+        .filter_map(|(r, _)| r.pose(world).map(|p| p.position))
+        .chain(state.rig.pose(world).map(|p| p.position))
+        .collect();
     for i in 0..state.field.len() {
         let Some(pose) = state.field[i].0.pose(world) else { continue };
         let net = std::mem::take(&mut state.net);
         let way = std::mem::take(&mut state.waypoints);
-        let c = state.field[i].1.drive(pose.position, pose.rotation, pose.speed, &net, &way);
+        let c =
+            state.field[i].1.drive(pose.position, pose.rotation, pose.speed, &net, &way, &traffic);
         state.net = net;
         state.waypoints = way;
         if let Some(c) = c {

@@ -26,8 +26,10 @@
 //!
 //! ## What is deliberately not modelled
 //!
-//! No racing line, no braking points, no awareness of the other cars. A rival drives the middle of
-//! the road at a speed the corner allows and will happily drive into the back of another one.
+//! No racing line and no braking points: a rival drives the middle of the road at a speed the corner
+//! allows. It does now keep a following distance — see `TRAFFIC_LOOK_PER_SPEED` — because having no
+//! traffic model at all turned out to be measurable rather than merely untidy, but it will not go
+//! round a slower car, so a queue behind one stays a queue.
 
 use super::drive::Controls;
 use crate::world::Network;
@@ -75,6 +77,41 @@ const BRAKE_GAIN: f32 = 1.5;
 
 /// How much steering costs throttle.
 const CORNER_LIFT: f32 = 0.75;
+
+/// How far ahead to look for another car, as a multiple of speed in m/s, and the floor under it.
+///
+/// Speed-proportional for the same reason the steering lookahead is: a following distance that is
+/// right at 30 km/h is tailgating at 120. The floor is what makes a **standing** grid file out
+/// instead of shunting — with no floor, a car doing nothing looks nothing up.
+///
+/// Swept over eight routes. The measure that decides it is **waypoints actually driven past**,
+/// because that is what having no traffic model was costing and because it cannot be inflated:
+///
+/// | multiple | away | off the world | distance | waypoints driven past | stopped before t=30 |
+/// |---|---:|---:|---:|---:|---:|
+/// | none | 62/64 | 0 | 4,129 m | 462 | 39 |
+/// | 0.6 | 63/64 | 2 | 3,965 | 584 | 33 |
+/// | 1.2 | 63/64 | 3 | 3,401 | 526 | 36 |
+/// | **2.0** | **63/64** | **0** | **3,611** | **589** | **31** |
+/// | 3.0 | 63/64 | 3 | 3,612 | 587 | 34 |
+/// | 4.5 | 63/64 | 3 | 3,787 | 572 | 28 |
+///
+/// Coverage jumps as soon as there is any following distance at all and then sits on a plateau;
+/// two is the best of it. **The distance column goes the other way and that is not a surprise** —
+/// `furthest` is the leading car of each route, and a leader stuck behind someone is what a
+/// following distance costs. The column that says the *field* is driving the course went up 27 %.
+///
+/// The falls column is chaos rather than signal at this scale (0, 2, 3, 0, 3, 3); two landing on
+/// zero is luck, not a property of the number.
+const TRAFFIC_LOOK_PER_SPEED: f32 = 2.0;
+const TRAFFIC_LOOK_MIN: f32 = 8.0;
+
+/// How far to either side of its own line a car counts as being in the way, in metres.
+///
+/// The body is 1.64 m wide, so this is a car and a half: wide enough that a rival drifting in the
+/// next lane registers before it is a collision, narrow enough that the car on the other
+/// carriageway does not.
+const TRAFFIC_HALF_WIDTH: f32 = 2.2;
 
 /// One rival's driver.
 #[derive(Clone, Debug, Default)]
@@ -292,6 +329,7 @@ impl Pilot {
         speed: f32,
         net: &Network,
         course: &[Vec3],
+        traffic: &[Vec3],
     ) -> Option<Controls> {
         let here = self.at?;
         let flat = |v: Vec3| Vec3::new(v.x, 0.0, v.z);
@@ -495,7 +533,7 @@ impl Pilot {
         // as tuned.
         let want = (angle * 2.0 / std::f32::consts::PI).clamp(-1.0, 1.0) * STEER_LIMIT;
         self.steer += (want - self.steer) * 0.35;
-        let throttle = (1.0 - self.steer.abs() * CORNER_LIFT).max(0.15);
+        let mut throttle = (1.0 - self.steer.abs() * CORNER_LIFT).max(0.15);
 
         // **Brake.** Lifting the throttle was the whole speed policy and it is not enough: with no
         // brake a car carries 90 km/h into a corner, runs wide and leaves the road — measured, 20
@@ -506,7 +544,39 @@ impl Pilot {
         let bs: f32 =
             std::env::var("NFS_BRAKE").ok().and_then(|v| v.parse().ok()).unwrap_or(BRAKE_SPEED);
         let over = (speed / bs) * self.steer.abs();
-        let brake = ((over - 1.0) * BRAKE_GAIN).clamp(0.0, 1.0);
+        let mut brake = ((over - 1.0) * BRAKE_GAIN).clamp(0.0, 1.0);
+
+        // **The car in front.** Until now a rival would drive into the back of another one, which
+        // the module said out loud and which turned out to cost more than it looked: three of eight
+        // never leave a grid that is four abreast with 1.3 m of clear air, and when the pilots'
+        // blacklists were harvested for graph truth the nodes several cars agreed on sat a median
+        // 7.6-47.7 m from the start line — they were giving up on each other, not on the road.
+        //
+        // The crudest rule that is about the right thing: anything in a corridor of its own width,
+        // ahead, inside a following distance. `traffic` may contain this car's own position — its
+        // own `along` is zero, which is not ahead — so the caller does not have to exclude it.
+        let look_mul: f32 = std::env::var("NFS_TRAFFIC")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(TRAFFIC_LOOK_PER_SPEED);
+        if look_mul > 0.0 {
+            let look = (speed * look_mul).max(TRAFFIC_LOOK_MIN);
+            let side = Vec3::new(-f.z, 0.0, f.x);
+            let gap = traffic
+                .iter()
+                .filter_map(|o| {
+                    let d = flat(*o - at);
+                    let (fwd, lat) = (d.dot(f), d.dot(side));
+                    (fwd > 0.0 && fwd <= look && lat.abs() <= TRAFFIC_HALF_WIDTH).then_some(fwd)
+                })
+                .min_by(f32::total_cmp);
+            if let Some(g) = gap {
+                // Nothing at the far end of the look, everything at nose to tail.
+                let close = (1.0 - g / look).clamp(0.0, 1.0);
+                throttle *= 1.0 - close;
+                brake = brake.max((close - 0.5).max(0.0) * 2.0);
+            }
+        }
 
         Some(Controls { throttle, brake, steer: self.steer, toggle_auto_shift: false })
     }

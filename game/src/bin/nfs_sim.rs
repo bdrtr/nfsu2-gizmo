@@ -457,6 +457,10 @@ async fn run() {
             }
         }
         race.tick(FIXED_DT);
+        // Where everyone is, read before anyone is driven, so all eight pilots see the same field.
+        // A car's own position is in here and does not need taking out: it is not ahead of itself.
+        let traffic: Vec<Vec3> =
+            field.iter().filter_map(|(r, _)| r.pose(&world).map(|p| p.position)).collect();
         // Controls first for the whole field, then one physics step: every car sees the same
         // world state, which a loop that stepped physics per car would not give.
         for (rig, pilot) in &mut field {
@@ -474,7 +478,7 @@ async fn run() {
             }
             let Some(pose) = rig.pose(&world) else { continue };
             if let Some(c) =
-                pilot.drive(pose.position, pose.rotation, pose.speed, &net, &waypoints)
+                pilot.drive(pose.position, pose.rotation, pose.speed, &net, &waypoints, &traffic)
             {
                 rig.drive(&mut world, &c);
             }
