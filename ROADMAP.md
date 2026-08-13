@@ -875,6 +875,38 @@ arabanın fiziksel olarak alamayacağı birleşmelerden geçiyor ve o tek rotaya
 pusulası ise geziniyor, ve gezinme yalnızca kabaca doğru olan bir grafı tolere eden şey. Sıra:
 **rotayı optimize etmeden önce grafı doğru yap.**
 
+### Kara listeleri grafa geri yazmak: hasat gerçek, sinyal değil
+
+Geçen turun çıkardığı iş şuydu — bir bağın sürülebilirliğini *tahmin* etmek dört kez çürüdü, ama
+pilotların kara listeleri **sürülemediği kanıtlanmış** yerlerin kaydı. Bir arabanın vazgeçmesi kaza
+olabilir; birkaç arabanın aynı düğümde vazgeçmesi graf gerçeği olmalı.
+
+Hasat gerçekten var: sekiz parkurda **369 düğüm**, 64 arabanın **63'ü** en az bir tane bırakıyor. Ve
+paylaşmak her eşikte kaybediyor:
+
+| kaç araba anlaşınca | giden | mesafe | kavşak | **geçilen yol noktası** | yasaklanan |
+|---|---:|---:|---:|---:|---:|
+| **kapalı** | **62/64** | **4.129 m** | 864 | **462** | 0 |
+| 2 | 60/64 | 3.217 | 1671 | 412 | 70 |
+| 3 | 62/64 | 3.848 | 991 | 448 | 54 |
+| 4 | 62/64 | 3.974 | 841 | 458 | 39 |
+
+Eğri tekdüze kapalıya doğru gidiyor — yani paylaşım arttıkça kötüleşiyor, ki bir mekanizmanın
+"faydası negatif" demenin en temiz hâli.
+
+**Sebep ölçüldü ve trafik.** İki arabanın anlaştığı **ilk** düğümler ızgaraya medyan **7,6-47,7 m**
+uzakta, sekiz parkurun hepsinde. Alan dört yan yana, önde arkada 1,3 m boşlukla başlıyor ve pilotun
+hiç trafik modeli yok: oradaki "anlaşma" yolun kapalı olduğunu değil, arabaların **birbirini**
+tıkadığını ölçüyor.
+
+Açıklama doğrulandı: kanıtın ızgaradan en az 60 m ötede toplanması şartı konunca 412 → **461**'e
+dönüyor, yani kaybın tamamı bulaşmaymış. Ama temizlenmiş hâliyle bile kazanç yok — 461'e karşı 462,
+ve mesafe 3.947'ye karşı 4.129. Yani gözlem kanalı kaynağında kirli, ve temizlendiğinde bu örneklem
+büyüklüğünde grafa dair söyleyecek bir şeyi kalmıyor.
+
+Kalan: kara liste pilotun **kendi anlık** deneyimi olarak değerli (o arabaya başka yol denetiyor),
+graf gerçeği olarak değil. Vazgeçilen düğüm sayısı artık araba satırlarında yazıyor.
+
 **Yapışan düğüm için "geçtiyse bırak" ise çürüdü — bin kat.** Nişan düzeltmesinin simetriği gibi
 duruyor (düğüm arabanın arkasında kaldıysa ilerlet) ve sekiz parkurda kavşağı 848 → **854.536**
 yapıyor, mesafeyi 3.652 → 2.699 m'ye düşürüyor. Bu, kodda zaten yazılı olan "yeterince yakınsa

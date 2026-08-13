@@ -593,7 +593,8 @@ async fn run() {
         }
         println!(
             "  car {k}: ({:>7.0},{:>6.0},{:>7.0}) {:>4.0} km/h{} · {:>4} junctions over {:>3} \
-             distinct nodes · {} waypoints driven past, last gained at {:>5.1}s · strayed {:>5.0} m from its node",
+             distinct nodes · {} waypoints driven past, last gained at {:>5.1}s · strayed {:>5.0} m \
+             from its node · gave up on {}",
             at.x,
             at.y,
             at.z,
@@ -603,7 +604,8 @@ async fn run() {
             pilot.seen(),
             pilot.covered(),
             moved_at[k],
-            strayed[k]
+            strayed[k],
+            pilot.given_up().len()
         );
     }
     // **Why** they fell, which is not the same question as how many. Each fallen car is traced back

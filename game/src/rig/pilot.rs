@@ -248,6 +248,16 @@ impl Pilot {
         self.goal
     }
 
+    /// The nodes this pilot has given up on — see the [`Self::blocked`] field.
+    ///
+    /// Reported because the harvest turned out to be worth counting and worth **not** trusting: 369
+    /// nodes over eight routes, 63 of 64 cars leaving at least one, and sharing the ones several
+    /// cars agree on is refuted (`ROADMAP.md`).
+    #[must_use]
+    pub fn given_up(&self) -> &[u32] {
+        &self.blocked
+    }
+
     /// How many of the course's waypoints the car has actually driven past.
     #[must_use]
     pub fn covered(&self) -> usize {
