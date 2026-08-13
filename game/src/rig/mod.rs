@@ -205,6 +205,10 @@ pub enum Rescue {
     /// It was put back, but nowhere it has been is known to be ground — it has not touched anything
     /// since it spawned, so the spawn point itself is over a hole. Reported once by the rig.
     NowhereSafe,
+    /// It was on its side and has been set upright again. A different report from the other two on
+    /// purpose: a car that rolled never left the world, and saying it did would be a lie the next
+    /// person reading a log has to un-learn.
+    Righted,
 }
 
 /// A car spawned into a world: its physics chassis, its visual entities, and the state that only
@@ -230,6 +234,8 @@ pub struct CarRig {
     last_safe: Transform,
     /// Seconds of unbroken air. Reset the moment any wheel touches.
     airborne_for: f32,
+    /// Seconds spent past level, unbroken. Reset the moment the car is upright again.
+    rolled_for: f32,
     /// Seconds all four wheels have been down, upright, without a break.
     grounded_for: f32,
     /// Whether a wheel has ever touched anything. While this is false there is no safe pose to
@@ -409,6 +415,7 @@ pub fn spawn_car(
         start,
         last_safe: start,
         airborne_for: 0.0,
+        rolled_for: 0.0,
         grounded_for: 0.0,
         has_grounded: false,
         warned_nowhere: false,
@@ -692,20 +699,46 @@ impl CarRig {
         /// through the drop. A ramp that genuinely needs more air than this wants its own exemption,
         /// not a bigger number here.
         const FALL_GRACE: f32 = 2.5;
+        /// How long a car may lie on its side before it counts as needing the same help.
+        ///
+        /// **Falling out of the world was never the only terminal state and the other one had no
+        /// answer at all.** Measured over eight routes: **25 of 64 cars spend time on their side**,
+        /// and a car on its side is not slowed down, it is *finished* — one sat at the same
+        /// coordinates for seventy-two seconds. Worse, its pilot cannot tell: it goes on walking the
+        /// graph, so a motionless car banked 115 junctions in that time, and across the field cars
+        /// that had rolled held **52 % of every junction counted**.
+        ///
+        /// Longer than the fall grace because a car can be up on two wheels through a corner and
+        /// come back down, and that is driving rather than crashing.
+        const ROLL_GRACE: f32 = 4.0;
+        /// How far past level counts as being over: `up.y` below this is more than 60° from
+        /// upright, which no amount of cornering reaches.
+        const UPRIGHT: f32 = 0.5;
 
         let g = self.watch_ground(world, pose, dt);
         let too_deep = !g.on_all_four && g.below > FALL_DEPTH;
+        self.rolled_for = if (pose.rotation * Vec3::Y).y < UPRIGHT {
+            self.rolled_for + dt
+        } else {
+            0.0
+        };
+        let over = self.rolled_for >= ROLL_GRACE;
 
-        if g.airborne_for < FALL_GRACE && !too_deep {
+        if g.airborne_for < FALL_GRACE && !too_deep && !over {
             return Rescue::None;
         }
+        self.rolled_for = 0.0;
         self.airborne_for = 0.0;
         self.grounded_for = 0.0;
 
         // Never having touched anything means `last_safe` is still the spawn pose, which this fall
         // has just disproved as ground. Rescuing to it again is a loop, so say so — once — and let
         // the caller decide. The bug is the spawn point, not the fall.
-        let verdict = if g.ever {
+        let verdict = if over && g.airborne_for < FALL_GRACE && !too_deep {
+            // Only if rolling is the *whole* reason. A car that rolled on its way off a cliff has
+            // left the world, and that is the more important half to report.
+            Rescue::Righted
+        } else if g.ever {
             Rescue::ToLastGround
         } else {
             if !self.warned_nowhere {

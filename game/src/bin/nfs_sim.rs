@@ -37,6 +37,18 @@ use nfsu2::world as city;
 /// point under its own bumper.
 const WAYPOINT_STEP: f32 = 40.0;
 
+/// How slow counts as standing still, in m/s, and how long the grid is left alone first.
+///
+/// The same 0.7 m/s the pilot's own stall rule uses and the same three seconds it settles for, so
+/// "this car is stopped" means the same thing in the measurement as in the thing being measured.
+const STILL_SPEED: f32 = 0.7;
+const SETTLE: f32 = 3.0;
+/// How far ahead another car has to be to count as the reason this one is standing still.
+///
+/// Two car lengths. Short enough that it is the car in front rather than a car somewhere up the
+/// road, long enough to cover the 1.3 m of clear air a grid row leaves.
+const QUEUE_LOOK: f32 = 9.0;
+
 /// How far to walk the city on from where the world let go, before calling the road unbroken.
 ///
 /// Long enough that a car doing 100 km/h covers it in under three seconds — the scale a driving
@@ -411,6 +423,17 @@ async fn run() {
     let mut was: Vec<Option<Vec3>> = vec![None; field.len()];
     let mut aim_seen = vec![0usize; field.len()];
     let mut aim_walled = vec![0usize; field.len()];
+    // **Why a car stopped, which the summary cannot say.** A field that stops is not one thing, and
+    // the three that matter want completely different work: a car pinned by the fence, a car
+    // grinding against geometry, and a car queued behind another car look identical in every number
+    // printed so far. Counted per car so the answer is per car.
+    let mut fenced = vec![0usize; field.len()];
+    let mut still = vec![0usize; field.len()];
+    let mut rolled = vec![0usize; field.len()];
+    let mut rescued = vec![0usize; field.len()];
+    let rescue = std::env::var("NFS_RESCUE").is_ok_and(|v| v != "0");
+    let mut ticks = vec![0usize; field.len()];
+    let mut queued = vec![0usize; field.len()];
     let steps = (seconds / FIXED_DT) as usize;
     for step in 0..steps {
         let now = step as f32 * FIXED_DT;
@@ -510,9 +533,11 @@ async fn run() {
         // car over the lip is the step that does not. NFS_FENCE=0 turns it off, which is the only
         // way to say what it is worth.
         if fence {
-            for (rig, _) in &mut field {
+            for (k, (rig, _)) in field.iter_mut().enumerate() {
                 let Some(p) = rig.pose(&world) else { continue };
-                held += usize::from(rig.hold_at_edge(&mut world, p, &ground));
+                let hit = rig.hold_at_edge(&mut world, p, &ground);
+                held += usize::from(hit);
+                fenced[k] += usize::from(hit);
             }
         }
         gizmo::physics::physics_step_system(&world, FIXED_DT);
@@ -522,6 +547,39 @@ async fn run() {
         // and catching it are different jobs, and only the first one answers why.
         for (k, (rig, pilot)) in field.iter_mut().enumerate() {
             let Some(p) = rig.pose(&world) else { continue };
+            // Counted only once the grid has been left alone to settle, for the same reason the
+            // pilot's own stall rule waits: a car being dropped on the line is not a car that has
+            // stopped.
+            if now > SETTLE {
+                ticks[k] += 1;
+                // **On its side.** Nothing in the game puts a car back on its wheels — falling has
+                // `keep_in_world` and the map edge has `hold_at_edge`, and rolling over has
+                // nothing — so this is terminal, and it has to be counted separately because a
+                // flipped car goes on *taking junctions*: its pilot walks the graph exactly as
+                // before while the car itself has not moved a millimetre.
+                if (p.rotation * Vec3::Y).y < 0.5 {
+                    rolled[k] += 1;
+                }
+                if p.speed.abs() < STILL_SPEED {
+                    still[k] += 1;
+                    // Standing still *behind somebody* is a different failure from standing still
+                    // against a wall, and it is the one that needs no new mechanism — the traffic
+                    // rule is already doing what it was asked to.
+                    let f = Vec3::new(
+                        (p.rotation * Vec3::NEG_Z).x,
+                        0.0,
+                        (p.rotation * Vec3::NEG_Z).z,
+                    )
+                    .normalize_or_zero();
+                    let side = Vec3::new(-f.z, 0.0, f.x);
+                    if traffic.iter().enumerate().any(|(j, o)| {
+                        let d = Vec3::new(o.x - p.position.x, 0.0, o.z - p.position.z);
+                        j != k && d.dot(f) > 0.0 && d.dot(f) < QUEUE_LOOK && d.dot(side).abs() < 2.0
+                    }) {
+                        queued[k] += 1;
+                    }
+                }
+            }
             let round = pilot.along(waypoints.len());
             if round > along[k] {
                 along[k] = round;
@@ -536,7 +594,25 @@ async fn run() {
                 let d = Vec3::new(j.at.x - p.position.x, 0.0, j.at.z - p.position.z).length();
                 strayed[k] = strayed[k].max(d);
             }
-            let g = rig.watch_ground(&world, p, FIXED_DT);
+            // **Whether the rivals get the net the player has always had.** `keep_in_world` is
+            // called for `state.rig` in all three windowed binaries and for nobody else, so a
+            // rival that falls stays fallen and a rival that rolls stays rolled — in the game as
+            // well as in here. This sim watches rather than catches on purpose, because only
+            // watching answers *why*; but "the field is not caught at all" is a decision that has
+            // never been measured, so it is switchable. `NFS_RESCUE=1` gives the field the net.
+            //
+            // `keep_in_world` runs `watch_ground` itself, so it is one or the other — calling both
+            // would advance the airborne clock twice a step.
+            let g = if rescue {
+                if !matches!(rig.keep_in_world(&mut world, p, FIXED_DT), nfsu2::rig::Rescue::None) {
+                    rescued[k] += 1;
+                }
+                // Read the footing back without advancing anything a second time. The pose is the
+                // pre-rescue one, which is the one the fall diagnostics are about.
+                rig.watch_ground(&world, p, 0.0)
+            } else {
+                rig.watch_ground(&world, p, FIXED_DT)
+            };
             let f = &mut falls[k];
             f.below = g.below;
             f.ever = g.ever;
@@ -692,6 +768,48 @@ async fn run() {
         if let Some(half) = std::env::var("NFS_FALLMAP").ok().and_then(|v| v.parse::<f32>().ok()) {
             print!("{}", ground_map(&ground, c.at, c.going, half, 2.0));
         }
+    }
+    // **Why they stopped** — the question the `stopped before t=30` column raises and cannot
+    // answer. Three different failures wear the same number and want completely different work: a
+    // car pinned by the fence, a car queued behind another car, and a car stuck against the city.
+    let early: Vec<usize> = (0..field.len()).filter(|k| moved_at[*k] < 30.0).collect();
+    if !early.is_empty() {
+        println!("\nwhy {} stopped gaining before t=30:", early.len());
+        for k in early {
+            let t = ticks[k].max(1);
+            let s = 100.0 * still[k] as f32 / t as f32;
+            let q = if still[k] > 0 { 100.0 * queued[k] as f32 / still[k] as f32 } else { 0.0 };
+            println!(
+                "  car {k}: still for {s:>3.0}% of the race · {q:>3.0}% of that behind another car · \
+                 on its side for {:>3.0}% · fence held it {:>3} times · last gained at {:>4.1}s",
+                100.0 * rolled[k] as f32 / t as f32,
+                fenced[k],
+                moved_at[k]
+            );
+        }
+    }
+    // What being on its side costs, in the column it corrupts. A rolled car cannot move and its
+    // pilot does not know that, so it goes on walking the graph — which lands in `junctions`, a
+    // column quoted in every sweep in `ROADMAP.md`. Waypoints driven past cannot be inflated this
+    // way, which is exactly why that is the column decisions are made on.
+    let ever_rolled: Vec<usize> = (0..field.len()).filter(|k| rolled[*k] > 0).collect();
+    if !ever_rolled.is_empty() {
+        let junk: usize =
+            ever_rolled.iter().filter_map(|k| field.get(*k)).map(|(_, p)| p.passed()).sum();
+        println!(
+            "\n{} of {} cars spent time on their side; between them they hold {junk} of the \
+             {junctions} junctions counted",
+            ever_rolled.len(),
+            field.len()
+        );
+    }
+    if rescue {
+        let total: usize = rescued.iter().sum();
+        println!(
+            "the field was caught {total} times ({} of {} cars needed it at least once)",
+            rescued.iter().filter(|n| **n > 0).count(),
+            field.len()
+        );
     }
     if aim_lift > 0.0 {
         let seen: usize = aim_seen.iter().sum();

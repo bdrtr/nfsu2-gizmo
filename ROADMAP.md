@@ -1278,6 +1278,59 @@ kenarında bu ikisi "yol burada bitiyor" der. Bunu ayıracak ölçüm yazılmad�
 
 Çit bu yüzden olduğu gibi bırakıldı — kaldırmak yedi arabayı haritadan atmak demek, ve nişanını
 düzeltmek ayrı bir tur.
+
+### Duran 18 araba tek bir hastalık değilmiş — ve ağ vardı, sadece oyuncuya bağlıydı
+
+En büyük tek kayıp kalemi "t=30'dan önce ilerlemeyi kesen 18 araba"ydı ve kodun kendi yorumu
+"özet bunları ayırt edemez, farklı işler isterler" diyordu. Ayırt eden ölçüm yazıldı: her araba için
+yarışın yüzde kaçında hiç kıpırdamadığı, bunun ne kadarının **önündeki arabanın arkasında** geçtiği,
+yüzde kaçını **yan yatmış** geçirdiği, ve **çitin kaç kez** tuttuğu. Eşikler uydurulmadı, pilotun
+kendi stall kuralından ödünç alındı (0,7 m/s, 3 sn yerleşme) — ölçen ile ölçülen aynı şeyi kastetsin
+diye.
+
+| sebep | araba |
+|---|---:|
+| önündeki arabanın arkasında (>%50) | 3 |
+| çit çivilemiş (10+ tutuş) | 5 |
+| yan yatmış | **2** |
+| **hiçbiri** | **8** |
+
+**Ve burada kendi ölçümüm beni yanılttı, kaydı düzeltiyorum.** İlk sayım "25/64 araba devriliyor,
+devrilmişler sayılan kavşakların %52'sini tutuyor" dedi ve bu bir felaket gibi okundu. Gevşekmiş:
+`rolled > 0` yalnızca "bir tik 60°'yi geçti" demek, ve viraj içinde savrulan araba da buna giriyor.
+Erken duran 18 arabanın **14'ünde yan yatma süresi %0**; gerçekten devrilip kalan iki tane
+(%92 ve %64). Kurtarma mekanizması bunu bağımsız olarak doğruladı: sekiz rotada yalnız **7 kez**
+ateşledi.
+
+Kirlenme iddiasının doğru kalan kısmı şu: **devrilmiş araba durur, pilotu bunu bilmez.** İzlenen bir
+araba (4102, no 7) aynı koordinatta **72 saniye** durdu ve bu sırada kavşak sayacı 10'dan **115'e**
+çıktı. Yani `junctions` sütunu tek bir taş gibi duran arabayla şişebiliyor — kararların
+`geçilen yol noktası` sütununda verilmiş olması bu yüzden şans değil: hareketsiz araba yeni yol
+noktasına yaklaşamaz.
+
+Devrilmenin **hiçbir cevabı yokmuş**, ve sebebi asıl bulgu: `keep_in_world` üç pencereli binary'de de
+yalnız `state.rig` için, yani **oyuncunun arabası** için çağrılıyor. Rakip düşerse düşmüş kalıyor,
+devrilirse devrilmiş kalıyor — sim'de değil, **oyunda**. Ağ baştan beri vardı ve tek bir arabaya
+bağlıydı.
+
+İki şey eklendi. `Rescue::Righted` — dört saniye tolerans (virajda iki teker havalanabilir, o
+sürüştür), ve ayrı bir hâl olarak, çünkü devrilen araba dünyadan çıkmadı ve öyle raporlamak sonraki
+okuyucuya yalan olur. Ve sim'de `NFS_RESCUE`, çünkü "sahayı hiç yakalamamak" hiç ölçülmemiş bir
+karardı:
+
+| | giden | **düşen** | mesafe | yol noktası | ayrı düğüm | yakalama |
+|---|---:|---:|---:|---:|---:|---:|
+| rakiplere ağ yok | 63/64 | **2** | 5.394 m | 799 | 1.247 | — |
+| ağ var | 63/64 | **0** | 5.372 | 806 | 1.271 | 7 |
+
+Düşen 2 → 0, gerisi düz (+7 yol noktası bu ölçekte kazanç değil — 609/605 için de öyle denmişti).
+Mütevazı ama bedava. **Sim'in varsayılanı kapalı bırakıldı**: bu dosyadaki bütün tablolar ağsız
+ölçüldü ve varsayılanı sessizce değiştirmek onları kıyaslanamaz yapardı. Rakiplere ağı `nfs_cruise`
+tarafında da bağlamak açık iş.
+
+**Açık kalan, ve hâlâ en büyük kova:** dik duran, önünde araba olmayan, çitin dokunmadığı, ama
+yarışın %33-93'ünde hiç kıpırdamayan **sekiz araba**. Sıradaki soru onlara sorulacak — dört tekeri
+yerde mi, yoksa bir şeye mi oturmuşlar.
 ---
 
 ## 1. Ana fikir

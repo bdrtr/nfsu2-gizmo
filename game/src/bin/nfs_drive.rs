@@ -160,6 +160,11 @@ fn update(world: &mut World, state: &mut DriveState, dt: f32, input: &Input) {
             println!("out of the world at {:?} — back on the last ground", pose.position);
             return;
         }
+        Rescue::Righted => {
+            state.driver.reset();
+            println!("on its side at {:?} — set upright again", pose.position);
+            return;
+        }
         // The rig has already said why, once.
         Rescue::NowhereSafe => {
             state.driver.reset();
