@@ -387,6 +387,14 @@ async fn run() {
     let watch: Option<usize> = std::env::var("NFS_WATCH").ok().and_then(|v| v.parse().ok());
     let fence = std::env::var("NFS_FENCE").ok().is_none_or(|v| v != "0");
     let mut held = 0usize;
+    // When each car last got further round the course, and how far it has been from the node it
+    // holds. A field that stops is not one thing: a car still gaining waypoints at the final second
+    // only wants more seconds, a car that stopped at t=20 is stuck, and a car a hundred metres from
+    // its own held node has lost the graph. The summary cannot tell those apart and they need
+    // different work.
+    let mut along = vec![0usize; field.len()];
+    let mut moved_at = vec![0.0f32; field.len()];
+    let mut strayed = vec![0.0f32; field.len()];
     let mut falls: Vec<Fall> = vec![Fall::default(); field.len()];
     let mut was: Vec<Option<Vec3>> = vec![None; field.len()];
     let steps = (seconds / FIXED_DT) as usize;
@@ -486,8 +494,17 @@ async fn run() {
         // Where the world last held each car up — the same question `keep_in_world` asks in the
         // game, through the same code, with the rescue left out. Watching a field leave the world
         // and catching it are different jobs, and only the first one answers why.
-        for (k, (rig, _)) in field.iter_mut().enumerate() {
+        for (k, (rig, pilot)) in field.iter_mut().enumerate() {
             let Some(p) = rig.pose(&world) else { continue };
+            let round = pilot.along(waypoints.len());
+            if round > along[k] {
+                along[k] = round;
+                moved_at[k] = now;
+            }
+            if let Some(j) = pilot.node().and_then(|i| net.node(i)) {
+                let d = Vec3::new(j.at.x - p.position.x, 0.0, j.at.z - p.position.z).length();
+                strayed[k] = strayed[k].max(d);
+            }
             let g = rig.watch_ground(&world, p, FIXED_DT);
             let f = &mut falls[k];
             f.below = g.below;
@@ -576,7 +593,7 @@ async fn run() {
         }
         println!(
             "  car {k}: ({:>7.0},{:>6.0},{:>7.0}) {:>4.0} km/h{} · {:>4} junctions over {:>3} \
-             distinct nodes · waypoint {}",
+             distinct nodes · {} waypoints driven past, last gained at {:>5.1}s · strayed {:>5.0} m from its node",
             at.x,
             at.y,
             at.z,
@@ -584,7 +601,9 @@ async fn run() {
             if gone { " FALLEN" } else { "" },
             pilot.passed(),
             pilot.seen(),
-            pilot.goal()
+            pilot.covered(),
+            moved_at[k],
+            strayed[k]
         );
     }
     // **Why** they fell, which is not the same question as how many. Each fallen car is traced back

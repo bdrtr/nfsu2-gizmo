@@ -51,6 +51,11 @@ const STALL_SPEED: f32 = 0.7;
 const STALL_FOR: f32 = 1.5;
 /// How long a car is left alone at the start before it can be called stuck.
 const SETTLE: f32 = 3.0;
+/// How near a waypoint counts as having driven past it, for [`Pilot::covered`].
+///
+/// The waypoints are 40 m apart after `route::densify`, so this is one step: near enough that a car
+/// on the road claims every one it passes, far enough that it does not have to clip the exact point.
+const COVERED_WITHIN: f32 = 40.0;
 /// How long a reversing manoeuvre lasts.
 const BACK_FOR: f32 = 1.2;
 /// The step the pilot assumes between calls. It is called once per frame and the physics runs at
@@ -131,6 +136,15 @@ pub struct Pilot {
     /// where the geometric rules could not — the route where nothing moved at all goes from 2 cars
     /// and 40 m to 5 and 170, and another from 0 and 29 m to 2 and 264.
     blocked: Vec<u32>,
+    /// Which waypoints of the course the car has actually been near.
+    ///
+    /// **A progress measure a resync cannot inflate.** `along` is the waypoint *index*, so a pilot
+    /// that re-finds the course by jumping its index forward is credited with everything in
+    /// between; measured, that turns 5.5 waypoints of real progress into a reported 122.8. This can
+    /// only be earned by having been there. Proximity is refuted as a rule for *advancing* — a car
+    /// that strays never enters the radius, so the counter stops while the car drives on — and is
+    /// exactly right for *counting*, for the same reason read the other way round.
+    covered: std::collections::BTreeSet<usize>,
     /// Seconds still to wait before pulling away.
     ///
     /// A grid is four abreast and two deep with 3.5 m across and 5.7 m between the rows, against a
@@ -234,6 +248,12 @@ impl Pilot {
         self.goal
     }
 
+    /// How many of the course's waypoints the car has actually driven past.
+    #[must_use]
+    pub fn covered(&self) -> usize {
+        self.covered.len()
+    }
+
     /// Completed laps.
     #[must_use]
     pub fn laps(&self) -> u32 {
@@ -281,9 +301,6 @@ impl Pilot {
             });
         }
 
-        // The waypoint being driven to. With no course, the pilot still drives — it just has
-        // nothing to prefer at a junction, and takes whatever is not backwards.
-        let target = course.get(self.goal).copied();
         // Advance while the **next** waypoint is nearer than the one held — the same self-limiting
         // rule the network walk uses, and for the same reason.
         //
@@ -294,6 +311,19 @@ impl Pilot {
         // fiction.
         if !course.is_empty() {
             let d = |i: usize| flat(course[i % course.len()] - at).length();
+            // **"Advance while the one it holds is behind" is refuted here too**, and it was worth
+            // trying because the lock is real: over eight routes 39 of 64 cars stop gaining course
+            // progress before t=30 s and the field averages 5.2 waypoints of 126. A car that strays
+            // past its waypoint sideways never gets nearer the next one than the one it holds, the
+            // counter stops, and since the counter is what the pilot steers the network by it then
+            // drives at a point behind it for the rest of the race.
+            //
+            // The reason it fails is the reason it failed on the node walk, and now it is clear:
+            // **"behind" cannot terminate on a cycle.** A course is a closed ring, so a car pointed
+            // away from it has a whole arc of it behind — the counter walks that arc, wraps, counts
+            // a lap, and the early waypoints are behind too. Measured: 92 laps and 5,999 waypoints
+            // driven for one car in ninety seconds, and two cars "FINISHED". Whatever the answer to
+            // a car that has lost the course is, advancing is not it. See [`Self::lost`].
             for _ in 0..3 {
                 let next = (self.goal + 1) % course.len();
                 if d(next) >= d(self.goal) {
@@ -305,7 +335,26 @@ impl Pilot {
                 self.goal = next;
             }
         }
-        let toward = target.unwrap_or(at + facing * Vec3::NEG_Z * 1000.0);
+        // **Re-finding the course when the counter stops is refuted too.** The lock is real and the
+        // idea is the obvious one left after advancing failed: a pilot that has gained no waypoint
+        // for a while asks the grid's own question again — nearest waypoint, nearest node — which is
+        // bounded by construction and cannot run away. It loses anyway, at every interval swept, on
+        // the one measure it cannot inflate. Waypoints actually driven past, over eight routes: 462
+        // with it off, **369 at 4 s, 412 at 8 s, 435 at 16 s**; distance 4,129 m → 2,955 / 3,878 /
+        // 3,640; cars away 62/64 → 53 / 59 / 62. The only column it wins is junctions, which is
+        // exactly the column that re-picking a node inflates.
+        //
+        // It was worth doing for what it exposed: `along` is the waypoint *index*, so a pilot that
+        // jumps its index forward is credited with everything in between, and the resync looked like
+        // a twenty-two-fold gain (5.5 → 122.8) until it was measured with [`Self::covered`].
+        // What it has actually driven past, as opposed to what its counter says.
+        for (i, w) in course.iter().enumerate() {
+            if flat(*w - at).length() <= COVERED_WITHIN {
+                self.covered.insert(i);
+            }
+        }
+
+        let toward = course.get(self.goal).copied().unwrap_or(at + facing * Vec3::NEG_Z * 1000.0);
 
         // Advance while the **next** node is nearer the car than the one held. Self-limiting by
         // construction: it stops the moment the held node is the nearest, so a stopped car stops

@@ -809,6 +809,46 @@ Oturumun toplamı:
 | toplam mesafe | 2.594 m | **3.881 m** |
 | kavşak | 718 | **846** |
 
+### Alan parkuru sürmüyor — ve iki makul çözüm daha çürüdü
+
+Çit düşüşleri bitirince kalan soruyu ölçtüm: alan neden ilerlemeyi bırakıyor, süre mi yetmiyor?
+Süre değil. 64 arabanın **39'u t=30'dan önce** parkurda ilerlemeyi bırakıyor ve yalnız 4'ü son
+saniyeye kadar ilerliyor. Dahası 54'ü tuttuğu düğümden 60 m'den fazla sapıyor, en fazlası **954 m**.
+Arabalar sürüyor (62/64, 4,1 km) ama parkuru dolaşmıyorlar.
+
+**Birinci deneme: "yol noktası arkada kaldıysa ilerlet."** Nişan noktasında işe yarayan cümlenin bir
+üst katmanı. Kaçtı: bir araba 90 saniyede **92 tur ve 5999 yol noktası** sürdü ve iki araba
+"BİTİRDİ". Sebep artık net ve düğümdeki kaçakla aynı: **"arkada" döngüsel bir dizide sonlanamaz.**
+Parkur kapalı bir halka, yani ondan yüzünü çevirmiş arabanın arkasında halkanın koca bir yayı var;
+sayaç o yayı yürüyor, başa sarıyor, bir tur sayıyor, ve baştaki noktalar da arkada. İki kez
+denendi, iki kez aynı sebeple öldü.
+
+**İkinci deneme: kaybolduysa parkuru yeniden bul.** İlerletmek olmuyorsa geriye kalan: bir süredir
+yol noktası kazanamayan pilot ızgaradaki soruyu tekrar sorsun — en yakın yol noktası, en yakın
+düğüm. Tanım gereği sınırlı, kaçamaz. Yine de kaybediyor, hem de her aralıkta.
+
+Ve **şişiremediği tek ölçütte** kaybediyor. `along` yol noktasının *indeksi*, yani indeksini ileri
+zıplatan pilota aradaki her şey yazılıyor: senkron 5,5 → **122,8** gibi yirmi iki katlık bir kazanç
+gösteriyordu. `Pilot::covered` — arabanın gerçekten 40 m yakınından geçtiği ayrı yol noktası — bunu
+söktü:
+
+| | giden | düşen | mesafe | kavşak | **geçilen yol noktası** |
+|---|---:|---:|---:|---:|---:|
+| **senkron kapalı** | **62/64** | **0** | **4.129 m** | 864 | **462** |
+| 4 sn | 53/64 | 2 | 2.955 | 913 | 369 |
+| 8 sn | 59/64 | 0 | 3.878 | 906 | 412 |
+| 16 sn | 62/64 | 1 | 3.640 | 934 | 435 |
+
+Kazandığı tek sütun kavşak, ki düğümü yeniden seçmekle şişen sütun tam olarak o.
+
+Bu arada bayat bir okuma düzeldi ve bedava kazanç getirdi: `toward` bu karenin yol noktası
+ilerlemesinden **önceki** hedeften hesaplanıyordu. Ilerlemeden sonrasına alınınca sekiz parkurda
+düşen 1 → **0**, mesafe 3.881 → **4.129 m**, kavşak 846 → **864**.
+
+Kalan gerçek: alan parkurun ortalama **7 yol noktasını** geçiyor (rotaya göre 65-126 tanesinden).
+Sürüyorlar, düşmüyorlar, ama parkuru sürmüyorlar — ve bunun sebebi ne ilerletme kuralı ne de
+senkron. Sıradaki iş burada.
+
 **Yapışan düğüm için "geçtiyse bırak" ise çürüdü — bin kat.** Nişan düzeltmesinin simetriği gibi
 duruyor (düğüm arabanın arkasında kaldıysa ilerlet) ve sekiz parkurda kavşağı 848 → **854.536**
 yapıyor, mesafeyi 3.652 → 2.699 m'ye düşürüyor. Bu, kodda zaten yazılı olan "yeterince yakınsa
