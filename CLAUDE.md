@@ -66,7 +66,8 @@ crates.io `gizmo-engine 0.8.0` is still insufficient (`Collider::trimesh`, cache
   temporarily building against the local tree. It overrides the `rev`. Comment it back when done —
   `cargo tree -p gizmo-engine` says which source is live.
 - **Never `git checkout` in `../Gizmo`** (or `../PryHUB`): other sessions work in those trees. To
-  find out whether the engine has a commit, ask git — `git -C ../Gizmo log --oneline 4d1a8cb..main`.
+  find out whether the engine has a commit, ask git — `git -C ../Gizmo log --oneline <pin>..main`,
+  taking `<pin>` from `game/Cargo.toml` rather than from memory.
 
 The parser is *not* pinned: `gizmo-nfs` stays patched to the sibling `../PryHUB` checkout, because
 the parser and the game still move together.
