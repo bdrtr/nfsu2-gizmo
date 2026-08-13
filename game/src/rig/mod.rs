@@ -118,6 +118,54 @@ pub struct Pose {
     pub speed: f32,
 }
 
+/// How long all four wheels must stay down before that pose counts as ground worth returning to.
+///
+/// Not a formality. A car falling through a hole clips the *underside* of the terrain on the way
+/// past — one or two frames, one or two wheels — and recording that pose is how a rescue puts the
+/// player somewhere below the world on an empty plain. **Ground is where the car stayed, not
+/// everything it touched.**
+pub const GROUND_SETTLE: f32 = 0.25;
+
+/// How far below the last standing pose is too far, whatever the wheels report.
+///
+/// The airborne timer alone is not enough, and the way it fails is not hypothetical: a car dropping
+/// through a hole clips things on the way down — the underside of a road, a building's foundation, a
+/// kerb edge — and each graze puts a wheel on the ground for a frame and resets the timer. The fall
+/// then never "counts", and the car keeps going. Depth below the last place it actually *stood*
+/// cannot be reset that way. 60 m is far deeper than any drop Bayview's roads set up (they sit
+/// within a few metres of `y ≈ −11`) and far shallower than a fall out of the world.
+///
+/// **Below the last standing pose, not below anything absolute.** A world floor was tried and is the
+/// wrong instrument, and so is a depth below the starting grid: `Paths4061` starts on an elevated
+/// section at `y = 323` and its route descends sixty metres, so "fifty metres below the grid" called
+/// three cars that had driven down a hill and parked, upright and stationary, fallen out of the
+/// world. Depth below where the car itself last stood is local, needs no geometry, and means the
+/// same thing on every route.
+pub const FALL_DEPTH: f32 = 60.0;
+
+/// What the car's own suspension says about its footing — see [`CarRig::watch_ground`].
+#[derive(Clone, Copy, Debug)]
+pub struct Standing {
+    /// The last pose the car properly stood at: all four wheels down, upright, held for
+    /// [`GROUND_SETTLE`]. Starts at the spawn pose, so there is always somewhere to name.
+    pub last: Transform,
+    /// Whether this step's pose was the one just recorded into [`Self::last`]. The moment a caller
+    /// wanting to remember *anything else* about standing — speed, heading, the time — must catch,
+    /// because one step later the pose is history and the state that went with it is gone.
+    pub stood: bool,
+    /// Whether the car has ever stood anywhere. While false, [`Self::last`] is still the spawn pose
+    /// and nothing has shown it to be ground.
+    pub ever: bool,
+    /// All four wheels touching, right now.
+    pub on_all_four: bool,
+    /// Upright, right now — so a car on its roof is never mistaken for one on its wheels.
+    pub upright: bool,
+    /// Unbroken seconds with no wheel touching anything.
+    pub airborne_for: f32,
+    /// How far below [`Self::last`] the car is now. Negative above it.
+    pub below: f32,
+}
+
 /// What [`CarRig::keep_in_world`] did about a car that had left the world.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Rescue {
@@ -428,6 +476,69 @@ impl CarRig {
         }
     }
 
+    /// How many of the car's wheels are touching something, and how many there are.
+    ///
+    /// The suspension's own answer, against the real colliders — not a second opinion from a height
+    /// query, which is why a caller trying to work out *why* a car left the world should start here
+    /// and go to [`crate::world::Ground`] only for the city's side of the story.
+    ///
+    /// `(0, 0)` means there is no controller to ask. That is not "airborne": a car with no wheels
+    /// has not left the ground, it has no ground to leave, and the two must not be conflated by
+    /// anyone reading this.
+    #[must_use]
+    pub fn wheels_down(&self, world: &World) -> (usize, usize) {
+        let vehicles = world.borrow::<VehicleController>();
+        vehicles.get(self.chassis).map_or((0, 0), |v| {
+            (v.wheels.iter().filter(|w| w.is_grounded).count(), v.wheels.len())
+        })
+    }
+
+    /// Watch the car's footing for one step and remember the last place it properly stood.
+    ///
+    /// All the bookkeeping [`Self::keep_in_world`] needs, with none of the rescuing — so a harness
+    /// that wants to *watch* cars leave the world rather than catch them (`nfs_sim`) asks exactly
+    /// the same question the game asks, and cannot drift from it. Call it once per step per car.
+    ///
+    /// Two different predicates, deliberately not one. Falling is "no wheel is touching" — the one
+    /// `NFS_DIAG` prints. Ground is "all four are, and it is upright", which is much stricter, and
+    /// the strictness is the point: a car resting on its roof or wedged nose-down against a wall is
+    /// not somewhere to come back to.
+    ///
+    /// A car with no controller is neither airborne nor standing: it has no wheels to report with,
+    /// and calling that airborne would start a fall timer on something that cannot fall.
+    pub fn watch_ground(&mut self, world: &World, pose: Pose, dt: f32) -> Standing {
+        let (down, total) = self.wheels_down(world);
+        let (airborne, on_all_four) = (total > 0 && down == 0, total > 0 && down == total);
+        let upright = (pose.rotation * Vec3::Y).dot(Vec3::Y) > 0.7;
+
+        let mut stood = false;
+        if on_all_four && upright {
+            self.grounded_for += dt;
+            if self.grounded_for >= GROUND_SETTLE {
+                self.has_grounded = true;
+                self.last_safe = Transform::new(pose.position).with_rotation(pose.rotation);
+                stood = true;
+            }
+        } else {
+            self.grounded_for = 0.0;
+        }
+        if airborne {
+            self.airborne_for += dt;
+        } else {
+            self.airborne_for = 0.0;
+        }
+
+        Standing {
+            last: self.last_safe,
+            stood,
+            ever: self.has_grounded,
+            on_all_four,
+            upright,
+            airborne_for: self.airborne_for,
+            below: self.last_safe.position.y - pose.position.y,
+        }
+    }
+
     /// Put the car back on the last ground it stood on, if it has left the world. Returns whether
     /// it fired.
     ///
@@ -458,60 +569,10 @@ impl CarRig {
         /// not a bigger number here.
         const FALL_GRACE: f32 = 2.5;
 
-        /// How long all four wheels must stay down before that pose counts as ground worth
-        /// returning to.
-        ///
-        /// Not a formality. A car falling through a hole clips the *underside* of the terrain on
-        /// the way past — one or two frames, one or two wheels — and recording that pose is how a
-        /// rescue puts the player somewhere below the world on an empty plain. Ground is where the
-        /// car stayed, not everything it touched.
-        const SETTLE: f32 = 0.25;
+        let g = self.watch_ground(world, pose, dt);
+        let too_deep = !g.on_all_four && g.below > FALL_DEPTH;
 
-        // Two different questions, deliberately not the same predicate. Falling is "no wheel is
-        // touching" — the one `NFS_DIAG` prints. Ground is "all four are", which is much stricter.
-        let (airborne, on_all_four) = {
-            let vehicles = world.borrow::<VehicleController>();
-            match vehicles.get(self.chassis) {
-                Some(v) => (
-                    v.wheels.iter().all(|w| !w.is_grounded),
-                    !v.wheels.is_empty() && v.wheels.iter().all(|w| w.is_grounded),
-                ),
-                None => (false, false),
-            }
-        };
-        // And upright, so a car resting on its roof or wedged nose-down against a wall is never
-        // stored as somewhere to come back to.
-        let upright = (pose.rotation * Vec3::Y).dot(Vec3::Y) > 0.7;
-
-        if on_all_four && upright {
-            self.grounded_for += dt;
-            if self.grounded_for >= SETTLE {
-                self.has_grounded = true;
-                self.last_safe = Transform::new(pose.position).with_rotation(pose.rotation);
-            }
-        } else {
-            self.grounded_for = 0.0;
-        }
-
-        /// How far below the last standing pose is too far, whatever the wheels report.
-        ///
-        /// The airborne timer alone is not enough, and the way it fails is not hypothetical: a car
-        /// dropping through a hole clips things on the way down — the underside of a road, a
-        /// building's foundation, a kerb edge — and each graze puts a wheel on the ground for a
-        /// frame and resets the timer. The fall then never "counts", and the car keeps going. Depth
-        /// below the last place it actually stood cannot be reset that way. 60 m is far deeper than
-        /// any drop Bayview's roads set up (they sit within a few metres of `y ≈ −11`) and far
-        /// shallower than a fall out of the world.
-        const FALL_DEPTH: f32 = 60.0;
-
-        let too_deep = !on_all_four && (self.last_safe.position.y - pose.position.y) > FALL_DEPTH;
-
-        if !airborne {
-            self.airborne_for = 0.0;
-        } else {
-            self.airborne_for += dt;
-        }
-        if self.airborne_for < FALL_GRACE && !too_deep {
+        if g.airborne_for < FALL_GRACE && !too_deep {
             return Rescue::None;
         }
         self.airborne_for = 0.0;
@@ -520,7 +581,7 @@ impl CarRig {
         // Never having touched anything means `last_safe` is still the spawn pose, which this fall
         // has just disproved as ground. Rescuing to it again is a loop, so say so — once — and let
         // the caller decide. The bug is the spawn point, not the fall.
-        let verdict = if self.has_grounded {
+        let verdict = if g.ever {
             Rescue::ToLastGround
         } else {
             if !self.warned_nowhere {

@@ -37,8 +37,97 @@ use nfsu2::world as city;
 /// point under its own bumper.
 const WAYPOINT_STEP: f32 = 40.0;
 
+/// How far to walk the city on from where the world let go, before calling the road unbroken.
+///
+/// Long enough that a car doing 100 km/h covers it in under three seconds — the scale a driving
+/// mistake happens on — and short enough that the answer is about the place it left rather than
+/// about the far side of the block.
+const PROBE: f32 = 80.0;
+
+/// The height window that probe allows, and deliberately the same number as `NFS_WALL`'s default.
+///
+/// A road climbs and dips, and `Network::drop_walled` measured what happens to a tighter tolerance:
+/// it cuts real roads. Reusing the value means a gap found here is a gap by the same standard the
+/// network already routes by, rather than a second opinion with its own threshold to argue about.
+const PROBE_SLACK: f32 = 8.0;
+
+/// Where a car last had the world under it.
+///
+/// A fall is *noticed* at the bottom, and the bottom is the least informative place to look at one:
+/// by then every car that left is a kilometre under an empty map at terminal velocity, and they all
+/// look the same whatever went wrong. What separates the causes is the moment the ground let go.
+#[derive(Clone, Copy)]
+struct Contact {
+    /// When, in simulated seconds.
+    t: f32,
+    /// Where the car was.
+    at: Vec3,
+    /// Which way it was actually travelling, flattened and normalised — measured from the step it
+    /// just took, not from where its nose pointed. A car sliding sideways off a kerb leaves along
+    /// its velocity, and the whole question is what is out there in the direction it left.
+    going: Vec3,
+    /// Speed in m/s. Passing through a triangle is a speed failure and driving off an edge is not,
+    /// so the number is worth carrying before anything is concluded from it.
+    speed: f32,
+}
+
+/// One car's fall, as far as the sim can witness it.
+#[derive(Clone, Copy, Default)]
+struct Fall {
+    /// The last pose it properly **stood** at, and what it was doing there. Not merely the last
+    /// thing it touched: a car dropping through a hole clips the underside of the world on the way
+    /// past, and taking that as the departure point puts the whole diagnosis inside the fall.
+    last: Option<Contact>,
+    /// How far below that pose it is now.
+    below: f32,
+    /// The highest it got above it since. A car that was *launched* was over the edge in the air
+    /// and no barrier at ground level would have stopped it; a car that drove off one never left
+    /// the surface it was on. Same ending, different bug.
+    peak: f32,
+    /// Whether it ever stood anywhere at all. False means the grid place itself has never been
+    /// shown to be ground.
+    ever: bool,
+}
+
 const DEFAULT_CAR: &str =
     "/home/bedir/Games/need-for-speed-underground-2/drive_c/Need for Speed Underground 2/CARS/240SX/GEOMETRY.BIN";
+
+/// A picture of what the city has to stand on around a point, for when a distance is not enough.
+///
+/// A gap measured along one line says the road ran out; it does not say whether the car slipped
+/// through a seam between two meshes that should have met, or drove off the edge of a world that
+/// simply stops there. Those need different fixes — one is an assembly bug, the other is the
+/// barriers `ROADMAP.md` §M4 says have to be derived — and a 80 m square of the answer tells them
+/// apart at a glance.
+///
+/// `#` drivable surface within [`PROBE_SLACK`] of the centre's height: road this car could be on.
+/// `:` a surface at that XZ, but too far above or below to be the same road — another deck, a roof.
+/// `.` nothing at all. `O` is the point itself and `>` is 10 m along the way it was going.
+fn ground_map(ground: &city::Ground, at: Vec3, going: Vec3, half: f32, step: f32) -> String {
+    let n = (half / step) as i32;
+    let ahead = at + going * 10.0;
+    let mut out = String::new();
+    for iz in -n..=n {
+        for ix in -n..=n {
+            let (x, z) = (at.x + ix as f32 * step, at.z + iz as f32 * step);
+            let near = |p: Vec3| (p.x - x).abs() <= step * 0.5 && (p.z - z).abs() <= step * 0.5;
+            let hs = ground.heights_at(x, z);
+            out.push(if near(at) {
+                'O'
+            } else if near(ahead) {
+                '>'
+            } else if hs.iter().any(|h| (h - at.y).abs() <= PROBE_SLACK) {
+                '#'
+            } else if hs.is_empty() {
+                '.'
+            } else {
+                ':'
+            });
+        }
+        out.push('\n');
+    }
+    out
+}
 
 fn main() {
     pollster::block_on(run());
@@ -61,11 +150,52 @@ async fn run() {
     // The same preparation the game does, and in the same order: the drivers must be given the
     // world the player would have been given, or the answer is about a different city.
     let meshes = city::dedup(meshes);
-    let objects: Vec<_> =
-        meshes.into_iter().filter(|m| city::is_drawn(&m.header.name)).collect();
-    let objects = city::lod::keep_finest(objects);
+    // NFS_COLLIDE=all: build the collision from **everything** the bundle ships except the backdrop
+    // — distant-LOD proxies kept, coarse tiers kept, nothing dropped.
+    //
+    // The one experiment that separates "the city has a hole here" from "our assembly opened one".
+    // Both exclusions the drawn set applies are *visual* decisions — a kilometre-wide proxy plane at
+    // arm's length is worse than none, a coarse tier over its own fine version is a blurry box — and
+    // collision inherited both without ever being asked whether they applied to it. They may not: a
+    // plane you cannot see through is perfectly good to stand on.
+    //
+    // **Answered, and the answer is no.** 582,304 collision triangles become 734,880 with the 2,100
+    // coarse tiers put back, and over the eight routes the result is identical: the same ten cars
+    // fall off the same three places. The ground the cars need is not in the bundle under any
+    // filter. Kept as a knob because that is a claim worth being able to re-check in one run.
+    let collide_all = std::env::var("NFS_COLLIDE").is_ok_and(|v| v == "all");
+    // What each filter costs, printed rather than assumed. A knob whose effect is invisible is a
+    // knob that can be swept all day against a set it never changed.
+    let (backdrop, distant) = meshes.iter().fold((0usize, 0usize), |(b, d), m| {
+        (
+            b + usize::from(city::is_backdrop(&m.header.name)),
+            d + usize::from(city::is_distant_lod(&m.header.name)),
+        )
+    });
+    let objects: Vec<_> = meshes
+        .into_iter()
+        .filter(|m| {
+            if collide_all {
+                !city::is_backdrop(&m.header.name)
+            } else {
+                city::is_drawn(&m.header.name)
+            }
+        })
+        .collect();
+    let before = objects.len();
+    let objects = if collide_all { objects } else { city::lod::keep_finest(objects) };
+    println!(
+        "objects: {before} kept of {} · {backdrop} backdrop, {distant} distant-LOD proxies · \
+         {} coarse tiers dropped{}",
+        before + backdrop + distant,
+        before - objects.len(),
+        if collide_all { " · NFS_COLLIDE=all: nothing dropped" } else { "" }
+    );
     let colliders = city::collision_cells(&objects);
     let ground = city::Ground::of(&colliders);
+    // Which cells have anything to drive on at all. A fall inside the mapped city and a fall past
+    // its edge are different findings, and only this can tell them apart.
+    let bounds = city::Bounds::of(&colliders);
 
     let bytes = std::fs::read(&route).unwrap_or_else(|e| panic!("read {route}: {e}"));
     let nodes = gizmo_nfs::world::routes::nodes(&bytes).expect("read the route file's nodes");
@@ -239,6 +369,8 @@ async fn run() {
     let trace: f32 = std::env::var("NFS_TRACE").ok().and_then(|v| v.parse().ok()).unwrap_or(0.0);
     let mut next_trace = trace;
     let watch: Option<usize> = std::env::var("NFS_WATCH").ok().and_then(|v| v.parse().ok());
+    let mut falls: Vec<Fall> = vec![Fall::default(); field.len()];
+    let mut was: Vec<Option<Vec3>> = vec![None; field.len()];
     let steps = (seconds / FIXED_DT) as usize;
     for step in 0..steps {
         let now = step as f32 * FIXED_DT;
@@ -312,6 +444,35 @@ async fn run() {
         }
         gizmo::physics::vehicle_controller_system(&world, FIXED_DT);
         gizmo::physics::physics_step_system(&world, FIXED_DT);
+
+        // Where the world last held each car up — the same question `keep_in_world` asks in the
+        // game, through the same code, with the rescue left out. Watching a field leave the world
+        // and catching it are different jobs, and only the first one answers why.
+        for (k, (rig, _)) in field.iter_mut().enumerate() {
+            let Some(p) = rig.pose(&world) else { continue };
+            let g = rig.watch_ground(&world, p, FIXED_DT);
+            let f = &mut falls[k];
+            f.below = g.below;
+            f.ever = g.ever;
+            if g.stood {
+                let moved = was[k].map_or(Vec3::ZERO, |b| p.position - b);
+                let going = Vec3::new(moved.x, 0.0, moved.z).normalize_or_zero();
+                // A car that has not moved this step has no direction of travel; where it is
+                // pointing is the honest stand-in, and it is only ever used for a car that
+                // afterwards falls, which means it was going somewhere.
+                let nose = p.rotation * Vec3::NEG_Z;
+                let going = if going == Vec3::ZERO {
+                    Vec3::new(nose.x, 0.0, nose.z).normalize_or_zero()
+                } else {
+                    going
+                };
+                f.last = Some(Contact { t: now, at: p.position, going, speed: p.speed });
+                f.peak = 0.0;
+            } else {
+                f.peak = f.peak.max(-g.below);
+            }
+            was[k] = Some(p.position);
+        }
     }
 
     let pilots: Vec<Pilot> = field.iter().map(|(_, p)| p.clone()).collect();
@@ -342,13 +503,20 @@ async fn run() {
     // ended at -219 to -310 km/h, which is not reverse — it is falling — and one was 2.4 km outside
     // the map. Straight-line distance counted every one of them as progress, so the measure was
     // rewarding the exact failure it was there to detect.
-    let floor = line.y - 50.0;
+    //
+    // The first correction for that was itself wrong, and wrong in the mirror image: "fifty metres
+    // below the grid" invents falls on any route with vertical extent. `Paths4061` starts at
+    // `y = 323`, descends, and three cars that had driven down and parked — upright, stationary, all
+    // four wheels down at the final step — were counted as having left the world. The test is now
+    // [`rig::FALL_DEPTH`] below where the car itself last **stood**, which is what the game's own
+    // `keep_in_world` has always used and needs no grid to mean something.
     for (k, (rig, pilot)) in field.iter().enumerate() {
         let p = rig.pose(&world);
         let (at, speed) = p.map_or((Vec3::ZERO, 0.0), |p| (p.position, p.speed));
         junctions += pilot.passed();
         best_waypoint = best_waypoint.max(pilot.goal());
-        if at.y < floor {
+        let gone = falls[k].below > nfsu2::rig::FALL_DEPTH;
+        if gone {
             fallen += 1;
         } else {
             furthest = furthest
@@ -361,14 +529,65 @@ async fn run() {
             at.y,
             at.z,
             speed * 3.6,
-            if at.y < floor { " FALLEN" } else { "" },
+            if gone { " FALLEN" } else { "" },
             pilot.passed(),
             pilot.seen(),
             pilot.goal()
         );
     }
+    // **Why** they fell, which is not the same question as how many. Each fallen car is traced back
+    // to the last step its wheels had anything under them, and the city is then asked what was out
+    // there in the direction the car was going. Three answers, and they are three different bugs:
+    // the road ran out (the shipped geometry has holes and no barrier chunk to fence them), the
+    // road went on without it (the car passed through a triangle that was there — physics, not
+    // geometry), or it never touched anything at all (the grid place is over nothing).
+    if fallen > 0 {
+        println!("\nwhy {fallen} fell:");
+    }
+    let (mut edge, mut through, mut nowhere) = (0usize, 0usize, 0usize);
+    for (k, (rig, _)) in field.iter().enumerate() {
+        if falls[k].below <= nfsu2::rig::FALL_DEPTH {
+            continue;
+        }
+        let at = rig.pose(&world).map_or(Vec3::ZERO, |p| p.position);
+        let Some(c) = falls[k].last.filter(|_| falls[k].ever) else {
+            nowhere += 1;
+            println!("  car {k}: never stood anywhere — its grid place has not been shown to be ground");
+            continue;
+        };
+        let verdict = match ground.gap_along(c.at, c.at + c.going * PROBE, PROBE_SLACK, 3.0) {
+            Some(d) => {
+                edge += 1;
+                format!("the road runs out {d:.0} m ahead")
+            }
+            None => {
+                through += 1;
+                format!("the road goes on {PROBE:.0} m — it went THROUGH the surface")
+            }
+        };
+        // How far it has travelled sideways since letting go. A car that went through what it was
+        // standing on drops more or less where it stood; one that drove off an edge is still
+        // carrying the speed that took it there.
+        let over = (Vec3::new(at.x, 0.0, at.z) - Vec3::new(c.at.x, 0.0, c.at.z)).length();
+        println!(
+            "  car {k}: let go at t={:>5.1}s ({:>7.0},{:>6.1},{:>7.0}) doing {:>4.0} km/h, \
+             {:>4.1} m of air · now {:>5.0} m down and {over:>4.0} m away{} · {verdict}",
+            c.t,
+            c.at.x,
+            c.at.y,
+            c.at.z,
+            c.speed * 3.6,
+            falls[k].peak,
+            falls[k].below,
+            if bounds.contains(at) { ", inside the map" } else { ", outside the map" },
+        );
+        // NFS_FALLMAP=<half-width in metres>: draw what the city has around the place it left.
+        if let Some(half) = std::env::var("NFS_FALLMAP").ok().and_then(|v| v.parse::<f32>().ok()) {
+            print!("{}", ground_map(&ground, c.at, c.going, half, 2.0));
+        }
+    }
     println!(
-        "SUMMARY junctions={junctions} waypoint={best_waypoint} furthest={furthest:.0}          fallen={fallen} cars={} seconds={seconds:.0}",
+        "SUMMARY junctions={junctions} waypoint={best_waypoint} furthest={furthest:.0}          fallen={fallen} edge={edge} through={through} nowhere={nowhere} cars={} seconds={seconds:.0}",
         field.len()
     );
 }

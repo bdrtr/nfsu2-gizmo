@@ -633,6 +633,67 @@ ve bu sefer **üç ölçütte birden** kazanan bir değer çıktı:
 
 Ayrıca pilot artık kaç **ayrı** düğüm gördüğünü sayıyor; kavşak sayısına karşı bu, parkuru dolaşan
 bir arabayla daireler çizen arabayı ayırıyor.
+
+### Düşenler: onu da yoldan çıkıyor, hiçbiri zeminden geçmiyor
+
+Ölçüt yine yanlıştı, bu sefer ters yönde. "Izgaranın 50 m altına inen araba düşmüştür" der demez
+`Paths4061` onu çürütüyor: parkur **y = 323**'te başlıyor ve rotası altmış metre iniyor, yani aşağı
+inip duran üç araba düşmüş sayılıyordu. Üçü de son adımda dört tekerlek yerde, dik ve 0 km/h. Geçen
+tur ölçüt hatayı ödüllendiriyordu; bu ölçüt hata **uyduruyordu**. Sayı **13 değil 10**.
+
+Yeni ölçüt oyunun kendi kuralı: arabanın **en son durduğu** yerin 60 m altı (`rig::FALL_DEPTH`).
+Yerel, hiçbir zemine ya da ızgaraya ihtiyacı yok, her parkurda aynı şeyi söylüyor. Ve artık tek yerde
+duruyor — `keep_in_world` ile `nfs_sim` aynı `CarRig::watch_ground`'u çağırıyor, biri kurtarıyor
+öteki yalnız izliyor, ikisi ayrışamaz.
+
+Sonra sebep. Her düşen araba, tekerleklerin dünyayı en son tuttuğu ana geri sarılıyor ve şehre
+"bu arabanın **gittiği yönde** ne var" diye soruluyor — `Ground::gap_along`, `drop_walled`'ın kendi
+içinde kapalı duran yürüyüşü, artık ortak ve testli.
+
+| | |
+|---|---:|
+| düşen | **10/64** |
+| yol bitiyor | **10** |
+| zeminden geçen | **0** |
+| hiç yere basmamış | 0 |
+
+**Hiçbiri tünelleme değil.** Onunun da havada kazandığı yükseklik **0,0 m** — kimse rampadan
+fırlamamış — ve hepsi 39-55 km/h'de düz düz yoldan çıkmış. ROADMAP §6'daki `NarrowPhase::
+shape_trimesh` iç-kenar maddesi bunun sebebi değil; MOTOR-NOTLARI'na yazılacak bir şey yok.
+
+Ve boşluk **bizim montajımızın açtığı delik değil.** Paketin backdrop dışındaki her üçgeni çarpışmaya
+koyarak ölçüldü (`NFS_COLLIDE=all`: 582.304 → 734.880 üçgen, 2.100 kaba kademe geri geldi): sekiz
+parkurda sonuç **birebir aynı**, aynı on araba aynı üç yerden düşüyor. `*_WORLD_LOD` proxy'leri
+hipotezi ise test *edilemedi* — bu bölge hiç taşımıyor, sıfır tane. O yüzden `nfs_sim` artık
+filtrelerin ne attığını yazıyor: etkisi görünmeyen bir kol, hiç değiştirmediği bir küme üzerinde
+gün boyu süpürülebilir.
+
+`NFS_FALLMAP=<yarıçap>` boşluğun resmini çiziyor, ve resim dar bir dikiş değil onlarca metrelik bir
+hiçlik gösteriyor — araba `#` alanının kenarında duruyor, gideceği yön düpedüz `.`:
+
+```
+..############...########################
+.#############...########################
+############......#######################
+..................#######################
+...................######################
+................>..######################      # = basılabilir zemin
+...................######################      . = hiçbir şey
+....................#####################      O = arabanın bıraktığı yer
+....................O####################      > = gittiği yönde 10 m
+.....................####################
+...............##########################
+..........###############################
+......###################################
+```
+
+Düşüşler üç kümede: 4041'de (1900, 650) altı araba, 4021'de (−247, 1480) üç, 4102'de (80, −458) bir.
+Kalan beş parkurda kimse düşmüyor.
+
+Yani şehrin yolları **kenarlarında zemin olmadan** geliyor, ve arabayı üstünde tutacak bariyer
+chunk'ı dosyaların hiçbirinde yok (`0x0003410B`, §M4). Sürücü hatası değil, fizik hatası değil,
+bizim filtremiz değil — eksik veri. Kalan iş ikisinden biri: `keep_in_world`'ün oyunda zaten yaptığı
+şey, ya da §M4'ün ağdan türetilmiş bariyerleri.
 ---
 
 ## 1. Ana fikir

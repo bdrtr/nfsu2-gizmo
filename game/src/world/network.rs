@@ -153,15 +153,7 @@ impl Network {
         // 4081 from 746 to 333, and the eight-route total from 8.1 km to 6.8 km at every threshold
         // swept. A kerb has a drivable surface on top, so it passes "is there road here" — and
         // every rule sharp enough to catch it cuts crests and dips that are road.
-        let solid = |a: Vec3, b: Vec3| {
-            let d = Vec3::new(b.x - a.x, 0.0, b.z - a.z);
-            let n = (d.length() / STEP).ceil().max(1.0) as usize;
-            (1..n).all(|k| {
-                let t = k as f32 / n as f32;
-                let p = a.lerp(b, t);
-                ground.heights_at(p.x, p.z).iter().any(|h| (h - p.y).abs() <= tolerance)
-            })
-        };
+        let solid = |a: Vec3, b: Vec3| ground.gap_along(a, b, tolerance, STEP).is_none();
         let mut cut: Vec<(usize, u32)> = Vec::new();
         for i in 0..self.nodes.len() {
             for l in &self.nodes[i].links {

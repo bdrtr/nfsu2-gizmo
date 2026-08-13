@@ -259,6 +259,34 @@ impl Ground {
         out
     }
 
+    /// Walk a straight line over the city and say where the ground stops holding it up.
+    ///
+    /// Returns the distance along `a → b`, in the ground plane, of the first sample with no
+    /// drivable surface within `tolerance` of the interpolated height — or `None` where the surface
+    /// holds the whole way. Endpoints are not sampled: the caller already knows about them, and a
+    /// node standing a hair off its own tarmac would otherwise fail its own link.
+    ///
+    /// **Height matters, which is why this is not `heights_at` in a loop.** `Surface::Drivable`
+    /// admits a flat roof exactly as it admits a road, so "is there any surface at this XZ" says yes
+    /// over a car park with a building on it. Asking for one near where the line already is turns
+    /// that into the question a car has: does *this* road go on.
+    ///
+    /// Two callers, and they want the same thing from opposite ends. [`Network::drop_walled`](
+    /// crate::world::Network) asks it of a link the file claims, to find the wall in between; the
+    /// sim asks it of a car's own heading at the moment the world let go, to tell a car that drove
+    /// off an edge from one that went through a triangle. A gap is a gap either way.
+    #[must_use]
+    pub fn gap_along(&self, a: Vec3, b: Vec3, tolerance: f32, step: f32) -> Option<f32> {
+        let run = Vec3::new(b.x - a.x, 0.0, b.z - a.z).length();
+        let n = (run / step).ceil().max(1.0) as usize;
+        (1..n).find_map(|k| {
+            let t = k as f32 / n as f32;
+            let p = a.lerp(b, t);
+            let held = self.heights_at(p.x, p.z).iter().any(|h| (h - p.y).abs() <= tolerance);
+            (!held).then_some(t * run)
+        })
+    }
+
     /// Cells with drivable ground in them.
     #[must_use]
     pub fn cells(&self) -> usize {
@@ -503,6 +531,40 @@ mod tests {
         let g = Ground::of(&cells);
         assert_eq!(g.refs(), 0, "no drivable triangle, so nothing to answer with");
         assert!(g.height_at(Vec3::new(-15.0, 10.0, 0.0)).is_none());
+    }
+
+    /// Walking a line: ground that holds says nothing, ground that ends says where — and a line
+    /// above the surface is a gap, which is the whole difference from `heights_at` in a loop.
+    #[test]
+    fn a_gap_is_found_where_the_surface_stops_holding_the_line() {
+        // One flat quad. `remap` is `(-y, z, -x)`, so file x,y ∈ 0..40 is Gizmo x,z ∈ -40..0 at
+        // height 0 — the road ends at Gizmo x = 0.
+        let road = mesh(
+            vec![[0.0, 0.0, 0.0], [40.0, 0.0, 0.0], [0.0, 40.0, 0.0], [40.0, 40.0, 0.0]],
+            vec![0, 1, 2, 1, 3, 2],
+        );
+        let g = Ground::of(&collision_cells(&[road]));
+
+        // Wholly on the quad: nothing to report.
+        assert_eq!(
+            g.gap_along(Vec3::new(-30.0, 0.0, -20.0), Vec3::new(-10.0, 0.0, -20.0), 4.0, 3.0),
+            None,
+            "the road holds the whole way"
+        );
+
+        // Off the edge 30 m along. The answer is the first sample *past* it, so within one step.
+        let d = g
+            .gap_along(Vec3::new(-30.0, 0.0, -20.0), Vec3::new(30.0, 0.0, -20.0), 4.0, 3.0)
+            .expect("the road ends and the line goes on");
+        assert!((30.0..=33.5).contains(&d), "expected the edge at ~30 m, got {d}");
+
+        // The same XZ, a hundred metres up. Every sample has a surface under it and none of them is
+        // near the line, which is a car in the air over its own road rather than on it.
+        assert!(
+            g.gap_along(Vec3::new(-30.0, 100.0, -20.0), Vec3::new(-10.0, 100.0, -20.0), 4.0, 3.0)
+                .is_some(),
+            "a surface far below the line does not hold it up"
+        );
     }
 
     /// An object with no geometry, or an index past its own buffer, is skipped rather than
