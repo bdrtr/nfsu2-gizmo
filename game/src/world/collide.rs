@@ -340,6 +340,168 @@ impl Ground {
     }
 }
 
+/// The triangles a car cannot drive through, indexed to answer one question: **is there something
+/// between these two points.**
+///
+/// [`Ground`] is the other half of the same data and answers "is there road here". That is what
+/// `Network::drop_walled` asks of every link the file claims, and it is not the same question: a
+/// central reservation, a guardrail between two carriageways, a retaining wall beside a slip road —
+/// all of them have perfectly good road on both sides and along the line between, so the road test
+/// passes and the link stays. The network then hands a driver a branch with a barrier across it.
+///
+/// **Height is the whole difficulty.** `Surface::Wall` is a normal test, so it catches a building
+/// face and a fifteen-centimetre kerb alike, and four filters have already been swept away in this
+/// project for being sharp enough to catch kerbs. The lift below is what separates them: the
+/// question asked is not "does the line cross a wall triangle" but "does it cross one **standing at
+/// least this high**", tested by intersecting the segment carried at that height.
+///
+/// **What the answer may be used for is settled, and it is not deletion.** Cutting the links this
+/// finds was written, swept and refuted — see [`Network::drop_walled`](crate::world::Network) and
+/// `ROADMAP.md`. Six of eight routes did not move at all, and the two that did cancelled, because
+/// taking away a link a car cannot drive takes away the way round it as well. The answer is a
+/// **cost** on a branch, not the removal of one.
+pub struct Walls {
+    tris: Vec<[Vec3; 3]>,
+    runs: std::collections::HashMap<(i32, i32), Vec<u32>>,
+}
+
+impl Walls {
+    /// Index every wall triangle by the cells its XZ footprint touches.
+    #[must_use]
+    pub fn of(colliders: &[CityCollider]) -> Self {
+        let key = |v: f32| (v / GROUND_CELL).floor() as i32;
+        let mut tris: Vec<[Vec3; 3]> = Vec::new();
+        let mut runs: std::collections::HashMap<(i32, i32), Vec<u32>> = Default::default();
+        for c in colliders {
+            for (t, tri) in c.indices.chunks_exact(3).enumerate() {
+                if c.surfaces.get(t) != Some(&Surface::Wall) {
+                    continue;
+                }
+                let Some(p) = tri
+                    .iter()
+                    .map(|&i| c.vertices.get(i as usize).map(|v| *v + c.origin))
+                    .collect::<Option<Vec<_>>>()
+                else {
+                    continue;
+                };
+                let w = [p[0], p[1], p[2]];
+                let i = u32::try_from(tris.len()).unwrap_or(u32::MAX);
+                tris.push(w);
+                let (lo_x, hi_x) = (
+                    w.iter().fold(f32::MAX, |a, v| a.min(v.x)),
+                    w.iter().fold(f32::MIN, |a, v| a.max(v.x)),
+                );
+                let (lo_z, hi_z) = (
+                    w.iter().fold(f32::MAX, |a, v| a.min(v.z)),
+                    w.iter().fold(f32::MIN, |a, v| a.max(v.z)),
+                );
+                for cx in key(lo_x)..=key(hi_x) {
+                    for cz in key(lo_z)..=key(hi_z) {
+                        runs.entry((cx, cz)).or_default().push(i);
+                    }
+                }
+            }
+        }
+        Self { tris, runs }
+    }
+
+    /// Whether anything stands across the way from `a` to `b`, asked **along the road's own
+    /// profile** rather than along the straight line between the two.
+    ///
+    /// `lift` is what makes this about cars rather than about normals: half a metre clears a kerb,
+    /// and a guardrail, a central reservation or a building is taller than that. But the height has
+    /// to be measured *from the road*, and that is the whole of this method. A straight chord
+    /// between two nodes does not follow a crest or a dip — the same fact that forces
+    /// [`Network::drop_walled`](crate::world::Network) to work at an 8 m tolerance — so a chord
+    /// carried half a metre up runs **underground** wherever the road rises between its ends, and
+    /// every steep triangle of the embankment it is buried in answers "wall". Swept and measured:
+    /// see `ROADMAP.md`.
+    ///
+    /// So the walk follows the surface instead. At each step the local ground is taken **nearest
+    /// the height the walk is already at** — not the highest, because [`Surface::Drivable`] admits
+    /// a flat roof exactly as it admits a road — and the segment tested is the short one from the
+    /// previous sample to this one, both carried `lift` above their own ground.
+    #[must_use]
+    pub fn across(&self, ground: &Ground, a: Vec3, b: Vec3, lift: f32, step: f32) -> bool {
+        let run = Vec3::new(b.x - a.x, 0.0, b.z - a.z).length();
+        let n = (run / step).ceil().max(1.0) as usize;
+        let mut here = a.y;
+        let mut prev = a + Vec3::Y * lift;
+        for k in 1..=n {
+            let p = a.lerp(b, k as f32 / n as f32);
+            // Where the ground has nothing to say, the interpolated height stands in: a link with a
+            // genuine hole in it is `drop_walled`'s finding, not this one's, and it has already run.
+            let from = here;
+            here = ground
+                .heights_at(p.x, p.z)
+                .into_iter()
+                .min_by(|x, y| (x - from).abs().total_cmp(&(y - from).abs()))
+                .unwrap_or(p.y);
+            let cur = Vec3::new(p.x, here + lift, p.z);
+            if self.hits(prev, cur) {
+                return true;
+            }
+            prev = cur;
+        }
+        false
+    }
+
+    /// Whether the segment `p → q` — already at the height it is to be asked about — hits a wall.
+    fn hits(&self, p: Vec3, q: Vec3) -> bool {
+        let key = |v: f32| (v / GROUND_CELL).floor() as i32;
+        let (lo_x, hi_x) = (p.x.min(q.x), p.x.max(q.x));
+        let (lo_z, hi_z) = (p.z.min(q.z), p.z.max(q.z));
+        for cx in key(lo_x)..=key(hi_x) {
+            for cz in key(lo_z)..=key(hi_z) {
+                let Some(list) = self.runs.get(&(cx, cz)) else { continue };
+                for i in list {
+                    if let Some(t) = self.tris.get(*i as usize) {
+                        if segment_hits(p, q, t) {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    /// How many wall triangles were indexed.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.tris.len()
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.tris.is_empty()
+    }
+}
+
+/// Möller-Trumbore, bounded to the segment: whether `a → b` passes through the triangle.
+fn segment_hits(a: Vec3, b: Vec3, t: &[Vec3; 3]) -> bool {
+    let dir = b - a;
+    let (e1, e2) = (t[1] - t[0], t[2] - t[0]);
+    let p = dir.cross(e2);
+    let det = e1.dot(p);
+    if det.abs() < 1e-9 {
+        return false;
+    }
+    let inv = 1.0 / det;
+    let s = a - t[0];
+    let u = s.dot(p) * inv;
+    if !(-1e-4..=1.000_1).contains(&u) {
+        return false;
+    }
+    let q = s.cross(e1);
+    let v = dir.dot(q) * inv;
+    if v < -1e-4 || u + v > 1.000_1 {
+        return false;
+    }
+    let hit = e2.dot(q) * inv;
+    (0.0..=1.0).contains(&hit)
+}
+
 /// Where a vertical line through `(x, z)` meets a triangle's plane, or `None` if it misses.
 ///
 /// Barycentric in XZ, so a triangle standing exactly on its edge (zero area from above) is a miss

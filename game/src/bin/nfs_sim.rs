@@ -203,6 +203,18 @@ async fn run() {
     );
     let colliders = city::collision_cells(&objects);
     let ground = city::Ground::of(&colliders);
+    // **A measurement, not a mechanism.** Both ways of acting on a barrier through the *graph* were
+    // swept and refuted (`ROADMAP.md`), and what is left to try is the pilot's aim — so the first
+    // question is whether a pilot is in fact steering at points with something standing in the way,
+    // and on which routes. `NFS_AIMWALL=<metres>` is the lift the question is asked at.
+    //
+    // It answered, the answer became `Pilot`'s way-round rule, and that rule is now on by default —
+    // so what this measures today is the **residual**: how often a pilot is still aiming through
+    // something after the rule has had its go. For the number the rule was written from, run it
+    // with `NFS_AIMCLEAR=0`.
+    let aim_lift: f32 =
+        std::env::var("NFS_AIMWALL").ok().and_then(|v| v.parse().ok()).unwrap_or(0.0);
+    let walls = city::Walls::of(&colliders);
     // Which cells have anything to drive on at all. A fall inside the mapped city and a fall past
     // its edge are different findings, and only this can tell them apart.
     let bounds = city::Bounds::of(&colliders);
@@ -397,6 +409,8 @@ async fn run() {
     let mut strayed = vec![0.0f32; field.len()];
     let mut falls: Vec<Fall> = vec![Fall::default(); field.len()];
     let mut was: Vec<Option<Vec3>> = vec![None; field.len()];
+    let mut aim_seen = vec![0usize; field.len()];
+    let mut aim_walled = vec![0usize; field.len()];
     let steps = (seconds / FIXED_DT) as usize;
     for step in 0..steps {
         let now = step as f32 * FIXED_DT;
@@ -478,7 +492,15 @@ async fn run() {
             }
             let Some(pose) = rig.pose(&world) else { continue };
             if let Some(c) =
-                pilot.drive(pose.position, pose.rotation, pose.speed, &net, &waypoints, &traffic)
+                pilot.drive(
+                    pose.position,
+                    pose.rotation,
+                    pose.speed,
+                    &net,
+                    &waypoints,
+                    &traffic,
+                    Some((&walls, &ground)),
+                )
             {
                 rig.drive(&mut world, &c);
             }
@@ -504,6 +526,11 @@ async fn run() {
             if round > along[k] {
                 along[k] = round;
                 moved_at[k] = now;
+            }
+            // Sampled every tenth step because it is a rate, not an event.
+            if let Some(a) = pilot.aim().filter(|_| aim_lift > 0.0 && step % 10 == 0) {
+                aim_seen[k] += 1;
+                aim_walled[k] += usize::from(walls.across(&ground, p.position, a, aim_lift, 3.0));
             }
             if let Some(j) = pilot.node().and_then(|i| net.node(i)) {
                 let d = Vec3::new(j.at.x - p.position.x, 0.0, j.at.z - p.position.z).length();
@@ -665,6 +692,27 @@ async fn run() {
         if let Some(half) = std::env::var("NFS_FALLMAP").ok().and_then(|v| v.parse::<f32>().ok()) {
             print!("{}", ground_map(&ground, c.at, c.going, half, 2.0));
         }
+    }
+    if aim_lift > 0.0 {
+        let seen: usize = aim_seen.iter().sum();
+        let walled: usize = aim_walled.iter().sum();
+        let each: Vec<String> = aim_seen
+            .iter()
+            .zip(&aim_walled)
+            .map(|(s, w)| {
+                if *s > 0 {
+                    format!("{:.0}", 100.0 * *w as f32 / *s as f32)
+                } else {
+                    "-".to_string()
+                }
+            })
+            .collect();
+        println!(
+            "\naim: {walled} of {seen} sampled steps had something standing between the car and the \
+             point it was steering at — {:.1}% overall, per car {}",
+            if seen > 0 { 100.0 * walled as f32 / seen as f32 } else { 0.0 },
+            each.join(" ")
+        );
     }
     println!(
         "SUMMARY held={held} away={away} junctions={junctions} waypoint={best_waypoint} furthest={furthest:.0}          fallen={fallen} edge={edge} through={through} nowhere={nowhere} cars={} seconds={seconds:.0}",

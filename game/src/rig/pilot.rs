@@ -32,8 +32,39 @@
 //! round a slower car, so a queue behind one stays a queue.
 
 use super::drive::Controls;
-use crate::world::Network;
+use crate::world::{Ground, Network, Walls};
 use gizmo::prelude::*;
+
+/// How high the question "is something standing in the way" is asked at, and how finely the walk
+/// between the car and its aim follows the ground under it.
+///
+/// The same half metre and the same 3 m as everywhere else this city is walked: half a metre
+/// clears a kerb and every crest that is road, and 3 m is the spacing at which a walk still sees
+/// the ground it is walking on.
+const WALL_LIFT: f32 = 0.5;
+const WALL_STEP: f32 = 3.0;
+/// How many ticks a way-round decision is kept before it is worked out again.
+const WALL_EVERY: u8 = 10;
+/// How many multiples of the shift the search will widen to before giving up.
+///
+/// It gives up rather than going wider because past a point the aim is no longer on the same road,
+/// and a pilot that has run out of ways round is exactly the case the stall-and-reverse rule below
+/// already handles.
+const WALL_WIDEST: f32 = 4.0;
+/// How far sideways the aim moves per step of that search, in metres.
+///
+/// Swept over eight routes, and **seven of the eight settings beat having no rule at all** on
+/// waypoints driven past — 615, 630, 653, 663, 584, 642, 636 at 2, 4, 5, 6, 7, 8 and 10 m against
+/// **605** with the rule off. So the gain is the rule and not the number.
+///
+/// Five rather than the peak. Six covers most (663) but its neighbour at seven is a hole (584,
+/// below the baseline), and the peak beside a hole is what a tuned number looks like. Five is
+/// within 1.5 % of it, takes the **most junctions of the whole sweep (1,358) over the most
+/// distinct nodes (980)** — which is the tiebreaker between real progress and a car going round in
+/// circles — drops nobody off the world, and has good values on both sides of it (630 at four,
+/// 663 at six). The hole at seven is two routes going badly at once rather than a trend:
+/// `Paths4001` falls 141 → 117 and `Paths4002` 27 → 22, and both recover at eight.
+const AIM_CLEAR: f32 = 5.0;
 
 /// How far ahead to aim, as a multiple of speed in m/s, and the bounds that keeps it inside.
 ///
@@ -214,6 +245,16 @@ pub struct Pilot {
     /// that: measured, three of eight never leave the grid, and which three changes with the
     /// spacing rather than staying with a slot.
     hold: f32,
+    /// The sideways shift the aim is carrying to get round something standing in the way, in
+    /// metres, positive to the car's left.
+    ///
+    /// Held between evaluations rather than worked out every step. The search costs a handful of
+    /// segment tests, but that is not the reason: a decision that flips side from one frame to the
+    /// next is a steering wobble rather than a way round, and the thing being gone round is a
+    /// hundred metres of concrete that will still be there in a tenth of a second.
+    wall_shift: f32,
+    /// Ticks left before the shift is worked out again.
+    wall_due: u8,
     /// The point the steering is actually aimed at, kept only so a harness can see it.
     ///
     /// Where a car is going and which node it holds are different facts, and reading one for the
@@ -354,6 +395,7 @@ impl Pilot {
         net: &Network,
         course: &[Vec3],
         traffic: &[Vec3],
+        sight: Option<(&Walls, &Ground)>,
     ) -> Option<Controls> {
         let here = self.at?;
         let flat = |v: Vec3| Vec3::new(v.x, 0.0, v.z);
@@ -498,6 +540,51 @@ impl Pilot {
             cur = next;
         }
 
+        // Which way is sideways. Wanted by the two rules below that move the aim off the line, so
+        // it is worked out once.
+        let side = Vec3::new(-f.z, 0.0, f.x);
+
+        // **Not through that.** Both ways of dealing with a barrier through the *graph* were swept
+        // and refuted — cutting the link and pricing it, `Network::drop_walled` carries the numbers
+        // — and the measurement that closed that door opened this one. Asked of the unchanged
+        // field: on `Paths4002` something stands between a car and the point it is steering at on
+        // **72 %** of the first twenty seconds' samples, against **zero** on the other seven
+        // routes. (Over ninety seconds 4081 reads 54 % and 4001 13 %, and both of those are zero
+        // early — that is cars that are already lost aiming across buildings, an effect and not a
+        // cause. Only 4002 does it from the grid.)
+        //
+        // So the rule is the same shape as going round a car in front, with one thing it cannot
+        // assume: which side. A central reservation has good road on both sides — that is why the
+        // file links across it in the first place — so the side is *searched* rather than guessed,
+        // widening until the way is clear. Nothing else changes, so the car returns to the line by
+        // itself once the concrete has run out.
+        let clear: f32 =
+            std::env::var("NFS_AIMCLEAR").ok().and_then(|v| v.parse().ok()).unwrap_or(AIM_CLEAR);
+        if clear > 0.0 {
+            if let Some((walls, ground)) = sight {
+                if self.wall_due == 0 {
+                    self.wall_due = WALL_EVERY;
+                    self.wall_shift = 0.0;
+                    if walls.across(ground, at, aim, WALL_LIFT, WALL_STEP) {
+                        let mut off = clear;
+                        'search: while off <= clear * WALL_WIDEST {
+                            for s in [1.0f32, -1.0] {
+                                let try_at = aim + side * s * off;
+                                if !walls.across(ground, at, try_at, WALL_LIFT, WALL_STEP) {
+                                    self.wall_shift = s * off;
+                                    break 'search;
+                                }
+                            }
+                            off += clear;
+                        }
+                    }
+                } else {
+                    self.wall_due -= 1;
+                }
+                aim += side * self.wall_shift;
+            }
+        }
+
         // Stuck, and doing something about it. Reverse for a moment with the lock reversed too,
         // which is what backs a car off the thing it has driven into rather than along it.
         //
@@ -559,7 +646,6 @@ impl Pilot {
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(TRAFFIC_LOOK_PER_SPEED);
-        let side = Vec3::new(-f.z, 0.0, f.x);
         let mut blocking: Option<(f32, f32)> = None;
         let mut blocked_side = 0.0f32;
         if look_mul > 0.0 {

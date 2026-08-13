@@ -107,6 +107,10 @@ struct CruiseState {
     bounds: city::Bounds,
     /// The drivable surface, kept past setup because the barrier is derived from it every step.
     ground: city::Ground,
+    /// The other half of the same triangles: what a car cannot drive *through*. Kept for the same
+    /// reason — the pilots ask it every step whether something stands between them and where they
+    /// are steering.
+    walls: city::Walls,
     /// Seconds spent outside those cells, unbroken. Reset the moment the car is back in.
     out_for: f32,
     /// Whether where the car is *pointed* leaves the map — the warning that arrives in time.
@@ -284,6 +288,9 @@ fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> CruiseState
     // down — including the height, which is why the airport's `y = -11` was carried downtown where
     // the ground is at `y = 27`. Asked properly, the number comes from the city.
     let ground = city::Ground::of(&colliders);
+    // What a car cannot drive through, for the pilots' "not through that" rule — the same index the
+    // sim measures with, so the two cannot disagree about where the concrete is.
+    let walls = city::Walls::of(&colliders);
     let named_at = std::env::var("NFS_AT").is_ok();
     //
     // Free roam takes the `Err` arm on purpose even if `NFS_ROUTE` is set: there is nothing to
@@ -710,6 +717,7 @@ fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> CruiseState
     println!("bounds: {} cells with ground", bounds.cells());
     CruiseState {
         ground,
+        walls,
         rig,
         driver: Driver::new(),
         camera,
@@ -764,17 +772,24 @@ fn update(world: &mut World, state: &mut CruiseState, dt: f32, input: &Input) {
         .filter_map(|(r, _)| r.pose(world).map(|p| p.position))
         .chain(state.rig.pose(world).map(|p| p.position))
         .collect();
-    for i in 0..state.field.len() {
-        let Some(pose) = state.field[i].0.pose(world) else { continue };
-        let net = std::mem::take(&mut state.net);
-        let way = std::mem::take(&mut state.waypoints);
-        let c =
-            state.field[i].1.drive(pose.position, pose.rotation, pose.speed, &net, &way, &traffic);
-        state.net = net;
-        state.waypoints = way;
+    // Borrowed field by field rather than through `state`, which is what lets a pilot read the
+    // city while the field it is in is held mutably. It also retires the `mem::take` dance that
+    // used to stand in for exactly this.
+    let CruiseState { field, net, waypoints, walls, ground, driving, .. } = state;
+    for (rig, pilot) in field.iter_mut() {
+        let Some(pose) = rig.pose(world) else { continue };
+        let c = pilot.drive(
+            pose.position,
+            pose.rotation,
+            pose.speed,
+            net,
+            waypoints,
+            &traffic,
+            Some((&*walls, &*ground)),
+        );
         if let Some(c) = c {
-            state.field[i].0.drive(world, &c);
-            state.driving += 1;
+            rig.drive(world, &c);
+            *driving += 1;
         }
     }
 

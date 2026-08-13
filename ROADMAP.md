@@ -1105,6 +1105,75 @@ tıkanıklığa sokuyor, ve o tıkanıklık ölçülmedi.
 
 **Açık kalan:** 4002 hâlâ çözülmedi, ama artık ne olmadığını biliyoruz — ne bağı silmek, ne
 fiyatlamak. Sıradaki adayın grafa değil **pilotun nişan almasına** dokunması gerekiyor.
+
+### Ve nişan aldığı yere bakınca oldu: "oradan değil"
+
+Grafın iki kapısı da kapanınca kalan yer pilottu, ve mekanizmadan önce ölçüm geldi: **araba ile
+nişan aldığı nokta arasında ne sıklıkla bir şey duruyor?** Alan hiç değiştirilmeden, her onuncu
+adımda soruldu (`NFS_AIMWALL=<metre>`, indeks yalnız istenince kuruluyor):
+
+| rota | 90 sn boyunca | **ilk 20 sn** | alanın gittiği mesafe |
+|---|---:|---:|---:|
+| 4081 | %53,6 | **%0,0** | 233 m |
+| 4002 | %42,4 | **%71,7** | 176 m |
+| 4001 | %13,3 | **%0,0** | 965 m |
+| 4021 | %6,4 | %0,0 | 596 m |
+| 4102 | %3,1 | %0,0 | 426 m |
+| 4121 | %2,1 | %0,0 | 667 m |
+| 4061 / 4041 | %0,0 | %0,0 | 859 / 265 m |
+
+İki zaman penceresi tek başına bir teşhis: 4081'in %53,6'sı ve 4001'in %13,3'ü **sonuç**, sebep
+değil — ilk yirmi saniyede sıfırlar, yani bunlar zaten kaybolmuş arabaların binaların içinden
+nişan alması. **Yalnız 4002 ızgaradan itibaren duvarın arkasına nişan alıyor** (%71,7), ki
+"dosyanın çizgisi ayırıcıların üstünden geçiyor" teşhisinin sayıya dönmüş hâli.
+
+Kural, öndeki arabayı geçmenin aynı şekli — nişanı yana kaydır — ama varsayamadığı bir şey var:
+**hangi yana.** Refüjün iki yanında da yol var, dosyanın oradan bağ kurmasının sebebi zaten bu. O
+yüzden yön aranıyor: kaydırma adımı kadar sağa ve sola bakılıyor, açılmazsa dört katına kadar
+genişletiliyor, ilk açılan alınıyor. Karar on tikte bir yenileniyor (her karede verilse direksiyon
+titrer, oysa dolanılan şey yüz metrelik beton), ve kaydırma dışında hiçbir şey değişmiyor — beton
+bitince araba çizgiye kendiliğinden dönüyor.
+
+| kaydırma | giden | düşen | mesafe | **yol noktası** | kavşak | ayrı düğüm |
+|---|---:|---:|---:|---:|---:|---:|
+| **0 (kapalı)** | 63/64 | 0 | 4.187 m | **605** | 1245 | 926 |
+| 2 | 63/64 | 1 | 4.163 | 615 | 1235 | 931 |
+| 4 | 63/64 | 1 | 4.217 | 630 | 1263 | 948 |
+| **5** | **63/64** | **0** | **4.251** | **653** | **1358** | **980** |
+| 6 | 63/64 | 0 | 4.272 | **663** | 1325 | 968 |
+| 7 | 63/64 | 0 | 3.990 | 584 | 1267 | 893 |
+| 8 | 63/64 | 0 | 4.315 | 642 | 1276 | 974 |
+| 10 | 63/64 | 1 | 4.787 | 636 | 1265 | 962 |
+
+**Sekiz ayardan yedisi kapalıyı geçiyor**, yani kazanç kuralın kendisi, bir sayının şansı değil.
+
+Seçim tepeden yapılmadı: 6 en çok kapsıyor (663) ama komşusu 7 bir çukur (584, kapalının altında),
+ve çukurun yanındaki tepe "ayarlanmış sayı"nın tarifidir. **5** kapsamada ondan %1,5 geride, ama
+tüm süpürmenin en çok kavşağını (1.358) **en çok ayrı düğüm** (980) üzerinden alıyor — daire çizen
+arabayla gerçek ilerlemeyi ayıran sütun o — kimseyi düşürmüyor, ve iki yanı da sağlam (4'te 630,
+6'da 663). Çukur da açıklandı: 7'de 4001 (141 → 117) ve 4002 (27 → 22) aynı anda kötüleşiyor,
+ikisi de 8'de toparlıyor.
+
+Rota kırılımı kuralın nereye dokunduğunu söylüyor — ve sürpriz:
+
+| rota | kapalı | 5 | 6 | 8 |
+|---|---:|---:|---:|---:|
+| 4001 | 141 | 154 | **179** | 158 |
+| 4021 | 68 | **92** | 83 | 89 |
+| 4002 | 27 | **38** | 35 | 24 |
+| 4041 / 4061 / 4081 / 4102 | değişmiyor | | | |
+
+**En büyük kazanç 4002'de değil, 4001'de.** Yani ölçümün "sebep değil sonuç" dediği şey — kaybolmuş
+arabanın binaların içinden nişan alması — müdahale edilince kazanca dönüyor: kural kaybolan arabayı
+geri getiriyor. 4002'nin ızgaradan gelen kendi sorunu da düzeliyor ama daha az.
+
+Ve grafın iki kapısıyla farkı burada: bu kural **hiçbir şeyi silmiyor ve hiçbir şeyi
+pahalandırmıyor**, yalnızca aynı hedefe başka bir çizgiden gidiyor.
+
+Yukarıdaki iki zaman penceresi tablosu kural **kapalıyken** ölçüldü. Kural artık varsayılan açık,
+yani `NFS_AIMWALL` bugün koşulursa ölçtüğü şey aynı sayı değil, kaydırmadan *sonra* geriye kalan —
+"kural iş görmesine rağmen hâlâ duvara nişan alıyor mu". İkisi de faydalı, ama karşılaştırırken
+`NFS_AIMCLEAR=0` ile koşmak gerekiyor.
 ---
 
 ## 1. Ana fikir
