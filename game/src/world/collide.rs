@@ -287,6 +287,46 @@ impl Ground {
         })
     }
 
+    /// Which way is **off** the city, from a point standing on it — the barrier the files do not
+    /// carry, derived from the ground itself.
+    ///
+    /// A chunk census finds no `0x0003410B` anywhere in this install, so the fence that keeps a car
+    /// on Bayview's roads has to come from somewhere. The route network is one candidate and it was
+    /// measured: a corridor at its own half-width would have caught eight of the ten cars that left
+    /// the world, and **two were still on the course when the ground ran out** — on `Paths4041` the
+    /// race line runs along the lip of the void. The ground knows about that lip and the route does
+    /// not, so the ground is asked.
+    ///
+    /// Probes `reach` metres out in a ring of directions and returns the normalised sum of the ones
+    /// with **no drivable surface near the asker's own height**, or `None` where the ground holds
+    /// all the way round. The result points away from the city, so a caller that wants to stop a car
+    /// leaving removes the velocity along it — which leaves the car free to slide along the edge
+    /// rather than being nailed to it.
+    ///
+    /// **At the asker's height, which is why this is not a map.** Bayview stacks: a raster of "is
+    /// there ground at this XZ" cannot tell the edge of a bridge deck from a road passing under it,
+    /// and would fence the road while letting cars off the bridge. Every question here goes through
+    /// [`Self::gap_along`], which follows a height.
+    #[must_use]
+    pub fn edge_at(&self, at: Vec3, reach: f32, tolerance: f32) -> Option<Vec3> {
+        /// Directions probed. Twelve is a 30° resolution: fine enough that the normal off a straight
+        /// edge is within half a step of square to it, coarse enough to be one ring of cheap queries.
+        const RAYS: usize = 12;
+        // A quarter of the reach, because [`Self::gap_along`] does not sample its endpoint: at half
+        // the reach a ray tests one point, its own midpoint, and a lip at the far end of the probe
+        // is missed entirely. Three samples along each ray is the cheapest spacing that reaches out.
+        let step = reach * 0.25;
+        let mut out = Vec3::ZERO;
+        for k in 0..RAYS {
+            let a = std::f32::consts::TAU * k as f32 / RAYS as f32;
+            let dir = Vec3::new(a.cos(), 0.0, a.sin());
+            if self.gap_along(at, at + dir * reach, tolerance, step).is_some() {
+                out += dir;
+            }
+        }
+        (out.length_squared() > 1e-6).then(|| out.normalize())
+    }
+
     /// Cells with drivable ground in them.
     #[must_use]
     pub fn cells(&self) -> usize {
@@ -565,6 +605,39 @@ mod tests {
                 .is_some(),
             "a surface far below the line does not hold it up"
         );
+    }
+
+    /// The derived barrier points away from the city, says nothing in the middle of a road, and
+    /// answers about the deck the asker is on rather than the one under it.
+    #[test]
+    fn the_edge_points_off_the_city() {
+        // `remap` is `(-y, z, -x)`: the file's x becomes Gizmo's **z** and its y becomes Gizmo's x.
+        // So this is a deck spanning Gizmo x ∈ -40..0, z ∈ -to..0, at height `z_off`.
+        let deck = |to: f32, z_off: f32| {
+            mesh(
+                vec![[0.0, 0.0, z_off], [to, 0.0, z_off], [0.0, 40.0, z_off], [to, 40.0, z_off]],
+                vec![0, 1, 2, 1, 3, 2],
+            )
+        };
+        // The lower one reaches z = -40, the upper one stops at z = -20 — so over z ∈ -20..0 there
+        // are two surfaces nine metres apart, and the upper one has a lip the lower one does not.
+        let g = Ground::of(&collision_cells(&[deck(40.0, 0.0), deck(20.0, 9.0)]));
+
+        // Well inside the lower deck, nothing to report.
+        assert_eq!(g.edge_at(Vec3::new(-20.0, 0.0, -30.0), 6.0, 4.0), None, "mid-road is not an edge");
+
+        // Near the lower deck's edge at x = 0, the normal points out of the city — +x.
+        let n = g.edge_at(Vec3::new(-3.0, 0.0, -30.0), 6.0, 4.0).expect("an edge near the lip");
+        assert!(n.x > 0.7, "expected a normal pointing off the +x edge, got {n:?}");
+        assert!(n.y.abs() < 1e-6, "the barrier is a plan-view direction");
+
+        // **The stacked case, and the reason this is not a map.** Standing on the upper deck three
+        // metres from its lip at z = -20, the edge is found and points off it — even though the
+        // lower deck fills that XZ and a flat "is there ground here" raster would call it inside.
+        let n = g.edge_at(Vec3::new(-20.0, 9.0, -17.0), 6.0, 4.0).expect("the upper deck has a lip");
+        assert!(n.z < -0.7, "expected the upper deck's own edge, got {n:?}");
+        // And on the lower deck directly beneath it, there is no edge at all: the road runs on.
+        assert_eq!(g.edge_at(Vec3::new(-20.0, 0.0, -17.0), 6.0, 4.0), None, "the road under it runs on");
     }
 
     /// An object with no geometry, or an index past its own buffer, is skipped rather than

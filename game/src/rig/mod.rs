@@ -31,6 +31,8 @@ mod chase;
 mod drive;
 mod pilot;
 
+use crate::world::Ground;
+
 pub use chase::ChaseCamera;
 pub use drive::{Controls, Driver, FIXED_DT};
 pub use pilot::Pilot;
@@ -142,6 +144,33 @@ pub const GROUND_SETTLE: f32 = 0.25;
 /// world. Depth below where the car itself last stood is local, needs no geometry, and means the
 /// same thing on every route.
 pub const FALL_DEPTH: f32 = 60.0;
+
+/// How far ahead of the chassis centre the fence asks its question, in metres.
+///
+/// **Swept, over eight routes, against a field that had ten cars leave the world with no fence at
+/// all** (3,652 m covered, 848 junctions):
+///
+/// | lead | off the world | distance | junctions |
+/// |---|---:|---:|---:|
+/// | 0 m | 5 | 3,934 m | 865 |
+/// | 1.0 | 3 | 3,946 | 851 |
+/// | 2.2 | 2 | 3,746 | 813 |
+/// | 2.6 | 2 | 4,019 | 833 |
+/// | **3.0** | **1** | **3,881** | **846** |
+/// | 3.4 | 1 | 3,623 | 822 |
+/// | 3.8 | 2 | 3,252 | 783 |
+/// | 4.5 | 0 | 3,482 | 771 |
+///
+/// Falls fall away monotonically with the lead and the distance is flat until about 3.4 m, after
+/// which the fence starts refusing legitimate road: at 4.5 m no car leaves the world and the field
+/// covers 170 m *less* than with no fence at all. Three metres is the middle of that plateau — one
+/// car lost instead of ten, more ground covered than unfenced, and junctions untouched (846 v 848).
+///
+/// **The principled value was tried and lost.** Probing from the front axle — the contact point that
+/// actually loses the ground first, taken from the car's own wheel mounts — is the number with a
+/// reason behind it, and it measures worse on every column than the swept one: 3 cars lost, 3,686 m,
+/// 819 junctions. Written down so it is not re-derived as an improvement.
+const FENCE_LEAD: f32 = 3.0;
 
 /// What the car's own suspension says about its footing — see [`CarRig::watch_ground`].
 #[derive(Clone, Copy, Debug)]
@@ -537,6 +566,82 @@ impl CarRig {
             airborne_for: self.airborne_for,
             below: self.last_safe.position.y - pose.position.y,
         }
+    }
+
+    /// Hold the car on the city, at the edge the city's own geometry has — the barrier this
+    /// install's files do not carry. Returns whether it pushed back this step.
+    ///
+    /// `0x0003410B` is in no file here (`ROADMAP.md` §M4), so NFSU2's own fences are simply absent
+    /// and a car that reaches the lip of the world goes over it. Two sources for a replacement were
+    /// available and the choice was measured, not assumed: a corridor around the race line would
+    /// have caught eight of the ten cars that left the world, and **two were still on the course**
+    /// when the ground stopped — on `Paths4041` the race line runs along the lip. The route does not
+    /// know where the city ends. [`Ground::edge_at`] does.
+    ///
+    /// **This is a wall, not a driving aid.** It removes the component of velocity that points off
+    /// the city and leaves everything else, so a car meeting the edge slides along it and keeps its
+    /// speed down the road — the behaviour a barrier has — rather than being stopped dead or
+    /// steered by an invisible hand. It applies to the player exactly as it applies to a rival,
+    /// which is the whole point of putting it here and not in [`Pilot`](super::Pilot).
+    ///
+    /// Only while the car is on its wheels. A car already in the air is
+    /// [`Self::keep_in_world`]'s problem, and a jump that clears a gap is not a barrier violation.
+    pub fn hold_at_edge(&mut self, world: &mut World, pose: Pose, ground: &Ground) -> bool {
+        /// How far ahead to look, as a multiple of speed in m/s, and the bounds on it.
+        ///
+        /// Half a second of travel: long enough to have somewhere to put the car at 100 km/h, short
+        /// enough that a fence never reaches across a road it is not on the edge of.
+        const LOOK_PER_SPEED: f32 = 0.5;
+        const LOOK_MIN: f32 = 4.0;
+        const LOOK_MAX: f32 = 16.0;
+        /// The height window the probes allow, the same one the network's wall filter uses.
+        const SLACK: f32 = 8.0;
+
+        let (down, total) = self.wheels_down(world);
+        if total == 0 || down == 0 {
+            return false;
+        }
+
+        let v = {
+            let velocities = world.borrow::<Velocity>();
+            velocities.get(self.chassis).map_or(Vec3::ZERO, |x| x.linear)
+        };
+        let flat = Vec3::new(v.x, 0.0, v.z);
+        let speed = flat.length();
+        if speed < 0.5 {
+            return false;
+        }
+        let dir = flat / speed;
+
+        // One probe in the common case. The ring of twelve behind [`Ground::edge_at`] only runs
+        // once this one has already found the ground stopping in front of the car, which is rare
+        // enough that the cost of the fence is a single query per car per step almost always.
+        // **From the nose, not the middle.** A car is 4.4 m long and the pose is its centre, so a
+        // fence measured from the centre engages when the front axle is already over the lip — and
+        // by then the car goes over under gravity, which is not a horizontal velocity and not
+        // something this can take back. Measured with the probe at the centre: five cars still left
+        // the world, at 0, 1, 9, 13 and 27 km/h — pressed against the fence and tipping over it
+        // rather than driving through it.
+        let lead: f32 =
+            std::env::var("NFS_FENCE_LEAD").ok().and_then(|v| v.parse().ok()).unwrap_or(FENCE_LEAD);
+        let from = pose.position + dir * lead;
+        let look = (speed * LOOK_PER_SPEED).clamp(LOOK_MIN, LOOK_MAX);
+        if ground.gap_along(from, from + dir * look, SLACK, 2.0).is_none() {
+            return false;
+        }
+        let Some(n) = ground.edge_at(from, look, SLACK) else { return false };
+        let outward = flat.dot(n);
+        if outward <= 0.0 {
+            // Already leaving the edge behind. A barrier that also stopped a car driving *away*
+            // from it would be a trap rather than a fence.
+            return false;
+        }
+
+        let mut velocities = unsafe { world.borrow_mut_unchecked::<Velocity>() };
+        if let Some(mut x) = velocities.get_mut(self.chassis) {
+            x.linear -= n * outward;
+        }
+        true
     }
 
     /// Put the car back on the last ground it stood on, if it has left the world. Returns whether

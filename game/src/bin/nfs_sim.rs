@@ -385,6 +385,8 @@ async fn run() {
     let trace: f32 = std::env::var("NFS_TRACE").ok().and_then(|v| v.parse().ok()).unwrap_or(0.0);
     let mut next_trace = trace;
     let watch: Option<usize> = std::env::var("NFS_WATCH").ok().and_then(|v| v.parse().ok());
+    let fence = std::env::var("NFS_FENCE").ok().is_none_or(|v| v != "0");
+    let mut held = 0usize;
     let mut falls: Vec<Fall> = vec![Fall::default(); field.len()];
     let mut was: Vec<Option<Vec3>> = vec![None; field.len()];
     let steps = (seconds / FIXED_DT) as usize;
@@ -470,6 +472,15 @@ async fn run() {
             }
         }
         gizmo::physics::vehicle_controller_system(&world, FIXED_DT);
+        // The fence, between the forces and the integration, so the step that would have carried a
+        // car over the lip is the step that does not. NFS_FENCE=0 turns it off, which is the only
+        // way to say what it is worth.
+        if fence {
+            for (rig, _) in &mut field {
+                let Some(p) = rig.pose(&world) else { continue };
+                held += usize::from(rig.hold_at_edge(&mut world, p, &ground));
+            }
+        }
         gizmo::physics::physics_step_system(&world, FIXED_DT);
 
         // Where the world last held each car up — the same question `keep_in_world` asks in the
@@ -631,7 +642,7 @@ async fn run() {
         }
     }
     println!(
-        "SUMMARY away={away} junctions={junctions} waypoint={best_waypoint} furthest={furthest:.0}          fallen={fallen} edge={edge} through={through} nowhere={nowhere} cars={} seconds={seconds:.0}",
+        "SUMMARY held={held} away={away} junctions={junctions} waypoint={best_waypoint} furthest={furthest:.0}          fallen={fallen} edge={edge} through={through} nowhere={nowhere} cars={} seconds={seconds:.0}",
         field.len()
     );
 }

@@ -758,6 +758,57 @@ kendi çözümünü istiyor.
 Bu arada `COURSE_HALF_WIDTH` artık `nfs_cruise`'un özel sabiti değil, kütüphanede: şehir hakkında
 ölçülmüş bir sayı, ve artık iki çağıranın aynı fikirde olması gerekiyor.
 
+### Çit — şehrin kendi kenarından türetildi
+
+Bariyer chunk'ı hiçbir dosyada yok, yani çit bir yerden türetilecek ve iki aday vardı. Ölçüm rotayı
+eledi: koridor onun sekizini yakalardı, **ikisi hâlâ parkurun içindeyken** düşüyordu. Rota şehrin
+nerede bittiğini bilmiyor. Zemin biliyor.
+
+`Ground::edge_at` on iki yöne bir halka sondaj atıyor; **arabanın kendi yüksekliğinde** basılabilir
+zemin bulamadığı yönlerin toplamı, dışarıyı gösteren normal. Yükseklikte sorulması şart, çünkü
+Bayview katmanlı: XZ'ye çıkarılmış düz bir "burada zemin var mı" haritası köprünün kenarını altından
+geçen yoldan ayıramaz — yolu çitler ve köprüden düşmeye izin verir. Testin son iki iddiası tam bu.
+
+`CarRig::hold_at_edge` bunu duvara çeviriyor: hızın şehirden **dışarı** bakan bileşenini siliyor,
+gerisine dokunmuyor. Kenara değen araba boyunca kayıyor ve yoluna devam ediyor — bir bariyerin
+davranışı, çarpıp durmak değil. Direksiyona hiç karışmıyor; o yüzden oyuncuya da rakibe de aynı
+şekilde uygulanabiliyor, ve `nfs_cruise`'da ikisine de uygulanıyor. Yeri de kararın parçası:
+kuvvetlerle integrasyonun **arasında** (`Driver::step_physics_with`), yani arabayı dudağın üstünden
+taşıyacak olan adım, taşımayan adım oluyor.
+
+Tek ayarı sondajın şasi merkezinden ne kadar önden atıldığı, ve süpürüldü:
+
+| pay | düşen | mesafe | kavşak |
+|---|---:|---:|---:|
+| çit yok | 10 | 3.652 m | 848 |
+| 0 m | 5 | 3.934 | 865 |
+| 1,0 | 3 | 3.946 | 851 |
+| 2,2 | 2 | 3.746 | 813 |
+| 2,6 | 2 | 4.019 | 833 |
+| **3,0** | **1** | **3.881** | **846** |
+| 3,4 | 1 | 3.623 | 822 |
+| 3,8 | 2 | 3.252 | 783 |
+| 4,5 | 0 | 3.482 | 771 |
+
+Düşüş payla tekdüze azalıyor, mesafe 3,4'e kadar düz duruyor, ondan sonra çit meşru yolu reddetmeye
+başlıyor: 4,5'te kimse düşmüyor ama alan çitsiz hâlden **170 m az** yol alıyor. Üç metre bu platonun
+ortası — ondan biri yerine bir araba kaybediliyor, çitsizden fazla yol alınıyor, kavşak sayısı
+kıpırdamıyor (846'ya karşı 848).
+
+**Ve ilkeli değer denendi, kaybetti.** Sondajı ön akstan atmak — desteği gerçekten ilk kaybeden temas
+noktası, arabanın kendi tekerlek bağlantılarından okunuyor — gerekçesi olan sayı, ve her sütunda
+daha kötü: 3 düşen, 3.686 m, 819 kavşak. Bir dahakine "iyileştirme" diye yeniden türetilmesin diye
+yazıldı.
+
+Oturumun toplamı:
+
+| | oturum başı | şimdi |
+|---|---:|---:|
+| giden araba | 52/64 | **62/64** |
+| haritadan düşen | 10 | **1** |
+| toplam mesafe | 2.594 m | **3.881 m** |
+| kavşak | 718 | **846** |
+
 **Yapışan düğüm için "geçtiyse bırak" ise çürüdü — bin kat.** Nişan düzeltmesinin simetriği gibi
 duruyor (düğüm arabanın arkasında kaldıysa ilerlet) ve sekiz parkurda kavşağı 848 → **854.536**
 yapıyor, mesafeyi 3.652 → 2.699 m'ye düşürüyor. Bu, kodda zaten yazılı olan "yeterince yakınsa

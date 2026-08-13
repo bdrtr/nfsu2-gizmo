@@ -99,10 +99,27 @@ impl Driver {
     /// Run the vehicle controller and the rigid-body solver at [`FIXED_DT`] for as much of this
     /// frame's time as has accumulated.
     pub fn step_physics(&mut self, world: &mut World, dt: f32) {
+        self.step_physics_with(world, dt, |_| {});
+    }
+
+    /// The same, with a hook **between the forces and the integration**.
+    ///
+    /// That gap is the only place a barrier can stand. `CarRig::hold_at_edge` takes the velocity the
+    /// controller has just produced and removes the part of it that points off the city, so the step
+    /// which would have carried the car over the lip is the step that does not — and it has to
+    /// happen once per fixed step rather than once per frame, or a slow frame steps the car over the
+    /// edge in instalments the fence never sees.
+    pub fn step_physics_with(
+        &mut self,
+        world: &mut World,
+        dt: f32,
+        mut between: impl FnMut(&mut World),
+    ) {
         self.accum += dt.min(MAX_FRAME);
         let mut steps = 0;
         while self.accum >= FIXED_DT && steps < MAX_STEPS {
             gizmo::physics::vehicle_controller_system(world, FIXED_DT);
+            between(world);
             gizmo::physics::physics_step_system(world, FIXED_DT);
             self.accum -= FIXED_DT;
             steps += 1;

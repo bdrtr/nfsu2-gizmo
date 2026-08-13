@@ -105,6 +105,8 @@ struct CruiseState {
     stats: CityStats,
     /// Which cells the city covers — the map's edge, since the files carry no barriers.
     bounds: city::Bounds,
+    /// The drivable surface, kept past setup because the barrier is derived from it every step.
+    ground: city::Ground,
     /// Seconds spent outside those cells, unbroken. Reset the moment the car is back in.
     out_for: f32,
     /// Whether where the car is *pointed* leaves the map — the warning that arrives in time.
@@ -707,6 +709,7 @@ fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> CruiseState
     println!("cruising at {:?} — {} meshes drawn", rig.start.position, stats.meshes);
     println!("bounds: {} cells with ground", bounds.cells());
     CruiseState {
+        ground,
         rig,
         driver: Driver::new(),
         camera,
@@ -771,7 +774,20 @@ fn update(world: &mut World, state: &mut CruiseState, dt: f32, input: &Input) {
         state.driver.reset();
     }
 
-    state.driver.step_physics(world, dt);
+    // The barrier the files do not carry, derived from the ground the city does have. Applied to
+    // the player and to every rival through the same call: a fence one of them can drive through is
+    // not a fence, it is a handicap.
+    let CruiseState { rig, driver, field, ground, .. } = state;
+    driver.step_physics_with(world, dt, |w| {
+        if let Some(p) = rig.pose(w) {
+            rig.hold_at_edge(w, p, ground);
+        }
+        for (r, _) in field.iter_mut() {
+            if let Some(p) = r.pose(w) {
+                r.hold_at_edge(w, p, ground);
+            }
+        }
+    });
 
     let Some(pose) = state.rig.pose(world) else { return };
 
