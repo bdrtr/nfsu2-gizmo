@@ -84,6 +84,22 @@ const STALL_SPEED: f32 = 0.7;
 const STALL_FOR: f32 = 1.5;
 /// How long a car is left alone at the start before it can be called stuck.
 const SETTLE: f32 = 3.0;
+/// How near the waypoint being held counts as having reached it, in metres.
+///
+/// Swept over eight routes and **all eight settings beat having no second arm at all** on waypoints
+/// driven past: 707, 703, 780, 799, 788, 678, 697 at 8, 12, 15, 18, 20, 25 and 40 m against **653**
+/// with the arm off. 15-20 is a plateau (780 / 799 / 788) bounded by 703 below and 678 above, and
+/// eighteen is its middle as well as the best of it — most course covered, furthest driven, most
+/// distinct nodes, and the cars that stop before t=30 s down from 30 of 64 to 18.
+///
+/// **The ceiling has a reason, which is why the plateau ends where it does.** Waypoints are 40 m
+/// apart — the step the course is densified to, see [`crate::world::densify`] — so at *half* of that the two arms
+/// meet: on an evenly spaced course, being within 20 m of the one you hold already means the next
+/// one is further, which is the first arm's own test. Past half the rule stops saying "reached" and
+/// starts saying "skip", and the numbers follow — 678 at 25 m, and 40 m drops four cars off the
+/// world. Eighteen is just inside that. **It is tied to the spacing, not absolute**: change
+/// `NFS_WPSTEP` and this wants moving with it.
+const REACHED: f32 = 18.0;
 /// How near a waypoint counts as having driven past it, for [`Pilot::covered`].
 ///
 /// The waypoints are 40 m apart after `route::densify`, so this is one step: near enough that a car
@@ -438,9 +454,27 @@ impl Pilot {
             // a lap, and the early waypoints are behind too. Measured: 92 laps and 5,999 waypoints
             // driven for one car in ninety seconds, and two cars "FINISHED". Whatever the answer to
             // a car that has lost the course is, advancing is not it. See [`Self::lost`].
+            // **The second way to be done with a waypoint: standing on it.**
+            //
+            // `Paths4081` needs this and nothing here provides it. Its grid is 8 m from waypoint
+            // #124, so every pilot starts holding #125 with the car already on top of it, and the
+            // first arm can never fire: the held one is at arm's length and the next — #0, the ring
+            // wrapping — is 33 m off, so "is the next nearer" is permanently no. Measured, all
+            // eight cars gain **nothing** in ninety seconds while taking seven junctions each,
+            // steering at a point that ends up 128 m behind them, and finally reversing. Where the
+            // grid is far from a waypoint this never comes up: `Paths4061` starts 42 m out and
+            // walks 46 → 47 → 50 → 51 → 53 → 55 → 56 in the same time.
+            //
+            // **This is not the refuted resync above**, and the difference is the whole of it: that
+            // one re-picks the nearest waypoint and can put the goal anywhere, including behind.
+            // This only ever steps forward by one, only when the goal being left has been reached,
+            // and at most three times a tick — so it cannot walk an arc of the ring the way
+            // "advance while the held one is behind" did.
+            let reached: f32 =
+                std::env::var("NFS_REACHED").ok().and_then(|v| v.parse().ok()).unwrap_or(REACHED);
             for _ in 0..3 {
                 let next = (self.goal + 1) % course.len();
-                if d(next) >= d(self.goal) {
+                if d(next) >= d(self.goal) && d(self.goal) > reached {
                     break;
                 }
                 if next == self.line {

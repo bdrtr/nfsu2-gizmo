@@ -1174,6 +1174,61 @@ Yukarıdaki iki zaman penceresi tablosu kural **kapalıyken** ölçüldü. Kural
 yani `NFS_AIMWALL` bugün koşulursa ölçtüğü şey aynı sayı değil, kaydırmadan *sonra* geriye kalan —
 "kural iş görmesine rağmen hâlâ duvara nişan alıyor mu". İkisi de faydalı, ama karşılaştırırken
 `NFS_AIMCLEAR=0` ile koşmak gerekiyor.
+
+### Yapışan şey düğüm değil yol noktasıymış — ve ızgaranın nerede kurulduğuna bağlı
+
+"Düğüm yapışıyor" diye üç girdidir açık duran madde yanlış adlandırılmıştı. `NFS_WATCH` ile 4081'in
+1 numaralı arabası izlendi: düğüm gayet ilerliyor (45 → 46 → 47 → 54 → 49 → 52 → 51), araba 66
+km/h'ye çıkıyor, 7 kavşak alıyor — ama satırların hepsinde aynı sayı duruyor, **`waypoint 125`**,
+45 saniye boyunca. t=15'te tuttuğu düğüm 3,8 m ötedeyken nişanı 41,8 m **geride**; t=21'de 128 m
+geride; t=30'dan sonra hız eksiye dönüyor, yani araba geri geri gidiyor. Çalışan bir rotada aynı
+sütun ilerliyor: 4061'de 46 → 47 → 50 → 51 → 53 → 55 → 56.
+
+Sebep kurulum satırında yazılıymış:
+
+```
+4061:  waypoint 0 is 844 m from the grid · nearest is Some("#45 at 42 m")
+4081:  waypoint 0 is  33 m from the grid · nearest is Some("#124 at 8 m")
+```
+
+4081'in ızgarası **126 yol noktalı parkurun sonuncusunun 8 m yanında** kuruluyor, yani sekiz pilot
+da hedefini arabanın dibinde tutarak doğuyor. İlerleme kuralının tek kolu vardı — "sıradaki,
+tutulandan yakınsa ilerlet" — ve bu böyle bir durumda asla evet olamaz: tutulan sıfırda, sıradaki
+(halka başa sarıyor, #0) 33 m ötede. Kilit kalıcı, `toward` arabanın kendi konumu oluyor, graf
+yürüyüşünün yön tercihi kalmıyor.
+
+İkinci kol kondu: **tutulan noktaya varıldıysa da ilerlet.** Kayıtlı iki çürütmeyle karışmasın diye
+farkı yazılı — resync hedefi *yeniden seçiyordu* (geriye bile atabiliyordu, ve her aralıkta
+kaybetmişti), "arkada kaldıysa ilerlet" ise halkanın bütün yayını yürüyüp 92 tur saymıştı; bu ise
+yalnız bir adım ileri, yalnız bırakılan noktaya varılmışken, tikte en fazla üç kez.
+
+| reached | giden | düşen | mesafe | **yol noktası** | kavşak | ayrı düğüm | t<30 duran |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| **0 (kapalı)** | 63/64 | 0 | 4.251 m | 653 | 1358 | 980 | 30 |
+| 8 | 63/64 | 0 | 4.865 | 707 | 1453 | 1102 | 28 |
+| 12 | 63/64 | 1 | 4.961 | 703 | 1773 | 1068 | 26 |
+| 15 | 63/64 | 1 | 5.145 | 780 | 1732 | 1172 | 20 |
+| **18** | 63/64 | 2 | **5.394** | **799** | 1566 | **1247** | **18** |
+| 20 | 63/64 | 3 | 5.389 | 788 | 1504 | 1228 | 11 |
+| 25 | 63/64 | 1 | 4.800 | 678 | 1284 | 1044 | 16 |
+| 40 | 63/64 | 4 | 4.660 | 697 | 1503 | 1049 | 16 |
+
+**Sekiz ayarın sekizi de kapalıyı geçiyor.** 15-20 plato, altında 12 (703) ve üstünde 25 (678); 18
+hem ortası hem en iyisi. Ve tavanın sebebi var: yol noktaları 40 m aralıklı, yani **yarıda (20 m)
+iki kol birbirine değiyor** — düzgün aralıklı bir parkurda tutulana 20 m'den yakınsan sıradaki
+zaten daha uzaktır, ki o birinci kolun kendi testi. Yarının ötesinde kural "vardım" demeyi bırakıp
+"atla" demeye başlıyor, sayılar da onu söylüyor (25'te 678, 40'ta dört araba haritadan düşüyor).
+Yani 18 mutlak bir sayı değil, **adıma bağlı**: `NFS_WPSTEP` değişirse bu da değişmeli.
+
+Tur sayısı sekiz ayarın hepsinde 64 arabada da sıfır — "92 tur" şişmesi geri gelmedi.
+
+Rota kırılımı, dürüstlük payıyla: beş rota kazanıyor (**4121 67 → 152**, **4081 50 → 100**,
+**4041 44 → 79**, 4021 +6, 4061 +6), üçü kaybediyor (**4001 154 → 132**, 4102 105 → 93, 4002 −2).
+4081'in eşiği de öğrenildi: 8 ve 15'te hiç kıpırdamıyor, 18'de açılıyor (233 → 583 m) — yani
+teşhis doğruydu ama eşiği rotanın kendi geometrisi belirliyor.
+
+Bir de yolda görüldü: kod `Self::lost`'a yönlendiriyor ama **öyle bir metot yok** — "kursu
+kaybetmiş arabanın cevabı" yazılmamış, yönlendirme boşa gidiyor.
 ---
 
 ## 1. Ana fikir
