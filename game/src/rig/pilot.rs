@@ -139,6 +139,13 @@ pub struct Pilot {
     /// that: measured, three of eight never leave the grid, and which three changes with the
     /// spacing rather than staying with a slot.
     hold: f32,
+    /// The point the steering is actually aimed at, kept only so a harness can see it.
+    ///
+    /// Where a car is going and which node it holds are different facts, and reading one for the
+    /// other cost a session: a trace showing the held node stuck and the car curving away from it
+    /// looks like a car ignoring its pilot, and is not — the aim walks *past* the held node, so the
+    /// two are supposed to disagree.
+    aim: Option<Vec3>,
 }
 
 impl Pilot {
@@ -213,6 +220,12 @@ impl Pilot {
     #[must_use]
     pub fn node(&self) -> Option<u32> {
         self.at
+    }
+
+    /// The point the steering is aimed at, once it has driven a frame.
+    #[must_use]
+    pub fn aim(&self) -> Option<Vec3> {
+        self.aim
     }
 
     /// Which waypoint it is heading for.
@@ -316,12 +329,34 @@ impl Pilot {
 
         // Aim: walk the network forward from the held node until far enough away, so the aim point
         // follows the road round a corner instead of cutting across it.
+        //
+        // **An aim point behind the car is not an aim point.** `walked` is seeded with the distance
+        // from the car to its held node, so once a car has drifted further than one lookahead from
+        // that node the loop breaks on its first test and the aim is left *on the node* — which by
+        // then is behind. Pure pursuit at a point behind the car asks for full lock, and full lock
+        // held is a circle: traced on `Paths4041`, car 3 arrives within 1.2 m of node 163, cannot
+        // advance off it (no neighbour is nearer to the car than a node it is standing on), watches
+        // the aim collapse back onto it, and drives a smooth arc off the edge of the world at 39
+        // km/h. Nothing recovers it — the stall manoeuvre wants speed under 0.7 m/s and the car is
+        // doing eleven.
+        //
+        // So the walk keeps going while the aim is behind, not only while it is near.
+        //
+        // **It is a trade and the trade is worth it.** Over eight routes: cars that got away
+        // **52/64 → 62/64**, distance **2,594 → 3,652 m**, junctions **718 → 848**, cars off the
+        // world unchanged at 10. Three routes gain heavily (4081 2/8 away and 21 junctions → 8/8 and
+        // 159, 4061 4/8 and 237 m → 8/8 and 735, 4121 142 m → 724) and three lose (4002 172 → 51 m,
+        // 4102 452 → 333, 4021 388 → 348). Kept because it wins every headline measure at once and
+        // because the ratio of junctions to *distinct* nodes does not move (1.29 → 1.30), so the
+        // extra junctions are new road rather than a car going round in circles — on 4102, where the
+        // distance fell, the ratio goes 1.28 → 1.00 and every junction it takes is somewhere new.
         let look = (speed * LOOKAHEAD_PER_SPEED).clamp(LOOKAHEAD_MIN, LOOKAHEAD_MAX);
+        let f = flat(facing * Vec3::NEG_Z).normalize_or_zero();
         let (mut cur, mut prev) = (self.at?, self.from);
         let mut aim = net.node(cur)?.at;
         let mut walked = flat(aim - at).length();
         for _ in 0..8 {
-            if walked >= look {
+            if walked >= look && flat(aim - at).dot(f) > 0.0 {
                 break;
             }
             let Some(next) = net.step_avoiding(cur, prev, toward, &self.blocked) else { break };
@@ -379,8 +414,8 @@ impl Pilot {
             }
         }
 
+        self.aim = Some(aim);
         let to = flat(aim - at).normalize_or_zero();
-        let f = flat(facing * Vec3::NEG_Z).normalize_or_zero();
         let angle = f.cross(to).y.atan2(f.dot(to));
         // A lock that grows with speed was tried here and is **refuted across routes**. The
         // reasoning was good — a raycast vehicle turns by generating lateral force and there is

@@ -694,6 +694,45 @@ Yani şehrin yolları **kenarlarında zemin olmadan** geliyor, ve arabayı üst�
 chunk'ı dosyaların hiçbirinde yok (`0x0003410B`, §M4). Sürücü hatası değil, fizik hatası değil,
 bizim filtremiz değil — eksik veri. Kalan iş ikisinden biri: `keep_in_world`'ün oyunda zaten yaptığı
 şey, ya da §M4'ün ağdan türetilmiş bariyerleri.
+
+### Nişan noktası arkada kalıyordu — pilotun sessiz kilidi
+
+Düşenlerden birini izlerken çıktı, ve düşüşten büyük. `Paths4041`, car 3: t=9,5'te düğüm 163'ün
+**1,2 m** yanına varıyor, o andan sonra düğüm bir daha hiç ilerlemiyor, araba 39 km/h'de düzgün bir
+yay çizip t=14,3'te dünyadan çıkıyor. İki kuralın birbirine kilitlenmesi:
+
+- **Düğüm yapışıyor.** İlerletme kuralı "bir sonraki düğüm arabaya, tutulandan daha yakınsa ilerle".
+  Araba düğümün 1,2 m yanındayken hiçbir komşu bundan yakın olamaz — yani düğümün *üstünde* duran
+  araba oradan hiç çıkamıyor.
+- **Nişan noktası çöküyor.** İleri bakış yürüyüşü `walked`'ı arabanın tuttuğu düğüme olan
+  mesafesiyle başlatıyordu. Araba düğümden bir lookahead'den fazla uzaklaşınca döngü **ilk testte**
+  kırılıyor ve nişan noktası düğümün kendisinde kalıyor. O da artık arkada.
+
+Arkadaki bir noktaya pure pursuit tam kilit ister; tutulan tam kilit de dairedir. Ve hiçbir şey
+kurtarmıyor: takılma manevrası 0,7 m/s'nin altını bekliyor, araba on bir yapıyor.
+
+Düzeltme tek cümle: **arkadaki nokta nişan noktası değildir.** Yürüyüş, nokta öne geçene kadar da
+sürüyor.
+
+| | önce | sonra |
+|---|---:|---:|
+| giden araba | 52/64 | **62/64** |
+| toplam mesafe | 2.594 m | **3.652 m** |
+| kavşak | 718 | **848** |
+| haritadan düşen | 10 | 10 |
+
+Temiz bir kazanç değil, takas: 4081 **2/8 ve 21 kavşak → 8/8 ve 159**, 4061 4/8 ve 237 m → 8/8 ve
+735 m, 4121 142 → 724 m; karşılığında 4002 172 → 51 m, 4102 452 → 333, 4021 388 → 348. Üç ölçütte
+birden kazandığı için duruyor — ve daire çizerek kazanmıyor: kavşağın ayrı düğüme oranı 1,29 → 1,30
+sabit, mesafe kaybeden 4102'de ise 1,28 → **1,00**, yani orada aldığı her kavşak yeni bir yer.
+
+Düşen sayısı kıpırdamadı, ki beklenen: bu pilotun nereye baktığını düzeltiyor, şehrin yol kenarına
+zemin koymuyor.
+
+Bir de ölçütün kendisi kodda değil awk'taymış. "Giden araba" `ROADMAP`'te sürücüler var olduğundan
+beri alıntılanıyor ama hiçbir zaman kodda olmamış — her seferinde araba satırlarından elle
+sayılmış, ve iki ayrı girdinin rakamı da bugünkü çıktıdan üretilemiyor. Tanım artık `nfs_sim`'de:
+en az bir kavşak almış araba, `SUMMARY away=` diye yazılıyor.
 ---
 
 ## 1. Ana fikir

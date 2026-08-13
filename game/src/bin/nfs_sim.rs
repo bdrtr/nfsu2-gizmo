@@ -401,10 +401,17 @@ async fn run() {
                         // indistinguishable from a car against a wall.
                         let up = (q.rotation * Vec3::Y).y;
                         let under = ground.heights_at(q.position.x, q.position.z);
+                        // The aim point as well as the held node. They are *supposed* to differ —
+                        // the aim walks the network forward past the node until it is a lookahead
+                        // away — and a trace showing only the node makes a pilot driving correctly
+                        // past a sticky node look identical to one ignoring its own graph.
+                        let aim = pilot.aim().unwrap_or(Vec3::ZERO);
+                        let off = aim - q.position;
                         println!(
                             "    watch {k} t={now:>5.1}s ({:>7.1},{:>6.2},{:>7.1}) {:>5.1} km/h · \
                              up {up:>5.2} · under {under:?} · \
-                             node {:?} ({:>7.1},{:>6.2},{:>7.1}) {gap:>5.1} m · {} junctions",
+                             node {:?} ({:>7.1},{:>6.2},{:>7.1}) {gap:>5.1} m · \
+                             aim ({:>7.1},{:>7.1}) {:>5.1} m · {} junctions · waypoint {}",
                             q.position.x,
                             q.position.y,
                             q.position.z,
@@ -413,7 +420,11 @@ async fn run() {
                             nx,
                             ny,
                             nz,
-                            pilot.passed()
+                            aim.x,
+                            aim.z,
+                            Vec3::new(off.x, 0.0, off.z).length(),
+                            pilot.passed(),
+                            pilot.goal()
                         );
                     }
                 }
@@ -498,6 +509,7 @@ async fn run() {
     // grid: crude, and crude in the same way for every run, which is what a comparison needs.
     let mut furthest = 0.0f32;
     let mut fallen = 0usize;
+    let mut away = 0usize;
     let line = slots[0];
     // **A car that has driven off the world is not a car that got far.** On one route six of eight
     // ended at -219 to -310 km/h, which is not reverse — it is falling — and one was 2.4 km outside
@@ -515,6 +527,11 @@ async fn run() {
         let (at, speed) = p.map_or((Vec3::ZERO, 0.0), |p| (p.position, p.speed));
         junctions += pilot.passed();
         best_waypoint = best_waypoint.max(pilot.goal());
+        // "Cars that got away" has been quoted in `ROADMAP.md` since the drivers existed and has
+        // never been in the code — it was recomputed by eye or by awk from the per-car lines each
+        // time, which is why the figures in two entries cannot both be reproduced from either. One
+        // junction taken is the definition, and it is printed now so it cannot drift again.
+        away += usize::from(pilot.passed() > 0);
         let gone = falls[k].below > nfsu2::rig::FALL_DEPTH;
         if gone {
             fallen += 1;
@@ -587,7 +604,7 @@ async fn run() {
         }
     }
     println!(
-        "SUMMARY junctions={junctions} waypoint={best_waypoint} furthest={furthest:.0}          fallen={fallen} edge={edge} through={through} nowhere={nowhere} cars={} seconds={seconds:.0}",
+        "SUMMARY away={away} junctions={junctions} waypoint={best_waypoint} furthest={furthest:.0}          fallen={fallen} edge={edge} through={through} nowhere={nowhere} cars={} seconds={seconds:.0}",
         field.len()
     );
 }
