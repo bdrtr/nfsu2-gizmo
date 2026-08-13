@@ -265,6 +265,9 @@ impl Pilot {
     ) -> Option<Controls> {
         let here = self.at?;
         let flat = |v: Vec3| Vec3::new(v.x, 0.0, v.z);
+        // Which way the car is pointing. Wanted by the aim walk and by the steering itself, so it
+        // is worked out once here rather than at each.
+        let f = flat(facing * Vec3::NEG_Z).normalize_or_zero();
 
         // Still on the line: brakes on, wheels straight, and no advance along the network — a
         // pilot that walked the graph while its car stood still would arrive already lost.
@@ -314,6 +317,14 @@ impl Pilot {
         // seconds, against the one a second a car at 96 km/h over 29 m nodes can drive. "Advance
         // only when the node is behind" is the opposite: a node the car cannot reach is never
         // behind it, so the pilot stops at the first one it cannot get to and the car stops at 65 m.
+        // **"Or the car has driven past it" is refuted, and by a factor of a thousand.** The
+        // nearer-than rule visibly cannot let go of a node the car is standing on — no neighbour of
+        // a node 1.2 m away is nearer to the car than that — so adding "advance also when the held
+        // node is behind" looks like the missing half, and it is not: over eight routes junctions go
+        // from 848 to **854,536** and distance covered *falls*, 3,652 → 2,699 m. It is the same
+        // runaway the paragraph above records, arrived at from the other side. A node behind the car
+        // is usually replaced by another node behind the car, so the loop advances to its cap every
+        // frame for the rest of the race. Whatever fixes the sticky node, it is not this.
         let dist = |i: u32| net.node(i).map_or(f32::MAX, |j| flat(j.at - at).length());
         for _ in 0..3 {
             let Some(next) = net.step_avoiding(self.at?, self.from, toward, &self.blocked) else { break };
@@ -351,7 +362,6 @@ impl Pilot {
         // extra junctions are new road rather than a car going round in circles — on 4102, where the
         // distance fell, the ratio goes 1.28 → 1.00 and every junction it takes is somewhere new.
         let look = (speed * LOOKAHEAD_PER_SPEED).clamp(LOOKAHEAD_MIN, LOOKAHEAD_MAX);
-        let f = flat(facing * Vec3::NEG_Z).normalize_or_zero();
         let (mut cur, mut prev) = (self.at?, self.from);
         let mut aim = net.node(cur)?.at;
         let mut walked = flat(aim - at).length();

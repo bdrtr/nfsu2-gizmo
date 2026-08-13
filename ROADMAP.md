@@ -729,6 +729,13 @@ sabit, mesafe kaybeden 4102'de ise 1,28 → **1,00**, yani orada aldığı her k
 Düşen sayısı kıpırdamadı, ki beklenen: bu pilotun nereye baktığını düzeltiyor, şehrin yol kenarına
 zemin koymuyor.
 
+**Yapışan düğüm için "geçtiyse bırak" ise çürüdü — bin kat.** Nişan düzeltmesinin simetriği gibi
+duruyor (düğüm arabanın arkasında kaldıysa ilerlet) ve sekiz parkurda kavşağı 848 → **854.536**
+yapıyor, mesafeyi 3.652 → 2.699 m'ye düşürüyor. Bu, kodda zaten yazılı olan "yeterince yakınsa
+ilerlet" kaçağının öbür kapıdan gelmiş hâli: arkadaki bir düğümün yerine geçen düğüm de genellikle
+arkada oluyor, yani döngü yarışın sonuna kadar her karede tavanına vuruyor. Yapışan düğümü ne
+çözecekse bu değil, ve düğüm hâlâ yapışıyor.
+
 Bir de ölçütün kendisi kodda değil awk'taymış. "Giden araba" `ROADMAP`'te sürücüler var olduğundan
 beri alıntılanıyor ama hiçbir zaman kodda olmamış — her seferinde araba satırlarından elle
 sayılmış, ve iki ayrı girdinin rakamı da bugünkü çıktıdan üretilemiyor. Tanım artık `nfs_sim`'de:
