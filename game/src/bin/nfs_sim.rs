@@ -933,6 +933,25 @@ async fn run() {
                 }
                 let on_course = corridor.locate(here).map(|x| x.distance);
                 println!("   koridora uzaklık: {on_course:?} (yarı genişlik {})", city::COURSE_HALF_WIDTH);
+                // The branches on offer here, and which of them the race is actually on. `path` is
+                // which of the file's paths a node belongs to, so a junction whose links span
+                // several paths is exactly where "follow the network" and "follow the race" part
+                // company.
+                if let Some(j) = net.node(best.1) {
+                    println!("   kavşak {}: hat {} · {} kol", best.1, j.path, j.links.len());
+                    for &l in &j.links {
+                        if let Some(n) = net.node(l) {
+                            let d = corridor
+                                .locate(n.at)
+                                .map_or(f32::INFINITY, |x| x.distance);
+                            let on = if d <= city::COURSE_HALF_WIDTH { "YARIŞ HATTI" } else { "yan yol" };
+                            println!(
+                                "     → düğüm {l:>4} · hat {:>3} · ({:>7.0},{:>7.0}) · koridora {d:>6.1} m · {on}",
+                                n.path, n.at.x, n.at.z, d = d
+                            );
+                        }
+                    }
+                }
             }
         }
         println!("\nwhat the stuck cars have around them:");

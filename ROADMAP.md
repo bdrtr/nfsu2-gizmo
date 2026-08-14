@@ -3005,4 +3005,28 @@ sapmak, pilotun kendi ölçütlerine göre tamamen meşru bir hamle. Öyleyse ku
 **pilotun neyi takip ettiği**.
 
 Sınaması ucuz: o kavşakta ağın kaç kolu var, hangisi yarış hattında, ve pilot hangisini seçiyor.
+**Hipotez çürüdü: alacak yanlış kol yok.** Kayıp noktasındaki kavşak (düğüm 37, hat 4) üç kol
+taşıyor ve **üçü de koridorun içinde**, uzaklıkları 0,0 m:
+
+| kol | hat | konum | koridora |
+|---|---|---|---|
+| 36 | 4 | (−314, 1392) | 0,0 m |
+| 38 | 4 | (−391, 1378) | 0,0 m |
+| 277 | **3** | (−312, 1394) | 0,0 m |
+
+Üçüncüsü komşu bir hatta ait ama koridor onu da kapsıyor — yani koridor tek bir `Paths` dosyasının
+hattı değil, birden çok hattı örtüyor. "Pilot ağı sürüyor, yarışı değil" okuması bu yüzden yanlış:
+pilotun burada seçebileceği yanlış bir kol **yok**.
+
+**Geriye kalan şey rota seçimi değil, virajı geniş almak.** Düğüm konumları ve iz birlikte
+okununca: araba kuzeydoğudan (−255, 1436) → (−292, 1380) diye güneybatıya iniyor, sonra
+(−339, 1379) ile batıya dönüyor — yaklaşık **50°'lik bir viraj** — ve tam orada 65 km/h'den
+**16 km/h**'ye düşüyor. Kayıp konumu (−334, 1374), yolun ekseninden ~15 m güneyde.
+
+Yani altı araba aynı virajda, 12 m'lik koridordan üç metre taşarak çıkıyor ve bir daha
+dönemiyor. Sıradaki turun sorusu artık dar ve pilotun kendi kollarına bakıyor: bu viraja giriş
+hızı (`BRAKE_SPEED`, `BRAKE_GAIN`) ve viraj gaz kesmesi (`CORNER_LIFT`) neyi veriyor, ve taşma
+frenle mi direksiyonla mı kapanıyor. Ölçüt yine sekiz rotalık süpürme — ama artık yanına
+"kursu bıraktığı waypoint" de yazılıyor, ki bir kazanç alan toplamını değiştirmeden bu virajı
+düzeltmiş olabilsin.
 
