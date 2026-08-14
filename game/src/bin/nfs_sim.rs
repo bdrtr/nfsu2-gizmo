@@ -873,6 +873,50 @@ async fn run() {
     // open ground around it that it is failing to use, or is it genuinely boxed in? Twelve
     // directions, drivable ground at the car's own height, nothing standing across the way.
     if !early.is_empty() {
+        // NFS_HOLE=x,z: is there ground there? A car that stops or falls at a particular place is
+        // asking a question about the world, not about its driver, and the cheapest honest answer
+        // is a grid of height queries around the spot.
+        if let Ok(spec) = std::env::var("NFS_HOLE") {
+            let mut it = spec.split(',').filter_map(|v| v.trim().parse::<f32>().ok());
+            if let (Some(cx), Some(cz)) = (it.next(), it.next()) {
+                println!("\nground coverage around ({cx:.0}, {cz:.0}), 8 m steps:");
+                for iz in -6..=6 {
+                    let z = cz + iz as f32 * 8.0;
+                    let row: String = (-6..=6)
+                        .map(|ix| {
+                            let x = cx + ix as f32 * 8.0;
+                            match ground.heights_at(x, z).into_iter().next() {
+                                Some(_) => '#',
+                                None => '.',
+                            }
+                        })
+                        .collect();
+                    println!("   z={z:>7.0}  {row}");
+                }
+                println!("   ('#' = zemin var, '.' = yok · orta sütun/satır sorulan nokta)");
+                // How far is the racing line from here? A hole beside the course and a hole in it
+                // are different findings: the first blames whatever pushed the car off the line,
+                // the second blames the world.
+                let here = Vec3::new(cx, 0.0, cz);
+                let mut best = (f32::INFINITY, 0u32);
+                for i in 0..net.len() as u32 {
+                    if let Some(n) = net.node(i) {
+                        let d = (Vec3::new(n.at.x, 0.0, n.at.z) - here).length();
+                        if d < best.0 {
+                            best = (d, i);
+                        }
+                    }
+                }
+                if let Some(n) = net.node(best.1) {
+                    println!(
+                        "   en yakın rota düğümü: {:.0} m ötede, ({:.0},{:.0},{:.0})",
+                        best.0, n.at.x, n.at.y, n.at.z
+                    );
+                }
+                let on_course = corridor.locate(here).map(|x| x.distance);
+                println!("   koridora uzaklık: {on_course:?} (yarı genişlik {})", city::COURSE_HALF_WIDTH);
+            }
+        }
         println!("\nwhat the stuck cars have around them:");
         for &k in &early {
             let Some((rig, _)) = field.get(k) else { continue };

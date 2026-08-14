@@ -2938,3 +2938,41 @@ Yolların çoğu `y ≈ -11` civarında; `nfs_fly`'ın varsayılan başlangıcı
 Yola inmek için `NFS_AT="1354,-11,-2457"`. Diagnostikler: `NFS_ID="x,y"` (o pikseli hangi mesh
 kaplıyor), `NFS_FIND=<substr>` (isme göre kaç obje yüklü, ilk birkaçı nerede), `NFS_NEAR=<r>`
 (bir noktanın ayak izini kapsayan objeler + doku slotlarının hangi katmanda çözüldüğü).
+
+### "Kimse tur tamamlamıyor" yanlış soruymuş — alan bir yere varıp dolanmaya başlıyor
+
+Duran hedef aylardır böyle yazılıydı. Üzerine gidince üç kez şekil değiştirdi ve sonuncusu asıl
+iş listesini değiştiriyor.
+
+**Önce aritmetik.** Bir tur 144 waypoint, waypoint'ler 40 m aralıklı, yani 5.760 m. Alanın en iyi
+arabası 90 saniyede 26 waypoint yapıyor — ortalama 42 km/h. O hızda bir tur **494 saniye** sürer.
+Yani 90 saniyelik ölçüm penceresinde tur tamamlamak *kurgu gereği* imkânsızdı; hedefin kendisi
+ölçülemez yazılmıştı.
+
+**Sonra pencereyi açtım ve o açıklama da çürüdü.** 4121'de 600 saniye (6,7 kat) koşturunca en iyi
+araba 26 → **29** waypoint yaptı. 6,7 kat zaman, %12 kazanç. Sınır zaman değil.
+
+**Alan bir yere varıp orada kalıyor.** 600 saniyenin sonunda sekiz arabanın yedisi
+`(-560…-754, 19–35, 886…1047)` içinde, ~200 m'lik tek bir bölgede, hepsi 0 km/h. Ve rotalarından
+**58-126 m sapmış** durumdalar. Sekizincisi (araba 4) `y = -38223`'te — dünyadan düşmüş.
+
+**Düşme teşhisi bir dünya kusuru gösterdi:**
+
+```
+car 4: let go at t=101.9s (-725, 32.8, 938) doing 4 km/h, 0.0 m of air
+       · 41 m off the course for 4.7 s · now 38256 m down · inside the map
+```
+
+4 km/h'de, sıçramadan, haritanın içinde. Zemin taraması onayladı — o noktanın çevresinde 16-30 m
+genişliğinde, çapraz uzanan zeminsiz bir bant var (`NFS_HOLE=x,z` ile haritalanıyor, alet kaldı).
+
+**Ama delik kursun üstünde değil, ve bu bulguyu tersine çeviriyor:** en yakın rota düğümü **41 m**
+ötede ve kurs koridorunun yarı genişliği **12 m**. Yani dünyanın, arabaların sürmesi gereken
+yerinde bir sorun yok.
+
+**Kalan soru bu yüzden dünya değil, dolanma:** 12 m'lik bir koridordan 40-130 m sapan arabalar,
+sapınca haritasız araziye giriyor ve orada bitiyor. Delik onları öldüren şey, oraya götüren şey
+değil.
+
+Sıradaki tur bunu sormalı: **arabalar 25-29. waypoint civarında koridoru neden bırakıyor?** Alan
+toplamı (869) değil, *sapma* ölçülmeli — hangi waypoint'te, hangi yöne, ve kurs orada ne yapıyor.
