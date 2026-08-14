@@ -936,6 +936,20 @@ impl Pilot {
         // 5/8**, 275 junctions down to 111. So it is gone rather than kept at a value that reads
         // as tuned.
         let want = (angle * 2.0 / std::f32::consts::PI).clamp(-1.0, 1.0) * STEER_LIMIT;
+        // How fast the wheel catches up with what the pilot wants.
+        //
+        // **Swept and refuted, and the way it failed is the point.** Six of eight cars on 4121
+        // leave the course at one corner, and a lagging wheel at 65 km/h through 50° is exactly
+        // what running wide looks like — so raising this was the obvious fix. On that route it
+        // looked like one: 0.5 took the cars losing the course there from **6 of 8 to 3 of 8**,
+        // and the number never leaving it from 1 to 3.
+        //
+        // It did not survive the field. Over eight routes, 0.5 gives **773** waypoints driven past
+        // against **869**, and 1 149 distinct nodes against 1 364 — while the corner metric it was
+        // supposed to fix barely moves (53 of 64 cars leave the course either way, 11 never leave
+        // against 12). The one-route result was the route, not the rule. This is what the sweep is
+        // for, and it is worth remembering that a 2× improvement on a single route can mean
+        // nothing at all.
         self.steer += (want - self.steer) * 0.35;
         let mut throttle = (1.0 - self.steer.abs() * CORNER_LIFT).max(0.15);
 

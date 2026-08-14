@@ -3029,4 +3029,23 @@ hızı (`BRAKE_SPEED`, `BRAKE_GAIN`) ve viraj gaz kesmesi (`CORNER_LIFT`) neyi v
 frenle mi direksiyonla mı kapanıyor. Ölçüt yine sekiz rotalık süpürme — ama artık yanına
 "kursu bıraktığı waypoint" de yazılıyor, ki bir kazanç alan toplamını değiştirmeden bu virajı
 düzeltmiş olabilsin.
+**İki kaldıraç denendi, ikisi de çürüdü.**
+
+*Fren.* `NFS_BRAKE` iki yönde süpürüldü ve varsayılan 9 yerel optimum çıktı: 3 ve 5'te alan çöküyor
+(kapsama 48), 7'de 166, **9'da 178**, 12'de 121, 18 ve üstünde yine 48. Daha çok fren de daha az
+fren de kötüleştiriyor — yani viraj kaybı bir **giriş hızı sorunu değil**.
+
+*Direksiyon hızı.* `self.steer += (want − self.steer) * 0.35` sabiti hiç süpürülmemişti ve
+hipotez sağlamdı: 65 km/h'de 50°'lik virajda geciken direksiyon zaten "geniş almak" demek. Tek
+rotada da öyle göründü — 0,5 ile 4121'de kursu bırakan araba **6/8'den 3/8'e**, hiç bırakmayan
+1'den 3'e.
+
+Alan genelinde tutmadı. Sekiz rotada 0,5 → **773** kapsanan (869'a karşı) ve 1.149 ayrık düğüm
+(1.364'e karşı), üstelik düzeltmesi beklenen viraj ölçütü neredeyse sabit: 64 arabanın 53'ü iki
+ayarda da kursu bırakıyor, hiç bırakmayan 11'e karşı 12. **Tek rotadaki iki kat iyileşme rotanın
+kendisiydi, kuralın değil.** Süpürmenin var olma sebebi tam bu.
+
+Geriye pilotun kolları arasında `CORNER_LIFT`'in büyüklüğü kaldı (rampalaması ayrıca çürütülmüştü)
+ve bakılmamış olan **nişan mesafesi**: pilot 18-20 m ötesine nişan alıyor, ki 18 m/s'de bir saniyelik
+öngörü eder — 50°'lik bir viraj için kısa olabilir. Sıradaki tur oraya bakmalı.
 
