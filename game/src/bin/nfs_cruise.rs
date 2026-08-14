@@ -779,6 +779,7 @@ fn update(world: &mut World, state: &mut CruiseState, dt: f32, input: &Input) {
     for (rig, pilot) in field.iter_mut() {
         let Some(pose) = rig.pose(world) else { continue };
         let c = pilot.drive(
+            dt,
             pose.position,
             pose.rotation,
             pose.speed,

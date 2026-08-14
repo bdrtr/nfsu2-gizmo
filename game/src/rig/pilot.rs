@@ -153,8 +153,25 @@ const REACHED: f32 = 18.0;
 const COVERED_WITHIN: f32 = 40.0;
 /// How long a reversing manoeuvre lasts.
 const BACK_FOR: f32 = 1.2;
-/// The step the pilot assumes between calls. It is called once per frame and the physics runs at
-/// sixty, so this is right where it matters and generous where it does not.
+/// The step the pilot falls back on when a caller does not say.
+///
+/// **It used to be assumed rather than passed, and the assumption was wrong in both callers.** The
+/// doc here read "it is called once per frame and the physics runs at sixty, so this is right where
+/// it matters" — but `nfs_sim` calls `drive` inside its 240 Hz physics loop, ungated, so every
+/// timer in this file ran at **four times** wall clock: `STALL_FOR`'s 1.5 s fired after 0.375 s,
+/// `BACK_FOR`'s 1.2 s reversed for 0.3 s, `ESCAPE_FOR`'s 3.5 s lasted 0.875 s. And `nfs_cruise`
+/// calls it once per rendered frame at 100-126 fps while advancing 1/60 per call, so the game ran
+/// its own different multiple, ~1.7-2.1x. The sim was not measuring the game.
+///
+/// The evidence was in this file's own recorded measurements the whole time and went unread: 4002
+/// was logged as "35 s of a 90 s race spent in reverse and 115 escapes", and 35/115 = **0.304 s**
+/// per reverse against a `BACK_FOR` of 1.2 — exactly a quarter. At the assumed rate one
+/// stall→reverse cycle costs at least `STALL_FOR + BACK_FOR` = 2.7 s, so 90 seconds holds 33 of
+/// them; 115 was arithmetically impossible. Likewise "126 escapes" at `ESCAPE_FOR` 3.5 s is 441
+/// seconds of escaping inside a 90-second race.
+///
+/// `drive` now takes `dt` and the callers pass their own step, so both are right and they agree
+/// with each other. This constant remains only as the fallback for a caller with nothing better.
 const TICK: f32 = 1.0 / 60.0;
 
 /// The speed, in m/s, at which full lock is as much as the car will hold. Above it, braking.
@@ -532,6 +549,7 @@ impl Pilot {
     /// This frame's controls. `None` when it has not been placed or the network is empty.
     pub fn drive(
         &mut self,
+        dt: f32,
         at: Vec3,
         facing: Quat,
         speed: f32,
@@ -541,6 +559,8 @@ impl Pilot {
         sight: Option<(&Walls, &Ground)>,
     ) -> Option<Controls> {
         let here = self.at?;
+        // The caller's real step, not an assumed one — see `TICK`.
+        let tick = if dt > 0.0 { dt } else { TICK };
         let flat = |v: Vec3| Vec3::new(v.x, 0.0, v.z);
         // Which way the car is pointing. Wanted by the aim walk and by the steering itself, so it
         // is worked out once here rather than at each.
@@ -549,7 +569,7 @@ impl Pilot {
         // Still on the line: brakes on, wheels straight, and no advance along the network — a
         // pilot that walked the graph while its car stood still would arrive already lost.
         if self.hold > 0.0 {
-            self.hold -= TICK;
+            self.hold -= tick;
             return Some(Controls {
                 throttle: 0.0,
                 brake: 1.0,
@@ -758,7 +778,7 @@ impl Pilot {
         // measuring `|speed|` made every car reverse for ever, the whole field ending sixty metres
         // behind the line facing the wrong way.
         if self.backing > 0.0 {
-            self.backing -= TICK;
+            self.backing -= tick;
             self.stalled = 0.0;
             return Some(Controls {
                 throttle: -0.7,
@@ -770,7 +790,7 @@ impl Pilot {
         // Gated on *time* and not on having taken a junction: the cars that need this most are
         // exactly the ones that never took one, and gating on progress meant the pilots that were
         // stuck from the start were the only ones that could not try to get out.
-        self.age += TICK;
+        self.age += tick;
         // **A car rolling backwards is not stalled — it is obeying.** `speed` is signed, so a car
         // that has just finished its 1.2 s of reverse is carrying negative speed, and `speed <
         // STALL_SPEED` counts that as a stall from the first tick. Getting from about −1.5 m/s back
@@ -785,7 +805,7 @@ impl Pilot {
             .unwrap_or(STALL_BACK);
         let moving_back = stall_back > 0.0 && speed <= -stall_back;
         if self.age > SETTLE && speed < STALL_SPEED && !moving_back && self.hold <= 0.0 {
-            self.stalled += TICK;
+            self.stalled += tick;
         } else {
             self.stalled = 0.0;
         }
@@ -927,7 +947,7 @@ impl Pilot {
         // node, the blacklist and the waypoint are all left exactly as they were, so the
         // pilot resumes mid-stride when it expires.
         if let Some((to, left)) = self.escape {
-            let left = left - TICK;
+            let left = left - tick;
             if left <= 0.0 || flat(to - at).length() < ESCAPE_ARRIVED {
                 if let Some(from) = self.escape_from.take() {
                     self.escape_moved += flat(at - from).length();

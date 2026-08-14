@@ -572,6 +572,7 @@ async fn run() {
             }
             if let Some(c) =
                 pilot.drive(
+                    FIXED_DT,
                     pose.position,
                     pose.rotation,
                     pose.speed,

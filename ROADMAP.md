@@ -3094,4 +3094,34 @@ iyileştirememesi" bununla tutarlı.
 yüzey ölçülmüştü) ve `Walls::across` zemini takip ederken yanlış kata atlayıp *altındaki* katı engel
 sayabilir. Yani bu oranların bir kısmı köprü/alt geçit olabilir. Ayırmanın yolu belli: engelli
 segmentlerin altında kaç yüzey var, ve engel gerçekten kursun kotunda mı.
+### Pilotun saati dört kat hızlı koşuyormuş — ve kanıtı sabahtan beri bu dosyadaydı
+
+Çok mercekli bir inceleme, üç turdur göremediğim şeyi buldu. `Pilot::drive` kendi zamanlayıcılarını
+`TICK = 1/60` ile ilerletiyordu ve belgesi *"kare başına bir kez çağrılır ve fizik altmışta koşar,
+yani önemli olan yerde doğru"* diyordu. Oysa `nfs_sim`, `drive`'ı **240 Hz'lik fizik döngüsünün
+içinde, kapısız** çağırıyor. Yani bu dosyadaki her zamanlayıcı **gerçek zamanın dört katı** hızda
+doluyordu: `STALL_FOR`'un 1,5 saniyesi 0,375'te, `BACK_FOR`'un 1,2'si 0,3'te, `ESCAPE_FOR`'un 3,5'i
+0,875'te.
+
+**Kanıt bu dosyanın kendi kayıtlarındaydı ve okumadım.** 4002 için *"90 saniyenin 35'i geri viteste,
+115 kaçış"* yazmışım. 35/115 = **0,304 s** geri vites başına — `BACK_FOR`'un tam dörtte biri. Üstelik
+varsayılan hızda bir takılma→geri döngüsü en az `STALL_FOR + BACK_FOR` = 2,7 saniye sürer, yani 90
+saniyeye **33** tane sığar; ben 115 ölçmüşüm. Aynı şekilde *"126 kaçış"* × 3,5 s = **441 saniye**,
+90 saniyelik bir yarışın içinde. Üç sayı da yalnız 4× ile açıklanabiliyordu.
+
+**Düzeltme:** `drive` artık `dt` alıyor ve çağıranlar kendi adımlarını veriyor. Ölçüm hemen
+oturdu — geri vites süresi 19,2 s / 16 kaçış = **1,200 s**, yani `BACK_FOR`'un kendisi.
+
+**Ama alan toplamı değişmedi: 865 (bozuk saatte 869), düğüm 1.354 (1.364), kursu bırakan 51/64
+(53/64).** Yani 4× saat platonun sebebi değil. Temiz bir olumsuz sonuç.
+
+Buna karşılık üç şey kazanıldı ve üçü de sayıdan bağımsız:
+
+1. **Teşhisler artık okunabilir.** "126 kaçış" gibi imkânsız sayılar üretmiyor.
+2. **Simülasyon ile oyun ilk kez aynı şeyi ölçüyor.** `nfs_cruise` pilotu kare hızında (100-126 fps)
+   çağırıp 1/60 sayıyordu, yani oyun da ~1,7-2,1× hızlıydı — farklı bir kat. Süpürme sonuçları
+   oyuna aktarılamıyordu.
+3. **Zaman sabitleri artık ne dediklerini yapıyor** — ve bu, açık bir soru bırakıyor: `STALL_FOR`,
+   `BACK_FOR`, `ESCAPE_FOR`, `SETTLE` yıllardır *çeyreklenmiş* değerleriyle ayarlanmıştı. Şimdi
+   dürüst olduklarına göre dört kat uzun olabilirler. Yeniden süpürülmeleri gerekiyor.
 
