@@ -3124,4 +3124,28 @@ Buna karşılık üç şey kazanıldı ve üçü de sayıdan bağımsız:
 3. **Zaman sabitleri artık ne dediklerini yapıyor** — ve bu, açık bir soru bırakıyor: `STALL_FOR`,
    `BACK_FOR`, `ESCAPE_FOR`, `SETTLE` yıllardır *çeyreklenmiş* değerleriyle ayarlanmıştı. Şimdi
    dürüst olduklarına göre dört kat uzun olabilirler. Yeniden süpürülmeleri gerekiyor.
+**Düzeltme: o engel taraması sonuç vermiyor, ve "doğrulandı" demek fazla iddialıydı.**
+
+Çekinceyi sınamak için iki ölçüm daha yaptım ve ikisi de kendi bulgumun aleyhine çıktı.
+
+*Birincisi.* 3 m'de bile kapalı kalan segmentlerin ezici çoğunluğu **çok katlı yerde**: 4002'de
+36'nın **32'si**, 4121'de 3'ün 3'ü. `Walls::across` yürürken zemini takip ediyor ve her adımda
+"önceki yüksekliğe en yakın" yüzeyi seçiyor — yani üst üste binmiş katların olduğu yerde köprüye
+çıkıp altındaki yolu "engel" sayabilir. Taramanın vuruşlarının çoğu tam o bölgelerde.
+
+*İkincisi, ve bu benim ikinci ölçümümü de çürüttü.* "Kursun kotu zeminden 2 m uzak" diye
+raporladığım sayı yanlıştı: düğümler zeminle **birebir** uyuşuyor (dört rotada en kötü sapma
+**0,0 m**, yalnız iki düğümün altında hiç zemin yok). Ölçtüğüm şey düğümler değil, iki düğüm
+arasına çektiğim **düz çizgiydi** — yol kot olarak kıvrıldığı için o çizgi zeminden ayrılıyor,
+oysa `across` zemini takip ediyor. Kendi lerp'imi ölçmüşüm.
+
+*Ve elimde zaten aleyhte bir veri vardı.* Yolun %6-8'i gerçekten kapalı olsaydı arabalar o
+segmentlerde dağınık biçimde tıkanırdı. Oysa ölçtüğüm şey bunun tersi: 4121'de sekiz arabanın
+**altısı tek bir dört metrelik noktada** kursu bırakıyor, 6-8'e yayılmış onlarca yerde değil.
+
+**Durum: sonuçsuz, doğrulanmış değil.** Oyuncunun "yolda binalara çarpıyorum" gözlemi kendi
+başına geçerli ve ciddi; çürüyen şey benim onu kanıt diye sunduğum ölçüm. Kesin cevap, engelin
+kendisini görmeyi gerektiriyor: `across` bir boolean döndürüyor, hangi üçgene çarptığını değil.
+Onu döndürmek — çarpan üçgenin yükseklik aralığını ve yola göre kotunu — bu soruyu tek seferde
+kapatır, ve sıradaki turun işi odur.
 

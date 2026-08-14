@@ -960,9 +960,48 @@ async fn run() {
         // course would look, from the cars' side, exactly like six of them running wide at one
         // corner — and a player reports hitting buildings on the roads.
         if std::env::var("NFS_BLOCKED").is_ok() {
+            // Before anything about walls: do the route's own nodes agree with the ground they are
+            // supposed to sit on? Every height query in this file walks from the node's y, so if
+            // the graph and the collision surface disagree the walls answer is about the wrong
+            // floor. This is the prior question and it had not been asked.
+            {
+                let (mut n, mut off2, mut off5, mut none) = (0usize, 0usize, 0usize, 0usize);
+                let mut worst = 0.0f32;
+                for i in 0..net.len() as u32 {
+                    let Some(j) = net.node(i) else { continue };
+                    if corridor.locate(j.at).map_or(f32::INFINITY, |x| x.distance)
+                        > city::COURSE_HALF_WIDTH
+                    {
+                        continue;
+                    }
+                    n += 1;
+                    let hs = ground.heights_at(j.at.x, j.at.z);
+                    match hs
+                        .into_iter()
+                        .min_by(|a, b| (a - j.at.y).abs().total_cmp(&(b - j.at.y).abs()))
+                    {
+                        None => none += 1,
+                        Some(h) => {
+                            let d = (h - j.at.y).abs();
+                            worst = worst.max(d);
+                            if d > 2.0 {
+                                off2 += 1;
+                            }
+                            if d > 5.0 {
+                                off5 += 1;
+                            }
+                        }
+                    }
+                }
+                println!(
+                    "\nrota dugumleri zeminle uyusuyor mu: {n} dugumun {off2}'si 2 m'den, {off5}'i 5 m'den \
+                     uzak · {none} tanesinin altinda hic zemin yok · en kotu {worst:.1} m"
+                );
+            }
             println!("\nyaris hatti boyunca engel taramasi:");
             let (mut blocked, mut checked) = (0usize, 0usize);
             let (mut low, mut mid, mut tall) = (0usize, 0usize, 0usize);
+            let (mut tall_multi, mut tall_offdeck) = (0usize, 0usize);
             for i in 0..net.len() as u32 {
                 let Some(a) = net.node(i) else { continue };
                 for &l in &a.links {
@@ -986,10 +1025,36 @@ async fn run() {
                     // At what height does it stop blocking? A kerb or a ramp lip clears by a metre;
                     // a building does not clear at all. Same query, three lifts — that is what
                     // separates "the road has a step in it" from "there is a wall across the road".
+                    // **Is the blocker at the course's own height, or is the query on the wrong
+                    // deck?** Bayview is multi-level — three stacked surfaces were measured at a
+                    // single point — and `across` follows the ground as it walks, so it can step
+                    // onto a bridge and count the road beneath as an obstacle. Counting the
+                    // surfaces under the segment, and how far the course's own height sits from
+                    // the nearest of them, separates "a wall across the road" from "the query
+                    // changed floors".
+                    let mut layers_max = 0usize;
+                    let mut off_deck = 0.0f32;
+                    for k in 0..=8 {
+                        let q = a.at.lerp(b.at, k as f32 / 8.0);
+                        let hs = ground.heights_at(q.x, q.z);
+                        layers_max = layers_max.max(hs.len());
+                        if let Some(near) = hs
+                            .into_iter()
+                            .min_by(|x, y| (x - q.y).abs().total_cmp(&(y - q.y).abs()))
+                        {
+                            off_deck = off_deck.max((near - q.y).abs());
+                        }
+                    }
                     let at05 = walls.across(&ground, a.at, b.at, 0.5, 3.0);
                     if at05 {
                         if walls.across(&ground, a.at, b.at, 3.0, 3.0) {
                             tall += 1;
+                            if layers_max > 1 {
+                                tall_multi += 1;
+                            }
+                            if off_deck > 2.0 {
+                                tall_offdeck += 1;
+                            }
                         } else if walls.across(&ground, a.at, b.at, 1.5, 3.0) {
                             mid += 1;
                         } else {
@@ -1014,6 +1079,10 @@ async fn run() {
             println!(
                 "   bunlarin {low} tanesi 1.5 m'de aciliyor (bordur/rampa), {mid} tanesi 3 m'de, \
                  {tall} tanesi 3 m'de bile KAPALI (duvar/bina)"
+            );
+            println!(
+                "   o {tall} kapalinin {tall_multi} tanesi COK KATLI yerde, {tall_offdeck} tanesinde \
+                 kursun kotu en yakin zeminden 2 m'den uzak (yani sorgu baska katta olabilir)"
             );
         }
         println!("\nwhat the stuck cars have around them:");
