@@ -3066,4 +3066,32 @@ rotadan çıkacak.
 mesafesi elendi. Alan 869'da duruyor. Geriye `CORNER_LIFT`'in büyüklüğü kalıyor — ve artık şunu da
 biliyoruz: bu virajı düzeltmek alan toplamını yükseltmiyor, çünkü üç ayarın hiçbirinde iki ölçüt
 birlikte iyileşmedi.
+### Oyuncu "yolda binalara çarpıyorum" dedi, ve ölçüm onu doğruladı
+
+Üç pilot sabiti üst üste çürüdükten sonra gelen bu gözlem, aramayı bambaşka bir yere taşıdı:
+**belki sorun sürücüde değil, kursun kendisinde.**
+
+Yeni alet (`NFS_BLOCKED=1`) yarış hattının kendisini yürüyor: koridorun içindeki her **komşu** düğüm
+çifti için (uzun kestirme bağlantılar hariç — yol kıvrıldığı için onların düz çizgisi doğal olarak
+bina keser) önü kesen geometri var mı diye soruyor, ve engeli **yüksekliğine göre** ayırıyor.
+
+| rota | engelli kenar | 1,5 m'de açılan | 3 m'de açılan | **3 m'de bile kapalı** |
+|---|---|---|---|---|
+| 4001 | 113 / 459 (%24,6) | 40 | 43 | **30** |
+| 4002 | 67 / 476 (%14,1) | 18 | 13 | **36** |
+| 4121 | 12 / 356 (%3,4) | 6 | 3 | **3** |
+| 4041 | 31 / 593 (%5,2) | — | — | — |
+
+Yani yolun kendi segmentlerinin **%6-8'inde** üç metrelik kaldırmanın açmadığı bir şey duruyor.
+Bordür ya da rampa değil.
+
+**Bu, üç turdur yaptığım şeyin zeminini kaydırıyor.** Pilot sabitlerini, segmentlerinin bir kısmı
+fiziksel olarak kapalı olan bir kursa karşı süpürüyormuşum. Bir sürücü, önü duvarla kesilmiş bir
+yolu hiçbir fren/direksiyon/nişan ayarıyla süremez — ve üç ayarın da "iki ölçütü birlikte
+iyileştirememesi" bununla tutarlı.
+
+**Açık kalan çekince, ve sınaması bir sonraki turun işi:** şehir çok katlı (tek bir noktada üç
+yüzey ölçülmüştü) ve `Walls::across` zemini takip ederken yanlış kata atlayıp *altındaki* katı engel
+sayabilir. Yani bu oranların bir kısmı köprü/alt geçit olabilir. Ayırmanın yolu belli: engelli
+segmentlerin altında kaç yüzey var, ve engel gerçekten kursun kotunda mı.
 

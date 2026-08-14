@@ -954,6 +954,67 @@ async fn run() {
                 }
             }
         }
+        // NFS_BLOCKED=1: walk the racing line itself and ask whether anything stands in it.
+        // Everything else here measures the cars; this measures the road. A building sitting in the
+        // course would look, from the cars' side, exactly like six of them running wide at one
+        // corner — and a player reports hitting buildings on the roads.
+        if std::env::var("NFS_BLOCKED").is_ok() {
+            println!("\nyaris hatti boyunca engel taramasi:");
+            let (mut blocked, mut checked) = (0usize, 0usize);
+            let (mut low, mut mid, mut tall) = (0usize, 0usize, 0usize);
+            for i in 0..net.len() as u32 {
+                let Some(a) = net.node(i) else { continue };
+                for &l in &a.links {
+                    if l <= i {
+                        continue;
+                    }
+                    let Some(b) = net.node(l) else { continue };
+                    let ina = corridor.locate(a.at).map_or(f32::INFINITY, |x| x.distance);
+                    let inb = corridor.locate(b.at).map_or(f32::INFINITY, |x| x.distance);
+                    if ina > city::COURSE_HALF_WIDTH || inb > city::COURSE_HALF_WIDTH {
+                        continue;
+                    }
+                    // Long links are the graph's shortcuts between distant nodes; a straight line
+                    // between them crosses buildings because the road curves, and that is not a
+                    // defect. Only adjacent-node edges say anything about the road itself.
+                    let len = (b.at - a.at).length();
+                    if len > 45.0 {
+                        continue;
+                    }
+                    checked += 1;
+                    // At what height does it stop blocking? A kerb or a ramp lip clears by a metre;
+                    // a building does not clear at all. Same query, three lifts — that is what
+                    // separates "the road has a step in it" from "there is a wall across the road".
+                    let at05 = walls.across(&ground, a.at, b.at, 0.5, 3.0);
+                    if at05 {
+                        if walls.across(&ground, a.at, b.at, 3.0, 3.0) {
+                            tall += 1;
+                        } else if walls.across(&ground, a.at, b.at, 1.5, 3.0) {
+                            mid += 1;
+                        } else {
+                            low += 1;
+                        }
+                    }
+                    if at05 {
+                        blocked += 1;
+                        if blocked <= 10 {
+                            println!(
+                                "   ENGELLI {i:>4} -> {l:>4}  ({:>7.0},{:>7.0}) -> ({:>7.0},{:>7.0})  {:>5.0} m",
+                                a.at.x, a.at.z, b.at.x, b.at.z, (b.at - a.at).length()
+                            );
+                        }
+                    }
+                }
+            }
+            println!(
+                "   hattin {blocked} / {checked} kenarinda onu kesen geometri var ({:.1}%)",
+                100.0 * blocked as f32 / checked.max(1) as f32
+            );
+            println!(
+                "   bunlarin {low} tanesi 1.5 m'de aciliyor (bordur/rampa), {mid} tanesi 3 m'de, \
+                 {tall} tanesi 3 m'de bile KAPALI (duvar/bina)"
+            );
+        }
         println!("\nwhat the stuck cars have around them:");
         for &k in &early {
             let Some((rig, _)) = field.get(k) else { continue };
