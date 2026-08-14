@@ -94,6 +94,19 @@ const AIM_CLEAR: f32 = 5.0;
 /// Speed-proportional because a fixed distance is wrong at both ends: short enough to be accurate
 /// at 30 km/h is a violent oscillation at 150, and long enough to be smooth at 150 cuts every
 /// corner at 30.
+/// Seconds of travel the pilot aims ahead.
+///
+/// **Swept over eight routes and 0.9 holds.** Longer looked promising and was not: 1.5 gives 724
+/// waypoints driven past and 1.8 gives 858, against **869** here, with distinct nodes agreeing
+/// (1 122 and 1 276 against 1 364).
+///
+/// The way it looked promising is worth more than the result. A four-route screen — 4001, 4121,
+/// 4041, 4102 — had 1.8 winning by 11 % (587 against 528), and the curve across 0.6…5.0 was
+/// cleanly unimodal with its peak right there. It was not noise: 1.8 really does gain **+59** on
+/// those four and really does lose **−70** on the four that were not screened. The subset was
+/// unrepresentative, which a subset is free to be. Screening on half the routes to save time has
+/// now produced a false positive twice in a row (see the steering rate above); it is not a cheap
+/// version of the sweep, it is a different and unreliable instrument.
 const LOOKAHEAD_PER_SPEED: f32 = 0.9;
 const LOOKAHEAD_MIN: f32 = 12.0;
 const LOOKAHEAD_MAX: f32 = 40.0;

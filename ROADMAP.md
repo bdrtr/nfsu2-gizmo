@@ -3048,4 +3048,22 @@ kendisiydi, kuralın değil.** Süpürmenin var olma sebebi tam bu.
 Geriye pilotun kolları arasında `CORNER_LIFT`'in büyüklüğü kaldı (rampalaması ayrıca çürütülmüştü)
 ve bakılmamış olan **nişan mesafesi**: pilot 18-20 m ötesine nişan alıyor, ki 18 m/s'de bir saniyelik
 öngörü eder — 50°'lik bir viraj için kısa olabilir. Sıradaki tur oraya bakmalı.
+**Üçüncü çürütme: nişan mesafesi de değil — ve ön eleme ikinci kez yanılttı.** `LOOKAHEAD_PER_SPEED`
+(kaç saniyelik yol kadar öne bakılacağı) hiç süpürülmemişti. Dört rotalık elemede eğri temiz ve tek
+tepeliydi — 0,6 → 511, 0,9 → 528, 1,3 → 558, **1,8 → 587**, 2,5 → 551, 5,0 → 547 — yani varsayılana
+göre %11.
+
+Sekiz rotada düştü: 1,5 → **724**, 1,8 → **858**, varsayılan **869** (ayrık düğüm 1.122 / 1.276 /
+1.364).
+
+Aritmetik, elemenin neden yanılttığını tam söylüyor: 1,8 elenen dört rotada (4001, 4121, 4041, 4102)
+gerçekten **+59** kazanıyor, elenmeyen dörtte **−70** kaybediyor. Gürültü değil — **alt küme temsil
+etmiyormuş.** Ve bu, üst üste ikinci kez oldu (önce direksiyon hızı, şimdi bu). Yarım süpürme,
+süpürmenin ucuz sürümü değil; **farklı ve güvenilmez bir alet.** Bundan sonra karar yalnız sekiz
+rotadan çıkacak.
+
+**Viraj cephesinde bilanço: üç aday, üç çürütme, kazanç yok.** Fren, direksiyon hızı ve nişan
+mesafesi elendi. Alan 869'da duruyor. Geriye `CORNER_LIFT`'in büyüklüğü kalıyor — ve artık şunu da
+biliyoruz: bu virajı düzeltmek alan toplamını yükseltmiyor, çünkü üç ayarın hiçbirinde iki ölçüt
+birlikte iyileşmedi.
 
