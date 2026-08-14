@@ -462,6 +462,8 @@ async fn run() {
     let mut revved = vec![0.0f32; field.len()];
     let mut torqued = vec![0.0f32; field.len()];
     let mut spun = vec![0.0f32; field.len()];
+    // When and where each car first lost the corridor for good, and how far along it was.
+    let mut lost: Vec<Option<(f32, Vec3, usize)>> = vec![None; field.len()];
     let rescue = std::env::var("NFS_RESCUE").is_ok_and(|v| v != "0");
     let mut ticks = vec![0usize; field.len()];
     let mut queued = vec![0usize; field.len()];
@@ -715,6 +717,14 @@ async fn run() {
             } else {
                 f.off_for = 0.0;
             }
+            // **Where the course was lost, not how far it strayed afterwards.** A car ends its run
+            // 60-130 m off the line, and that number says nothing about the moment it went wrong —
+            // by then it has been wandering for minutes. This records the first departure that
+            // *stuck*: off the corridor for three continuous seconds, which is long enough not to
+            // count a corner cut and short enough to still be near the cause.
+            if lost[k].is_none() && f.off_for >= 3.0 {
+                lost[k] = Some((now, p.position, pilot.covered()));
+            }
             if g.stood {
                 let moved = was[k].map_or(Vec3::ZERO, |b| p.position - b);
                 let going = Vec3::new(moved.x, 0.0, moved.z).normalize_or_zero();
@@ -807,6 +817,14 @@ async fn run() {
             strayed[k],
             pilot.given_up().len()
         );
+        if let Some((t, at, wp)) = lost[k] {
+            println!(
+                "            kursu bıraktı: t={t:>6.1}s · waypoint {wp:>3} · ({:>7.0},{:>6.0},{:>7.0})",
+                at.x, at.y, at.z
+            );
+        } else {
+            println!("            kursu hiç bırakmadı");
+        }
     }
     // **Why** they fell, which is not the same question as how many. Each fallen car is traced back
     // to the last step its wheels had anything under them, and the city is then asked what was out

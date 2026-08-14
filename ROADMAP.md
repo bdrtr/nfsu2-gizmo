@@ -2976,3 +2976,33 @@ değil.
 
 Sıradaki tur bunu sormalı: **arabalar 25-29. waypoint civarında koridoru neden bırakıyor?** Alan
 toplamı (869) değil, *sapma* ölçülmeli — hangi waypoint'te, hangi yöne, ve kurs orada ne yapıyor.
+**Ve sıradaki tur hemen geldi: kayıp waypoint 25'te değil, 6'da.** Yukarıdaki "koridoru neden
+bırakıyorlar" sorusu için sapmanın *ilk* anı ölçüldü — üç saniye boyunca koridor dışı, yani viraj
+kesme değil kalıcı kayıp. Sonuç tek bir noktayı gösteriyor:
+
+| araba | kursu bıraktığı an | waypoint | konum |
+|---|---|---|---|
+| 6 araba | t = 36-50 s | **6** | (−334…−337, 11-12, 1372…1376) |
+| 1 araba | t = 86 s | 25 | (−697, 33, 926) — deliğin yanı |
+| 1 araba | hiç bırakmadı | — | — |
+
+Sekizin altısı **dört metrelik tek bir noktada** kaybediyor. Önceki turda 25-29 civarını
+işaretlemem hataydı: arabaların *bittiği* yere bakmıştım, *yanlış gittiği* yere değil — bu ölçüm
+tam o ayrım için kuruldu ve ayrımı hemen gösterdi.
+
+Orada dünya sağlam: zemin taraması 13×13'lük ızgarada tek boşluk göstermiyor, en yakın rota düğümü
+22 m ötede ve koridor uzaklığı 15 m (sınır 12). Yani araba sağlam zeminde, izin verilenden yalnız
+üç metre fazla açılıyor — ama bir daha toparlanmıyor.
+
+İzleme o anı yakalıyor. Araba tuttuğu düğümü `…113 → 114 → 274 → 276 → 37 → 38` diye değiştiriyor
+ve tam o sırada 65 km/h'den **16 km/h**'ye düşüyor. Numaraların 270'lerden 30'lara atlaması, ağın
+**başka bir koluna** geçtiğini söylüyor.
+
+Buradan çıkan hipotez — ve bir sonraki turun sınaması gereken şey — şu: **pilot yarış rotasını
+değil yol ağını sürüyor.** Koridor `Paths4121`'in kendi hattından kuruluyor, oysa pilot
+`Network`'ün tamamında yürüyor; waypoint 6'daki kavşakta yarış hattından çıkıp komşu bir yola
+sapmak, pilotun kendi ölçütlerine göre tamamen meşru bir hamle. Öyleyse kusur "dolanma" değil,
+**pilotun neyi takip ettiği**.
+
+Sınaması ucuz: o kavşakta ağın kaç kolu var, hangisi yarış hattında, ve pilot hangisini seçiyor.
+
