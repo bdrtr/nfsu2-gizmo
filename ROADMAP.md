@@ -3149,3 +3149,51 @@ kendisini görmeyi gerektiriyor: `across` bir boolean döndürüyor, hangi üçg
 Onu döndürmek — çarpan üçgenin yükseklik aralığını ve yola göre kotunu — bu soruyu tek seferde
 kapatır, ve sıradaki turun işi odur.
 
+## Nerede kaldık (2026-08-14 sonu)
+
+**Alan: 865 geçilen waypoint, 1.354 ayrık düğüm, 64 arabanın 51'i kursu bırakıyor.** (Bugün 869
+diye geçen sayı, pilot saati 4× hızlıyken ölçülmüştü; düzeltilince 865 oldu — yani saat platonun
+sebebi değildi.) En iyi araba 144'ün **29'unda**, ve 600 saniye vermek onu 26'dan 29'a taşıyor:
+**sınır zaman değil.**
+
+### Hedefin bugünkü hâli
+
+"Kimse tur tamamlamıyor" üç kez daraldı ve şuraya indi: **4121'de sekiz arabanın altısı, waypoint
+6'daki ~50°'lik virajda, 12 m'lik koridordan 15 m açılarak kursu bırakıyor ve bir daha
+toparlanmıyor.** Orada dünya sağlam (13×13 zemin taramasında boşluk yok), kavşağın üç kolu da yarış
+hattında (koridora 0,0 m), yani alacak yanlış kol yok.
+
+### Çürütülenler — tekrar denenmesin
+
+| aday | sonuç |
+|---|---|
+| fren eşiği (`NFS_BRAKE`) | varsayılan 9 yerel optimum; iki yönde de kötüleşiyor |
+| direksiyon hızı (0,35) | 4121'de 6/8 → 3/8, **alanda 869 → 773** |
+| nişan mesafesi (`LOOKAHEAD_PER_SPEED`) | dört rotada +%11, **sekizde 869 → 858** |
+| pilotun 4× hızlı saati | düzeltildi, ama alan 869 → 865 — sebep değilmiş |
+
+**Yöntem dersi, iki kez ödendi:** yarım süpürme (dört rota) iki kez yanlış pozitif verdi, ve
+ikisinde de gürültü değil **temsil etmeyen alt küme** yüzünden — nişan mesafesi elenen dörtte +59,
+elenmeyen dörtte −70. Karar yalnız sekiz rotadan çıkar.
+
+### Açık kalanlar
+
+- **`CORNER_LIFT`'in büyüklüğü** — viraj cephesinde denenmemiş tek pilot kolu (rampalanması ayrıca
+  çürütülmüştü).
+- **Zaman sabitleri artık dürüst.** `STALL_FOR`, `BACK_FOR`, `ESCAPE_FOR`, `SETTLE` yıllarca
+  çeyreklenmiş değerleriyle ayarlanmıştı. Dördü birden dört katına çıktığında alan 869 → 865 gitti,
+  yani muhtemelen bağlayıcı değiller — ama tek tek süpürülmediler.
+- **Oyuncunun gözlemi: sürerken yolda binalara çarpmak.** Bağımsız ve açıklanmamış. Benim engel
+  taramam bunu **doğrulamadı** — vuruşlarının çoğu çok katlı yerlerde ve `Walls::across` orada kat
+  değiştirebiliyor. Kesin cevap `across`'un çarptığı üçgeni döndürmesini gerektiriyor (bugün yalnız
+  boolean); o üçgenin yükseklik aralığı ve yola göre kotu soruyu tek ölçümde kapatır.
+- **Motor pini `3433aef`'te** (2026-08-14'te taşındı, doğrulandı). Motor o günden beri ilerledi;
+  bugünkü render düzeltmelerinden sonrakiler oyuna henüz gelmedi.
+
+### Kalan aletler
+
+`NFS_HOLE=x,z` (zemin haritası + en yakın düğüm + kavşak kolları), `NFS_BLOCKED=1` (hat boyunca
+engel taraması, yüksekliğe göre ayrılmış), `NFS_FLOOR`/`NFS_FLOORSTEER` (pilotu devreden çıkarıp
+gazı basılı tutmak — bir turu bu çözdü), ve her arabanın kursu **ilk kalıcı olarak bıraktığı**
+an/waypoint/konum.
+
