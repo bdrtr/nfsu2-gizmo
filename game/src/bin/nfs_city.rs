@@ -191,7 +191,13 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
     }
 
     // NFS_BACKDROP=1: draw the sky shell and the panorama panels too, through the engine's
-    // `MaterialType::Backdrop` — drawn first, camera-locked, depth writes off.
+    // `MaterialType::BackdropPlaced` — drawn first, depth writes off, and **not** camera-locked.
+    // The comment used to name `Backdrop`, the locked variant, which is the one items 7 and 9
+    // measured and rejected: NFSU2's panorama is world-placed geometry twelve to eighteen
+    // kilometres across, and locking it to the camera pastes a three-kilometre panel onto the
+    // lens (move the camera 1000 m and 45.4 % of the top-left quadrant stayed identical; with
+    // the placed variant that is 0.0 %). The code below has always called
+    // `with_backdrop_placed` — only this line was wrong.
     //
     // Off by default so every existing measurement here keeps meaning what it meant, and because
     // this binary's job is the *city*: a backdrop that spans fifteen kilometres would dominate any

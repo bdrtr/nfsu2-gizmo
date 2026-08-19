@@ -52,9 +52,16 @@
 //!   scheme that puts coarse copies out of the way: the file plants them on Bayview's streets the
 //!   same way it plants everything else.
 //!
-//! What the tiers really are is the input a distance-based selector wants, which the renderer does
-//! not have yet; the day it does, this module is where it asks, and the coarse tiers stop being
-//! something to drop and become something to swap in.
+//! What the tiers really are is the input a distance-based selector wants — and the renderer HAS
+//! one now (`LodGroup` / `LodLevel`, honoured by the engine's own `collect_draw_items` since
+//! engine `eda05c3`, which the pin has carried since 2026-08-14). So the day named below has come:
+//! this module is where the selector asks, `families()` / `Family::finest()` are its input, and
+//! the coarse tiers stop being something to drop and become something to swap in. See
+//! `MOTOR-NOTLARI.md` item 8 — the engine half is done, this is the half that is waiting.
+//!
+//! Worth keeping in view before starting: the measured prize is small. Drawing all three tiers is
+//! 5672 → 6406 meshes and 8.0 → 9.1 ms, so at most 1.1 ms is on the table, and `keep_finest`'s
+//! reason was never speed — it is that a coarse tier read as a blurred box up close.
 //!
 //! What stays open is *why* a tier chain is spread across the map at all. That is a question about
 //! the bundle rather than about the game: the visibility data the original engine used
