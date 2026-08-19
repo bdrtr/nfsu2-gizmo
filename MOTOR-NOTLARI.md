@@ -170,6 +170,17 @@ Yeni madde eklerken şablon — boş sütun bırakma, bilmiyorsan "ölçülmedi"
 
 ## Pini yükseltme kontrol listesi
 
+**0. Baseline'ı al — yükseltmeden ÖNCE.** Sekiz-rota süpürmesini koştur ve sayıları diske yaz
+(`BASELINE-SEKIZ-ROTA.md`). Motorun kendi determinizm hash'i bu iş için kullanılamaz: o kendi 200
+kutuluk yıkım sahnesini kilitliyor, bu şehri değil. Yükseltmeden sonra alınan bir ölçümün
+karşılaştıracak bir şeyi kalmaz. Süpürmeden önce `cargo build --release` çıktısını doğrula —
+bayat binary eski sayıları sessizce tekrarlar ve "etki yok" diye okunur.
+
+**0b. `rev`'in erişilebilirliğini doğrula.** `git -C ../Gizmo branch --contains <rev>` boş
+dönmemeli. Erişilemeyen bir hash bir pin değil, bir önbellek bahsidir — 2026-08-20'de tam olarak
+bu oldu, yukarıya bak.
+
+
 1. **Ne değişmiş, gör:** `git -C ../Gizmo log --oneline 48ac99e..main`
 2. **Kuyruğu tara:** yukarıdaki `açık` maddelerden hangileri o aralıkta kapanmış? Kapananları
    `pin yükselince doğrula` yap — henüz `kapandı` değil, doğrulanmadan kapanmaz.
