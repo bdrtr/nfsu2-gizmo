@@ -11,8 +11,8 @@ tahmin değil bir liste olur.
 |---|---|
 | paket | `gizmo-engine` (kütüphane adı `gizmo`), sürüm `0.9.0` |
 | kaynak | `https://github.com/bdrtr/Gizmo` |
-| commit | `3433aefe8905afa104eaa96b021ca12d398692d5` — `main`, *"renderer: the caster-reach change quadrupled a bias in two paths I had not converted"* |
-| sabitlendi | 2026-08-14 (önceki: `48ac99e`, 2026-08-12; ondan önce `ba969c0`, 2026-08-11) |
+| commit | `09c948a9848d481fc9a57b17ea7fd5bf519e4841` — `main`, *"renderer: the caster-reach change quadrupled a bias in two paths I had not converted"* |
+| sabitlendi | 2026-08-20 (önceki: `3433aefe`, 2026-08-14 — **aynı ağaç**, aşağıya bak; ondan önce `48ac99e`, 2026-08-12; `ba969c0`, 2026-08-11) |
 | nerede yazılı | `game/Cargo.toml` → `rev = ...`; `Cargo.lock` aynı commit'i ayrıca kaydeder |
 
 **2026-08-11 yükseltmesi.** `4d1a8cb..main` beş commit ve ikisi doğrudan bu dosyaya cevap:
@@ -37,6 +37,27 @@ Bu commit'te oyunun bugün dayandığı her şey var — doğrulandı, varsayıl
 `gizmo-physics-core/src/components/collider.rs:648`), `MaterialType::BakedLit`,
 `VehicleTuning::torque_curve`. `trimesh-aabb` ve `shadow-gate` dallarının ikisi de `main`'e
 girmiş durumda, yani ROADMAP'in "push edilmedi" notu artık geçerli değil.
+
+**2026-08-20 yeniden pinleme — motor kaynağı DEĞİŞMEDİ.** Yeni `rev` yeni bir motor sürümü
+değil: `git diff 3433aefe 09c948a9 -- crates/` **boş**, yani iki commit'in motor ağacı bayt-birebir
+aynı. Değişen tek şey commit'in erişilebilir olması.
+
+Sebep ölçüldü: motor deposunun tarihi 96 MB'lık bir medya temizliği için yeniden yazılmış, ve eski
+hattaki commit'ler `main`'in atası olmaktan çıkmış. `3433aefe` **hiçbir daldan erişilemiyor** —
+yalnız cargo'nun `rev=` için ürettiği yapay `refs/commit/<sha>` ref'inden. Pratik sonucu şuydu:
+oyun bu makinede yalnız `~/.cargo/git/db` önbelleği sayesinde derleniyordu. Temiz bir kopyada,
+CI'da ya da başka bir makinede cargo GitHub'dan erişilemeyen bir nesne istemek zorunda kalırdı, ve
+GitHub onu bir gün toplar.
+
+Yani pinin verdiği söz — *"oyunun derlemesi bizim değiştirmediğimiz bir sebeple bozulamaz"* — bir
+commit tarafından değil bir önbellek tarafından tutuluyordu. Bu yeniden pinleme onu geri koyuyor:
+`09c948a9` `main`'den erişilebilir, ve içerik aynı olduğu için oyun tarafında doğrulanacak bir
+davranış değişikliği yok. Kontrol listesinin 5. adımı (gözle doğrulama) bu adımda atlanabilir; 4.
+adım (derle ve test et) yine de koşuldu.
+
+**Ders, defterin kendi diliyle:** bir git `rev` pini, o commit'e bir daldan erişilebildiği sürece
+tekrarlanabilirlik verir. Erişilemeyen bir hash bir pin değil, bir önbellek bahsidir. Bir sonraki
+pin değişiminde `git -C ../Gizmo branch --contains <rev>` çıktısının boş olmadığını doğrula.
 
 ### Neden pin
 
