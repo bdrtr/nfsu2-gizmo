@@ -1406,7 +1406,11 @@ fn shoot(world: &mut World, renderer: &mut Renderer, out: &str, w: u32, h: u32) 
     slice.map_async(wgpu::MapMode::Read, move |v| tx.send(v).unwrap());
     let _ = renderer.device.poll(wgpu::PollType::Wait { submission_index: None, timeout: None });
     rx.recv().unwrap().unwrap();
-    let data = slice.get_mapped_range();
+    // wgpu 30: `get_mapped_range` artık `Result` döndürüyor. Eşleme yukarıda
+    // `rx.recv().unwrap().unwrap()` ile zaten beklendi ve başarısı doğrulandı, yani
+    // buradaki hata "eşlenmemiş tampon" demek olurdu — o da bir kaçırılmış hata değil,
+    // bir mantık hatası. Motorun kendi `capture.rs`'i de aynı deseni kullanıyor.
+    let data = slice.get_mapped_range().expect("mapped range");
 
     let mut tight = Vec::with_capacity((unpadded * h) as usize);
     for y in 0..h {

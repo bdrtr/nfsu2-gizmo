@@ -19,7 +19,7 @@ default-run = "nfs_drive"
 #
 # Yerel motoru geçici olarak denemek için kök Cargo.toml'daki `[patch]` bloğunu aç.
 # Pini yükseltmeden önce MOTOR-NOTLARI.md'deki kontrol listesini oku.
-gizmo = { package = "gizmo-engine", git = "https://github.com/bdrtr/Gizmo", rev = "09c948a9848d481fc9a57b17ea7fd5bf519e4841", features = ["audio", "scripting", "scene", "editor", "render", "window", "ui"] }
+gizmo = { package = "gizmo-engine", git = "https://github.com/bdrtr/Gizmo", rev = "58dc26232b50d12eb0554317922c5d59bf5a6ae5", features = ["audio", "scripting", "scene", "editor", "render", "window", "ui"] }
 # Saf NFSU2 asset parser'ı (motordan bağımsız) — artık kendi reposunda: PryHUB varlık aracı.
 # Yerelde paralel geliştirme için kök Cargo.toml'daki `[patch]` bunu ../PryHUB'a yönlendirir.
 gizmo-nfs = { git = "https://github.com/bdrtr/PryHUB.git", branch = "main" }

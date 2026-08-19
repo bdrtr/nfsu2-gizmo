@@ -9,10 +9,10 @@ tahmin değil bir liste olur.
 
 | | |
 |---|---|
-| paket | `gizmo-engine` (kütüphane adı `gizmo`), sürüm `0.9.0` |
+| paket | `gizmo-engine` (kütüphane adı `gizmo`), sürüm `0.10.0` |
 | kaynak | `https://github.com/bdrtr/Gizmo` |
-| commit | `09c948a9848d481fc9a57b17ea7fd5bf519e4841` — `main`, *"renderer: the caster-reach change quadrupled a bias in two paths I had not converted"* |
-| sabitlendi | 2026-08-20 (önceki: `3433aefe`, 2026-08-14 — **aynı ağaç**, aşağıya bak; ondan önce `48ac99e`, 2026-08-12; `ba969c0`, 2026-08-11) |
+| commit | `58dc26232b50d12eb0554317922c5d59bf5a6ae5` — `main`, *"chore(media): logonun geniş kaynak sürümü depoya alındı"* |
+| sabitlendi | 2026-08-20 (önceki: `09c948a9` aynı gün — erişilebilirlik düzeltmesi, aynı ağaç; `3433aefe`, 2026-08-14; `48ac99e`, 2026-08-12; `ba969c0`, 2026-08-11) |
 | nerede yazılı | `game/Cargo.toml` → `rev = ...`; `Cargo.lock` aynı commit'i ayrıca kaydeder |
 
 **2026-08-11 yükseltmesi.** `4d1a8cb..main` beş commit ve ikisi doğrudan bu dosyaya cevap:
@@ -58,6 +58,48 @@ adım (derle ve test et) yine de koşuldu.
 **Ders, defterin kendi diliyle:** bir git `rev` pini, o commit'e bir daldan erişilebildiği sürece
 tekrarlanabilirlik verir. Erişilemeyen bir hash bir pin değil, bir önbellek bahsidir. Bir sonraki
 pin değişiminde `git -C ../Gizmo branch --contains <rev>` çıktısının boş olmadığını doğrula.
+
+**2026-08-20 yükseltmesi — 257 commit, oyuna maliyeti iki satır.**
+
+`log pin..main` 964 commit gösteriyor ama gerçek delta **257**: `main..pin`'deki 707 konunun hepsi
+`pin..main`'de birebir var, yani aynı işin yeniden yazılmış hâli. Ölçüm: `comm -12` = 707,
+`comm -13` = 0.
+
+**Derleme maliyeti: iki satır.** Tek kırık wgpu 30'un `get_mapped_range()` çağrısının artık
+`Result` döndürmesi — `nfs_shot.rs` ve `nfs_city.rs`'teki kare yakalayıcılar. `.expect(...)`
+eklendi; motorun kendi `capture.rs`'i de aynı deseni kullanıyor. Bunun dışında kaldırılmış ya da
+yeniden adlandırılmış tek bir motor sembolü yok — oyunun dokunduğu yüzeyin tamamı yerinde.
+Yığın sıçraması: wgpu 29→30, egui 0.34→0.36, MSRV 1.92→1.96 (bu makinede rustc 1.97.1).
+
+**Sürüş kaydı mı? Ölçüldü — sürücü sağlam, temas kaydı.** Sekiz-rota süpürmesi, yükseltmeden önce
+alınan baseline'a karşı (`BASELINE-SEKIZ-ROTA.md`):
+
+| ölçü | pin | main | okuma |
+|---|---|---|---|
+| `away` | 64 | 64 | kavşak seçimi değişmedi |
+| `junctions` | 1452 | 1445 | −%0,5 |
+| distinct nodes | 1354 | 1352 | −%0,1 |
+| `furthest` | 5350 | 5170 | −%3,4, **işaretler iki yönlü** (4001 +104, 4061 −182) |
+| `fallen` | 2 | 3 | +1, rota 4041 |
+
+Kontrol ölçümü yapıldı: aynı rota aynı binary'de iki kez koşuldu, sayılar **birebir aynı** çıktı
+(`furthest=708`). Yani farklar gürültü değil.
+
+Okuması: sürücü mantığı sağlam (`away` sabit, kavşak/düğüm yarım puan içinde), değişen şey
+**yörüngeler**. Rota 4081 tek bir sayı bile oynamadan **birebir aynı** kaldı — duvara sürtmeyen,
+temiz giden rota. Bu, aralıkta gelen statik/dinamik (stick-slip) temas sürtünmesi modelinin imzası:
+temasa girmeyen rota etkilenmiyor, girenler 90 saniyede ayrışıyor. `fallen`'daki +1 aynı yerden.
+Regresyon değil, ölçülmüş bir kayma — ve NFSU2 için doğru yönde olması muhtemel: gerçek araba
+duvara sürtünce yapışıp kaymaz.
+
+**Araç bit düzeyinde aynı.** `crates/gizmo-physics-dynamics/src/vehicle/` diff'inde yorum dışı tek
+kod satırı yok (ölçüldü), ve canlı doğrulaması da örtüşüyor: `NFS_AUTODRIVE=1 NFS_DIAG=1 nfs_race`
+→ 121 diag satırının 120'sinde dört teker yerde (tek istisna doğuş anındaki düşüş), 121/121'inde
+tork yalnız arka akstan `[0, 0, 949, 949]`, kütle 1220 kg. Defterin 2026-08-12'de kaydettiği
+sayıların aynısı.
+
+Gözle: `nfs_race` kare 300'de doğru çiziyor — araba, gölge, pist çizgileri, HUD. wgpu 30 geçişinin
+görünür bir kaybı yok.
 
 ### Neden pin
 
