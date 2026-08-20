@@ -177,6 +177,14 @@ struct CityStats {
     backdrop: usize,
 }
 
+/// Where a cut-out's holes are cut: a texel under half opacity is a hole. glTF's own
+/// `AlphaMode::Mask` default, and the same number the census counts see-through texels with.
+const CUT_ALPHA: f32 = 0.5;
+
+/// How much of a texture may sit at *partial* opacity before it is a decal rather than a cut-out.
+/// A stencil has almost none; a decal is made of it.
+const CUT_MID_BAND: f32 = 0.02;
+
 fn main() {
     gizmo::app::setup_panic_hook();
     App::<CruiseState>::new("Gizmo — NFSU2 Bayview", 1600, 900)
@@ -515,6 +523,7 @@ fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> CruiseState
             layout: &renderer.scene.texture_bind_group_layout,
         };
         let mut bound: HashMap<AssetHash, _> = HashMap::new();
+        let mut cut: std::collections::HashSet<_> = std::collections::HashSet::new();
         for key in visuals.meshes.iter().chain(&sky.meshes).filter_map(|m| m.texture) {
             if bound.contains_key(&key) {
                 continue;
@@ -523,10 +532,28 @@ fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> CruiseState
             // was resolved in, so a key that resolved shared uploads from shared.
             let own = packs.iter().find_map(|p| p.get(key).and_then(|r| p.decode(r).ok()));
             let Some(img) = own.or_else(|| shared.get(key).cloned()) else { continue };
+            // **Which textures are cut-outs.** Bayview's foliage is flat cards with the tree cut
+            // out of a quad; drawn opaque those cards are dark slabs standing in the air, which
+            // is what a player sees and reports as objects floating in the sky.
+            //
+            // A cut-out is told from a *decal* by the **shape** of its alpha, not by how much of
+            // it is clear: a stencil is bimodal — every texel is the thing or the hole — while a
+            // decal is made of partial opacity. The clear-share does not separate them (measured
+            // over 1,500 textures it runs smoothly from 0 to 100 %); this does, 156 against 79.
+            // Decals are then left exactly as they were, opaque, because that is the only one of
+            // the three treatments that shows their pattern.
+            let px = img.rgba.len() / 4;
+            let any = img.rgba.chunks_exact(4).any(|p| p[3] < 128);
+            let mid = img.rgba.chunks_exact(4).filter(|p| (26..=230).contains(&p[3])).count() as f32
+                / px.max(1) as f32;
+            if any && mid <= CUT_MID_BAND {
+                cut.insert(key);
+            }
             if let Some(bg) = tex.upload(&format!("city_{:08X}", key.0), &img.rgba, img.width, img.height) {
                 bound.insert(key, bg);
             }
         }
+        println!("kesim dokusu: {} / {} yüklenen", cut.len(), bound.len());
         if !course_paths.is_empty() {
             // Half a metre, not the three the headless overview needs: a chase camera is metres
             // from the road, and three would float.
@@ -549,6 +576,13 @@ fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> CruiseState
             };
             // The two arms the engine gained and nothing was pulling — `scene::city_lift`.
             let material = material.with_ambient(lift.0).with_emissive(lift.1);
+            // And the cut-outs lose their holes instead of standing as slabs. `discard` in the
+            // opaque pass, so depth is still written and nothing has to be sorted.
+            let material = if m.texture.is_some_and(|k| cut.contains(&k)) {
+                material.with_alpha_cutoff(CUT_ALPHA)
+            } else {
+                material
+            };
             scene::spawn_mesh(world, m.mesh.clone(), material, Transform::new(m.origin));
         }
 

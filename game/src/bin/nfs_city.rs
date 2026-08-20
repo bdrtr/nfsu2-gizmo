@@ -52,27 +52,25 @@ use nfsu2::scene::{self, Textures};
 use nfsu2::world::{build_region, CityVisuals};
 use std::collections::HashMap;
 
-/// How much of a texture may be see-through before it is *left opaque*, as a share. **0 is off**,
-/// which is the shipped value, and the reason is measured rather than chosen.
+/// How much of a texture may sit at *partial* opacity before it is a decal rather than a cut-out.
 ///
-/// Bayview's foliage is flat cards with the tree cut out of a quad, and the city is spawned
-/// opaque, so those cards render as **dark slabs standing in the air** — which is what a player
-/// reports as objects floating in the sky. The engine offers this path exactly one lever,
-/// `Material::with_transparent`, which is alpha *blending*; the alpha *test* that a cut-out
-/// actually wants (`discard` on `alpha < cutoff`) exists in the renderer's G-buffer shader but is
-/// reachable only from the glTF loader, and `with_baked_lit` does not go through the G-buffer.
+/// A stencil has none: every texel is the thing or the hole. A decal is made of partial opacity.
+const MID_BAND: f32 = 0.02;
+
+/// Where the cut-out threshold sits: a texel under half opacity is a hole.
 ///
-/// Blending fixes the trees and costs the decals. A decal — the circular paving pattern, road
-/// grime, the lane markings' overlay — is coplanar with the surface under it, and the transparent
-/// pass will not hold it there: it vanishes and the plaza reads as flat grey. Measured over
-/// `STREAML4RA`'s 1,500 textures, 235 carry transparency and their shares run smoothly from 0 to
-/// 100 % (quartiles 48 / 68 / 82 %), so **no threshold separates foliage from decals** — at 11
-/// textures the decals are right and the trees are slabs, at 235 the trees are right and the
-/// plaza is grey, and every value between is one or the other.
+/// **The city is spawned opaque and Bayview's foliage is flat cards with the tree cut out of a
+/// quad**, so those cards used to render as dark slabs standing in the air. The engine's only
+/// lever on this path was `with_transparent` — alpha *blending* — and blending forced a choice
+/// it could not win: it fixes the cards and loses every decal, because a decal is coplanar with
+/// the surface under it and the sorted pass will not hold it there. Measured over 1,500 textures,
+/// 235 carry transparency and their shares run smoothly from 0 to 100 % (quartiles 48/68/82 %),
+/// so no threshold separated foliage from decals.
 ///
-/// So this ships off, the black slabs stay, and what the city needs from the engine is one field:
-/// an alpha cutoff on the baked-lit material. `NFS_CUT=1` shows the other side of the trade.
-const CUT_SHARE: f32 = 0.0;
+/// The engine grew `Material::with_alpha_cutoff` for exactly this (`MOTOR-NOTLARI.md` §14): the
+/// draw stays in the opaque pass and the holes are `discard`ed, so both survive. 0.5 is glTF's
+/// own `AlphaMode::Mask` default, and the same number the census counts see-through texels with.
+const CUTOFF: f32 = 0.5;
 
 fn main() {
     let path = std::env::args().nth(1).expect("usage: nfs_city STREAM*.BUN OUT.raw [W H]");
@@ -232,6 +230,23 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
     } else {
         Vec::new()
     };
+    // NFS_NAMES=1: every object name the region ships, grouped by its family stem. A render
+    // category — backdrop, distant LOD, foliage — is a claim about what the file calls things,
+    // and this is how such a claim is checked instead of guessed at.
+    if std::env::var("NFS_NAMES").is_ok() {
+        let mut fams: HashMap<String, usize> = HashMap::new();
+        for m in &meshes {
+            let stem: String =
+                m.header.name.trim_end_matches(|c: char| c.is_ascii_digit()).to_string();
+            *fams.entry(stem).or_default() += 1;
+        }
+        let mut v: Vec<_> = fams.into_iter().collect();
+        v.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+        println!("isim aileleri ({} tane):", v.len());
+        for (n, c) in v.iter().take(60) {
+            println!("   {c:>5} × {n}");
+        }
+    }
     let sky = meshes.iter().filter(|m| nfsu2::world::is_backdrop(&m.header.name)).count();
     let lod = meshes.iter().filter(|m| nfsu2::world::is_distant_lod(&m.header.name)).count();
     meshes.retain(|m| {
@@ -1125,12 +1140,10 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
     // reports as objects floating in the sky. Only these need the transparent pipeline; putting
     // the whole city in it would cost a sorted pass for the sake of the trees.
     let mut cut: std::collections::HashSet<AssetHash> = std::collections::HashSet::new();
-    // How much of a texture has to be see-through before it counts as a cut-out. Measured, not
-    // guessed: at "any transparent pixel at all" 235 of 1500 textures qualify and the roads go
-    // with them — a road's texture carries a few transparent texels and drawing it in the sorted
-    // transparent pass washes the whole surface out.
-    let cut_share: f32 =
-        std::env::var("NFS_CUT").ok().and_then(|v| v.parse().ok()).unwrap_or(CUT_SHARE);
+    let mut soft: std::collections::HashSet<AssetHash> = std::collections::HashSet::new();
+    // The threshold the shader will cut at; `NFS_CUT` re-opens it for a look.
+    let cutoff: f32 =
+        std::env::var("NFS_CUT").ok().and_then(|v| v.parse().ok()).unwrap_or(CUTOFF);
     let mut shares: Vec<f32> = Vec::new();
     let mut decoded = 0usize;
     let sky_keys = sky_visuals.iter().flat_map(|s| s.meshes.iter()).filter_map(|m| m.texture);
@@ -1146,6 +1159,18 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
         let px = image.rgba.len() / 4;
         let clear = image.rgba.chunks_exact(4).filter(|p| p[3] < 128).count();
         let share = clear as f32 / px.max(1) as f32;
+        // **What separates a cut-out from a decal is the SHAPE of its alpha, not how much of it
+        // is clear.** A cut-out is a stencil: every texel is either the tree or the hole, so its
+        // alpha is bimodal — almost nothing lands in between. A decal is a wash: its edges fade,
+        // so a real share of it sits at partial opacity. Measured over the same 1,500 textures,
+        // the share of *clear* texels does not separate them at all (it runs smoothly 0-100 %),
+        // and this does.
+        let mid = image
+            .rgba
+            .chunks_exact(4)
+            .filter(|p| (26..=230).contains(&p[3]))
+            .count() as f32
+            / px.max(1) as f32;
         shares.push(share);
         // **A band, not a floor.** The two things that carry alpha here are not the same kind:
         // foliage is a card cropped tight to the tree, so only a small share of it is cut away,
@@ -1154,8 +1179,15 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
         // entirely, because a decal is coplanar with the surface it sits on and the transparent
         // pass will not hold it there. So the band takes the low end and leaves the high end
         // opaque. `NFS_CUT=<share>` moves the ceiling.
-        if cut_share > 0.0 && share > 0.0 && share <= cut_share {
-            cut.insert(key);
+        // **Any texture that carries real transparency is a cut-out.** The band this used to
+        // need is gone with the reason for it: discarding needs no choice between foliage and
+        // decals, because the draw stays in the opaque pass and both keep their place.
+        if share > 0.0 {
+            if mid <= MID_BAND {
+                cut.insert(key);
+            } else {
+                soft.insert(key);
+            }
         }
         let name = format!("city_{:08X}", key.0);
         if let Some(bg) = tex.upload(&name, &image.rgba, image.width, image.height) {
@@ -1185,7 +1217,12 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
             100.0 * q(0.75),
             100.0 * q(0.95),
             cut.len(),
-            100.0 * cut_share
+            100.0 * cutoff
+        );
+        println!(
+            "   {} kesim (alfası iki uçlu) · {} decal (ara opaklıkta)",
+            cut.len(),
+            soft.len()
         );
     }
 
@@ -1233,12 +1270,22 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
         };
         let material = material.with_ambient(lift.0).with_emissive(lift.1);
         let material = if double { material.with_double_sided(true) } else { material };
-        // And the cut-outs get the transparent pipeline. `NFS_ALPHA=0` puts them back the way
-        // they were, which is how the before-and-after was taken.
-        let material = if m.texture.is_some_and(|k| cut.contains(&k))
-            && std::env::var("NFS_ALPHA").as_deref() != Ok("0")
-        {
-            material.with_transparent(true)
+        // And the cut-outs are **discarded**, not blended: the draw stays in the opaque pass, so
+        // a tree's quad loses its holes while a decal coplanar with the road keeps its place.
+        // **Only the cut-outs are touched.** The census above separates them from decals, and
+        // the decals are deliberately left exactly as they were — opaque. That is not a
+        // compromise: a decal drawn opaque shows its pattern, which is what it is for, and both
+        // of the other treatments lose it. Blending drops it, because it is coplanar with the
+        // surface under it and the sorted pass will not hold it there; discarding erases it,
+        // because it is partial opacity all the way through and every texel falls under the
+        // threshold. Measured all three ways on the same frame.
+        //
+        // A **cut-out** is discarded: the draw stays in the opaque pass, depth is written, and a
+        // tree's quad simply loses its holes.
+        let material = if std::env::var("NFS_ALPHA").as_deref() == Ok("0") {
+            material
+        } else if m.texture.is_some_and(|k| cut.contains(&k)) {
+            material.with_alpha_cutoff(cutoff)
         } else {
             material
         };
