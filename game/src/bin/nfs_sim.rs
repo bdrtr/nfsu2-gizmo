@@ -42,6 +42,24 @@ const WHEEL_R: f32 = 0.31;
 /// them is already 15 m from both without having strayed at all. 25 m is that geometry plus a car.
 const OFF_LINE: f32 = 25.0;
 
+/// How many neighbours a pulled waypoint carries with it, with a linear falloff. **0: refuted.**
+///
+/// | | waypoints | on the corridor | on their side | furthest | lost the line |
+/// |---|---|---|---|---|---|
+/// | **0** (kept) | — | **73.8 %** | **0.8 %** | **5951 m** | 40 |
+/// | 2 | −179 | 72.9 % | 0.8 % | 5611 m | **36** |
+/// | 4 | −262 | 63.3 % | 2.6 % | 4910 m | 51 |
+///
+/// It does what it was written to do — on `Paths4121` the ring's sub-40 km/h waypoints go 3 → 1
+/// and its sub-60 16 → 11 — and the field loses anyway. Only the count of cars that lose the race
+/// line improves (40 → 36) and every other column is worse.
+///
+/// **Third refusal in a row of the same idea, and together they close it.** After the plain pull,
+/// making the ring's geometry *better* does not make the driving better: braking for the ring's
+/// own radius loses (`RING_HELD`), averaging the kinks away is neutral (`NFS_SMOOTH`), and moving
+/// a neighbourhood together instead of a point loses. The pull took what was there to take.
+const PULL_SPREAD: usize = 0;
+
 /// Where an off-corridor waypoint is pulled to, as a fraction of the corridor's half-width: 0 is
 /// its centre, 1 its edge. Measured; see the block that uses it.
 const PULL_TO: f32 = 0.0;
@@ -601,20 +619,54 @@ async fn run() {
     // keeps the course. Three independent measures agree; one, time on the corridor, disagrees.
     let waypoints = if knob("NFS_PULL").is_none_or(|v| v != "0") {
         let to: f32 = knob("NFS_PULL").and_then(|v| v.parse().ok()).unwrap_or(PULL_TO).clamp(0.0, 1.0);
+        // `NFS_PULLSPREAD=<k>`: carry each waypoint's displacement into its k neighbours, with a
+        // linear falloff, instead of moving it alone.
+        //
+        // **Why, measured.** Moving one point and leaving its neighbours where they were turns a
+        // bulge into a **notch**, and a notch is a corner the pilot has to take: the pulled ring
+        // still imposes a sub-60 km/h limit at 7-12 waypoints a route, and on `Paths4121` a 13 m
+        // radius — a hairpin in a city street, which is a kink, not a road. Braking for those
+        // radii was written and refuted, and smoothing them away afterwards is neutral, because
+        // an average cuts the corner it is smoothing. Spreading the displacement is the third
+        // option and the only one that keeps the ring's *shape*: a neighbourhood translates
+        // together, so the constraint is met without a new corner being invented.
+        let spread: usize = knob("NFS_PULLSPREAD").and_then(|v| v.parse().ok()).unwrap_or(PULL_SPREAD);
         let mut moved = 0usize;
         let mut worst = 0.0f32;
+        let n = waypoints.len();
+        let mut shift = vec![Vec3::ZERO; n];
+        for (i, w) in waypoints.iter().enumerate() {
+            let Some(f) = corridor.locate(*w) else { continue };
+            if f.distance <= city::COURSE_HALF_WIDTH {
+                continue;
+            }
+            moved += 1;
+            worst = worst.max(f.distance);
+            let back = f.distance - city::COURSE_HALF_WIDTH * to;
+            let dir = Vec3::new(f.at.x - w.x, 0.0, f.at.z - w.z).normalize_or_zero();
+            let d = dir * back;
+            shift[i] += d;
+            for k in 1..=spread {
+                let weight = 1.0 - k as f32 / (spread + 1) as f32;
+                shift[(i + k) % n] += d * weight;
+                shift[(i + n - k) % n] += d * weight;
+            }
+        }
+        // A neighbour that was inside can be pushed out by someone else's displacement; one
+        // correction pass, applied the old way, puts it back without re-opening the spreading.
         let pulled: Vec<Vec3> = waypoints
             .iter()
-            .map(|w| {
-                let Some(f) = corridor.locate(*w) else { return *w };
-                if f.distance <= city::COURSE_HALF_WIDTH {
-                    return *w;
+            .zip(&shift)
+            .map(|(w, d)| {
+                let p = *w + *d;
+                match corridor.locate(p) {
+                    Some(f) if f.distance > city::COURSE_HALF_WIDTH => {
+                        let back = f.distance - city::COURSE_HALF_WIDTH * to;
+                        let dir = Vec3::new(f.at.x - p.x, 0.0, f.at.z - p.z).normalize_or_zero();
+                        p + dir * back
+                    }
+                    _ => p,
                 }
-                moved += 1;
-                worst = worst.max(f.distance);
-                let back = f.distance - city::COURSE_HALF_WIDTH * to;
-                let dir = Vec3::new(f.at.x - w.x, 0.0, f.at.z - w.z).normalize_or_zero();
-                *w + dir * back
             })
             .collect();
         println!(

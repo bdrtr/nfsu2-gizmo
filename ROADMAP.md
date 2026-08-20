@@ -5214,3 +5214,37 @@ frenlenecek kadar güvenilir değil, ve yumuşatmak onları doğru yapmıyor.**
 
 Günün dördüncü "daha az yap" çürütmesi, ve en keskini: aritmetiğin "bu viraj imkânsız" dediği yere
 nişan alındı ve yavaşlamak yine kaybetti.
+
+### Kırık bırakmayan çekme de çürüdü — ve üç çürütme birlikte kapıyı kapatıyor (2026-08-20)
+
+Bir önceki bölümün sonu "halkanın yarıçaplarını güvenilir yapmak" diyordu. Üçüncü ve en dikkatli
+deneme yazıldı: **çekmeyi tek noktaya değil, komşularına doğrusal sönümle yayan** bir yer
+değiştirme alanı (`NFS_PULLSPREAD=<k>`). Ortalama almıyor — yani virajı kesmiyor — yalnız bir
+komşuluğu birlikte ötelüyor, böylece kısıt sağlanırken yeni köşe icat edilmiyor.
+
+**Kırıkları gerçekten alıyor:** `Paths4121`'de 40 km/h altı waypoint **3 → 1**, 60 altı **16 → 11**.
+
+**Alan yine kaybediyor:**
+
+| | waypoint | kursta süre | yan yatarak | furthest | hattı bırakan |
+|---|---|---|---|---|---|
+| **yayılım yok** (kalan) | — | **%73,8** | **%0,8** | **5.951 m** | 40 |
+| 2 | **−179** | %72,9 | %0,8 | 5.611 m | **36** |
+| 4 | **−262** | %63,3 | %2,6 | 4.910 m | 51 |
+
+Tek iyileşen sütun hattı bırakan araba (40 → 36), gerisi kötü.
+
+**Ve üç çürütme birlikte bir kapıyı kapatıyor.** Düz çekmeden *sonra* halkanın geometrisini daha
+iyi yapmak sürüşü daha iyi yapmıyor:
+
+1. halkanın kendi yarıçapı için fren — **çürük** (−153)
+2. kırıkları ortalamayla yumuşatmak — **nötr** (−39, gürültü kıyısında)
+3. kırık bırakmayan çekme — **çürük** (−179)
+
+Çekme alınacak olanı almış. Bugün kurs tarafında beş şey denendi (ağda yürüme, kırpma, çekme,
+yumuşatma, yayılımlı çekme) ve yalnız biri kazandı; pilot tarafında yedi kaldıraç çürüdü. Kolay
+olan bitti, ve bu bir sonuç: **kalan kayıp halkanın şeklinde ya da pilotun tepkisinde değil.**
+
+Ölçü artık doğru yere bakıyor (hattı bırakma, koridoru değil), 11 yerin beşi 31 arabayı açıklıyor,
+ve o beş yerin her biri ayrı bir soru. Sıradaki iş bir kural denemek değil, o yerlerden birinin
+izini baştan sona sürmek.
