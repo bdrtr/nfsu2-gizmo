@@ -3866,10 +3866,60 @@ yerin doğrulanması — iki halka iki farklı kurs ve sınırlayıcı olan halk
 başında duruyor — grafın 108 m'lik kirişe karşılık 2.436 m'lik yol bulduğu bacağın. Orada ne var?
 `NFS_HOLE` ve `NFS_ARM` o noktayı sormak için hazır.
 
+### Düzeltme, ve arkasına nişan alan arabanın yerinde sallanması (2026-08-20)
+
+**Önce bir düzeltme.** Bir önceki bölümde "4021'in arabaları tam olarak grafın tarif edemediği
+bacağın başladığı yerde duruyor" yazmıştım: bacak 0-5'in kiriş toplamı 619 m, arabaların
+`furthest`'ı 623 m. **İki farklı büyüklüğü karşılaştırmışım.** `furthest`, çıkış çizgisinden
+**düz-çizgi uzaklık** (`nfs_sim.rs`'de `(at - line).length()`'in en büyüğü), kat edilen yol değil.
+619 ile 623'ün örtüşmesi tesadüf. Bacak 6 `(-436, 976) → (-336, 1014)` arasında; arabalar ise
+`(-247, 1380)` ve `(-586, 1593)` civarında duruyor — ikisi de o bacak değil.
+
+**Doğru yer sorulunca dünya kusursuz çıktı.** `(-247, 1380)`: 13×13'lük zemin taramasının 169
+hücresinin 169'unda zemin var, en yakın düğüm 17 m ötede ve **üç kolunun üçü de yarış hattında**.
+Araba 0'ın kendi özeti: yarışın **%52'sinde duruyor**, dört tekeri yerde ve tam ağırlığını
+taşıyor, **12 yönün 11'i 8 m'den uzağa açık**, ve dururken **istenen gaz 0,03**.
+
+**Takılan arabanın izi yoktu, çünkü iz yalnız kurs kaybını yakalıyordu** — kursu hiç bırakmayan bir
+araba için `lost` hiç ateşlemiyor. Aynı halka tamponu artık "bu araba altı saniyedir duruyor"
+tetiğiyle de donduruluyor (`NFS_STUCK`). İlk koşuda cevap geldi:
+
+```
+koridora 2.6 m · direksiyon -0.85 · gaz  0.36 · nişan 20 m  180° · düğüm 5, 82 m · vazgeçti 6 · KAÇIŞ
+koridora 2.6 m · direksiyon +0.85 · gaz -0.70 · nişan 20 m  180° · düğüm 5, 82 m · vazgeçti 6 · KAÇIŞ
+koridora 2.6 m · direksiyon +0.85 · gaz -0.70 · nişan 20 m  179° · düğüm 5, 83 m · vazgeçti 6 · KAÇIŞ
+koridora 2.7 m · direksiyon -0.85 · gaz  0.36 · nişan 19 m  177° · düğüm 5, 83 m · vazgeçti 6 · KAÇIŞ
+```
+
+Araba kalıcı bir **kaçış** içinde ve kaçışın hedefi **20 m, tam arkada**. Tam arkadaki bir noktanın
+**yanı yoktur**: `atan2`, hedefi burnun hangi tarafına bir milimetre kaydırdığınıza göre +179° ya da
+−179° döndürür, `want` bir kilitten ötekine atlar, gaz da ileri-geri gider. Arabanın kendi özeti:
+**17 kaçış, 0,0 m.** Ve 102 çıkış yolundan yalnız 7'si henüz kara listede değil.
+
+**Düzeltme, tanımsız soruyu sormayı bırakmak:** `BEHIND`'ın (150°) ötesinde açı kullanılabilir bir
+yan taşımıyor, o yüzden **zaten seçilmiş olan yan korunuyor** — tekerlek bir tarafa bağlanıyor ve
+manevra bitebiliyor. `NFS_BEHIND=0` yazı-turayı geri getirir.
+
+**Süpürme, ve genişlik fikirden daha önemli çıktı:**
+
+| tutma açısı | waypoint | furthest | kursu hiç bırakmayan | düşen |
+|---|---|---|---|---|
+| kapalı | 986 | 5.413 m | 32 / 64 | 4 |
+| 150° | 980 | **5.522 m** | **34 / 64** | 4 |
+| **170°** | **1.000** | 5.381 m | 33 / 64 | 4 |
+
+Rota rota 170°: 4081 +8, 4061 +6, 4121 +2, 4041 +1, 4001 ve 4002 aynı, 4021 −1, 4102 −2. **Hiçbir
+rota incinmiyor.** 150° daha uzağa gidiyor ve iki araba fazla tutuyor ama tek başına `Paths4102`'de
+33 waypoint ödüyor: geniş bir koruma, saf takibin gayet iyi becerdiği dörtte üçlük dönüşlerde de
+tekerleği bağlıyor.
+
+`BEHIND = 2.97` (170°) varsayılan; `NFS_BEHIND=0` yazı-turayı geri getirir. Alan **986 → 1.000
+waypoint**.
+
 ## Nerede kaldık (2026-08-14 sonu)
 
-**Alan (2026-08-20 sonu, motor pini `58dc2623`, `GRIP` ve `PASSED_NEAR` açıkken): 986 geçilen
-waypoint, 64 arabanın **yarısı** kursu hiç bırakmıyor (32/32).** Günün ortasında, yalnız `GRIP`
+**Alan (2026-08-20 sonu, motor pini `58dc2623`, `GRIP`, `PASSED_NEAR` ve `BEHIND` açıkken):
+1.000 geçilen waypoint, 64 arabanın 33'ü kursu hiç bırakmıyor.** Günün ortasında, yalnız `GRIP`
 varken: 927 waypoint, 50 araba bırakıyordu. Bir önceki hâli, aşağıdaki paragrafın ölçüldüğü gün:
 865 waypoint, 1.354 düğüm, 51 araba. (Bugün 869
 diye geçen sayı, pilot saati 4× hızlıyken ölçülmüştü; düzeltilince 865 oldu — yani saat platonun

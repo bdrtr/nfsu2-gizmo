@@ -374,10 +374,18 @@ async fn run() {
                     });
                 match road {
                     Some(d) => println!(
-                        "   {k:>2}: {chord:>5.0} m → {d:>5.0} m  (×{:.1})",
+                        "   {k:>2}: ({:>7.0},{:>7.0}) → ({:>7.0},{:>7.0}) · {chord:>5.0} m → \
+                         {d:>5.0} m  (×{:.1})",
+                        cw[0].x,
+                        cw[0].z,
+                        cw[1].x,
+                        cw[1].z,
                         d / chord.max(1.0)
                     ),
-                    None => println!("   {k:>2}: {chord:>5.0} m → yol yok"),
+                    None => println!(
+                        "   {k:>2}: ({:>7.0},{:>7.0}) → ({:>7.0},{:>7.0}) · {chord:>5.0} m → yol yok",
+                        cw[0].x, cw[0].z, cw[1].x, cw[1].z
+                    ),
                 }
             }
         }
@@ -586,9 +594,20 @@ async fn run() {
     // corridor `lost` waits before calling a departure permanent, so a buffer that started at the
     // announcement would begin well past the cause.
     let losing = std::env::var("NFS_LOST").is_ok();
+    // **A car that stops is as much a departure as one that drives off, and the ring buffer was
+    // only catching the second.** On `Paths4021` three cars stand still on flat open ground with
+    // eleven of twelve directions clear, the pilot asking 0.03 throttle, seventeen escapes that
+    // moved it zero metres and a blacklist holding all but seven of its hundred-odd ways out —
+    // and none of it is traced, because `lost` never fires for a car that never leaves the course.
+    // Standing still this long is the trigger for the same window.
+    let stuck_for: f32 =
+        std::env::var("NFS_STUCK").ok().and_then(|v| v.parse().ok()).unwrap_or(6.0);
+    let mut standing = vec![0.0f32; field.len()];
     let mut ring: Vec<std::collections::VecDeque<Moment>> =
         vec![std::collections::VecDeque::new(); field.len()];
     let mut around: Vec<Option<Vec<Moment>>> = vec![None; field.len()];
+    // Where and when a car first stood still long enough to be worth a trace.
+    let mut stuck: Vec<Option<(f32, Vec3)>> = vec![None; field.len()];
     // **Why a car stopped, which the summary cannot say.** A field that stops is not one thing, and
     // the three that matter want completely different work: a car pinned by the fence, a car
     // grinding against geometry, and a car queued behind another car look identical in every number
@@ -950,6 +969,16 @@ async fn run() {
             if off <= city::COURSE_HALF_WIDTH {
                 entered[k] = true;
             }
+            // The clock that says "this one has stopped", reset by any real movement.
+            if p.speed.abs() < STILL_SPEED {
+                standing[k] += FIXED_DT;
+            } else {
+                standing[k] = 0.0;
+            }
+            if losing && around[k].is_none() && stuck_for > 0.0 && standing[k] >= stuck_for {
+                around[k] = Some(ring[k].iter().copied().collect());
+                stuck[k] = Some((now, p.position));
+            }
             if entered[k] && lost[k].is_none() && f.off_for >= 3.0 {
                 lost[k] = Some((now, p.position, pilot.covered()));
                 // Freeze what led here. `LOST_BEFORE` is counted back from *this* instant, which is
@@ -1116,6 +1145,14 @@ async fn run() {
         // The approach, in the pilot's own terms. Read down the `koridora` column for the moment it
         // passes 12 and then look left: what the wheel was being asked for, whether the pedal ever
         // came off, and where the aim point was while it happened.
+        if let Some((t, at)) = stuck[k] {
+            println!(
+                "            {} t={t:>6.1}s · ({:>7.0},{:>7.0})",
+                if lost[k].is_some() { "önce takıldı:" } else { "takıldı:      " },
+                at.x,
+                at.z
+            );
+        }
         if let Some(v) = &around[k] {
             println!(
                 "            iz — koridor yarı genişliği {} m · 20 Hz",

@@ -111,6 +111,38 @@ const LOOKAHEAD_PER_SPEED: f32 = 0.9;
 const LOOKAHEAD_MIN: f32 = 12.0;
 const LOOKAHEAD_MAX: f32 = 40.0;
 
+/// Past this angle the aim point has no usable side, so the side already chosen is kept.
+///
+/// **A point dead behind has no side, and pure pursuit tosses a coin about it every tick.** Traced
+/// on `Paths4021` with `NFS_LOST=1`: a car stands on flat open ground — 169 of 169 cells of a 13×13
+/// ground scan have surface, eleven of twelve directions clear past 8 m, four wheels down carrying
+/// its full weight — inside an escape whose target is **20 m at 180°**, and the wheel reads
+/// `−0.85, +0.85, +0.85, −0.85, …` while the pedal alternates `0.36, −0.70`. `atan2` returns +179°
+/// or −179° depending on which side of the nose a millimetre of drift puts the target, so `want`
+/// slams from one lock to the other and the car rocks in place. Its own summary: **seventeen
+/// escapes, zero metres moved**, still for 52 % of the race, and 0.03 of throttle asked for while
+/// standing.
+///
+/// The escape is not at fault — reversing out is exactly its job, and where it points is the
+/// clearest ground it could find. What has no answer is the *steering law*: pure pursuit cannot
+/// express "turn to 180°", so it thrashes. Past this angle the side is held instead of recomputed.
+///
+/// **Swept over eight routes**, and the width matters more than the idea:
+///
+/// | held past | waypoints | furthest | never lost the course |
+/// |---|---|---|---|
+/// | off | 986 | 5 413 m | 32 / 64 |
+/// | 150° | 980 | **5 522 m** | **34 / 64** |
+/// | **170°** | **1 000** | 5 381 m | 33 / 64 |
+///
+/// 170° is the one that wins the measure a lost car cannot inflate, and it wins it *quietly*: four
+/// routes better, two worse by one and two, two unchanged. 150° reaches further and keeps two more
+/// cars but pays 33 waypoints on `Paths4102` alone — a wide guard commits the wheel in ordinary
+/// three-quarter turns as well, and those are turns pure pursuit can do perfectly well.
+///
+/// `NFS_BEHIND=0` restores the coin toss.
+const BEHIND: f32 = 2.97;
+
 /// Steering lock the pilot will ask for, as a fraction of the controller's own.
 const STEER_LIMIT: f32 = 0.85;
 
@@ -1127,6 +1159,15 @@ impl Pilot {
         self.aim = Some(aim);
         let to = flat(aim - at).normalize_or_zero();
         let angle = f.cross(to).y.atan2(f.dot(to));
+        // Past [`BEHIND`] the angle carries no usable side, so the side already chosen is kept and
+        // the manoeuvre can finish. The measurement and the sweep are on the constant.
+        let hold: f32 =
+            std::env::var("NFS_BEHIND").ok().and_then(|v| v.parse().ok()).unwrap_or(BEHIND);
+        let angle = if hold > 0.0 && angle.abs() > hold {
+            hold * if self.steer < 0.0 { -1.0 } else { 1.0 }
+        } else {
+            angle
+        };
         // A lock that grows with speed was tried here and is **refuted across routes**. The
         // reasoning was good — a raycast vehicle turns by generating lateral force and there is
         // none at rest, and the trace showed stuck cars sitting on full lock — and on the route it
