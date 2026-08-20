@@ -3149,6 +3149,77 @@ kendisini görmeyi gerektiriyor: `across` bir boolean döndürüyor, hangi üçg
 Onu döndürmek — çarpan üçgenin yükseklik aralığını ve yola göre kotunu — bu soruyu tek seferde
 kapatır, ve sıradaki turun işi odur.
 
+### `across` artık ne çarptığını söylüyor — ve tarama ilk kez ayırıyor (2026-08-20)
+
+Bir önceki turun bıraktığı iş buydu. `Walls::across_hit` artık bir `Hit` döndürüyor: çarpan üçgen,
+çarpma noktası, yürüyüşün o adımda inandığı zemin, ilk **zemin bulduğu** yükseklik, zemin bulunan
+iki ardışık örnek arasındaki en büyük kat değişimi, o adımın altındaki yüzey sayısı, ve **aynı adım
+düz taşınsaydı yine bir şeye çarpar mıydı**. `across` duruyor, aynı yürüyüşün `is_some()`'ı.
+
+**Üç eleme, ve neden o sabitler.** Bir vuruş, şu üçünden biri olduğunda yürüyüşün kendi işi sayılıp
+atılıyor: adım düz taşındığında indeksteki *hiçbir şeye* değmiyorsa (`!flat_too`); tek adımda kat
+**2,5 m**'den fazla değiştiyse (üç metrelik bir adımda bu 40°'lik bir yüzey demek, yol değil); ya da
+yürüyüşün zemini kursun kendi kotundan **3 m**'den uzaksa. Kursun kotu düğümlerden okunuyor, çünkü
+düğümler zeminle birebir oturuyor — aynı taramanın başında basılan sayı, dört rotada en kötü
+sapma 0,0 m. Elemeden geçen vuruşlar sonra araca göre ayrılıyor: tepesi **0,4 m** altında kalan
+bordür, en altı **1,3 m**'nin üstünde kalan (240SX'in tavanı) arabanın altından geçen şey.
+
+**Ölçüm** — sekiz rota, `NFS_BLOCKED=1`, motor pini `58dc2623`. Kenar sayıları geri çekilen
+taramanınkiyle **birebir aynı** (459 / 476 / 356 / 593), yani karşılaştırma dürüst:
+
+| rota | kenar | ilk vuruş | elenen vuruş | temiz çıktı | devamda bulundu | bordür | üstünden | **DUVAR** | çok katlı | eksende |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 4001 | 459 | 113 | 59 | 42 | 2 | 6 | 8 | **57** | 12 | 18 |
+| 4002 | 476 | 67 | 48 | 32 | 2 | 0 | 0 | **35** | 27 | 23 |
+| 4021 | 256 | 20 | 8 | 8 | 0 | 2 | 0 | **10** | 6 | 10 |
+| 4041 | 593 | 31 | 11 | 9 | 0 | 15 | 0 | **7** | 0 | 6 |
+| 4061 | 52 | 0 | 0 | 0 | 0 | 0 | 0 | **0** | 0 | 0 |
+| 4081 | 343 | 25 | 1 | 1 | 0 | 1 | 0 | **23** | 21 | 19 |
+| 4102 | 289 | 1 | 0 | 0 | 0 | 1 | 0 | **0** | 0 | 0 |
+| 4121 | 356 | 12 | 6 | 6 | 0 | 0 | 0 | **6** | 5 | 5 |
+| **TOPLAM** | **2.824** | **269** | **133** | **98** | **4** | **25** | **8** | **138** | **71** | **81** |
+
+("eksende" = çarpma noktası yol ekseninden 6 m'den yakın.)
+
+**Üç sonuç.**
+
+1. **Geri çekilen bulgunun gerekçesi fazla kabaymış.** "Vuruşların çoğu çok katlı yerde" doğruydu,
+   ama eleme sebebi değil: ayakta kalan 138 duvarın **71'i** çok katlı yerde. Çok katlılık şüphe
+   sebebiydi; ayıran şey yürüyüşün kat değiştirip değiştirmediği, ve o artık ayrı ayrı ölçülüyor.
+2. **Oyuncunun gözlemi ilk kez ölçülmüş bir desteğe kavuştu.** Yarış hattının kenarlarının
+   **%4,9'unda** (138/2.824) yolun kendi kotunda, arabanın çarpacağı yükseklikte duran geometri
+   var; **81'i** yol ekseninin 6 m'sinde, yani kirişle açıklanamaz. Bu, oyuncunun çarptığı şeyin
+   *bunlar* olduğunu kanıtlamıyor — ama "yolda bina var" ifadesinin karşılığı sahiplerde duruyor.
+3. **Ve 4121'in virajını açıklamıyor.** O rotada sekiz arabanın yedisi waypoint 6'da,
+   `(-334, 1374)` civarında dört metrelik bir noktada kursu bırakıyor. Rotanın altı duvarının en
+   yakını oraya **225 m** uzakta. Yani bu tarama viraj sorusunu kapatmıyor, bir adayı daha eliyor:
+   orada duran bir şey yok.
+
+**Ölçümün kendi ilk hâlinde iki hata vardı, ikisi de sayıyı değiştirdi** — ve ikisi de tarama
+koşulmadan önce, kodun kendisine bakan çok mercekli bir incelemede çıktı.
+
+- **`flat_too` yalnız çarpılan üçgeni yeniden soruyordu.** Bir bariyer tek üçgen değil, ve yürüyüş
+  hücre sırasındaki *ilk* üçgeni döndürüyor. Alt yoldaki yüzey önce indekslenmişse, düz adım onu
+  ıskalıyor ve üst katta yolun tam karşısına dikilmiş duvar "kat değiştirme" diye atılıyordu.
+  Artık indeksin tamamı soruluyor. 4001'de duvar sayısı **37 → 57**, `!flat_too` elemesi **47 → 17**.
+- **Elenen bir vuruş kenarı temize çıkarmaz.** `across_hit` çarptığı ilk şeyde dönüyor ve
+  yürüyüşün geri kalanı hiç koşmuyor; vuruşu atan bir çağıran yolun açık olduğunu değil, yalnız
+  *o* engelin gerçek olmadığını öğrenmiş oluyor. Tarama artık vuruşun 1,5 m ötesinden devam
+  ediyor. Sekiz rotada 98 kenar bu şekilde temize çıktı ve **4 kenarda gerçek engel ancak devam
+  edilince bulundu**.
+
+Yürüyüşte iki düzeltme daha var, ikisi de teste bağlandı: zemin bulunmayan adımlar artık `climb`
+ve `start_y`'ye karışmıyor (delik kat değişimi değildir), ve yatay uzanımı olmayan bir sorgu düz
+sayılıyor (eskiden dejenere segment "hiç değmedi" cevabı veriyordu).
+
+**Bunu tekrar yanlış yapacak şey, ve çıktıda ilk bakılacak yer.** Kalan tek büyük alternatif
+açıklama **kiriş**: tarama düğümden düğüme düz gidiyor, yol ise arada kıvrılıyor, ve virajın
+dışındaki bina hiçbir arabanın sürmeyeceği bir çizginin önünde duruyor. Onun için her duvarın yol
+eksenine uzaklığı basılıyor — 138'in **57'si** 6 m'den uzakta ve 4001'in 57 duvarının 39'u öyle.
+4001'in yüksek oranını kanıt diye kullanmadan önce oraya bakılmalı. İkinci sınırlama: koridor
+uzaklığı plan görünümünde ölçülüyor, yani üst geçidin altındaki bir duvar da "eksende" görünebilir;
+`zemin N kat` sütunu o satırlar için uyarı işaretidir.
+
 ## Nerede kaldık (2026-08-14 sonu)
 
 **Alan: 865 geçilen waypoint, 1.354 ayrık düğüm, 64 arabanın 51'i kursu bırakıyor.** (Bugün 869
@@ -3183,17 +3254,21 @@ elenmeyen dörtte −70. Karar yalnız sekiz rotadan çıkar.
 - **Zaman sabitleri artık dürüst.** `STALL_FOR`, `BACK_FOR`, `ESCAPE_FOR`, `SETTLE` yıllarca
   çeyreklenmiş değerleriyle ayarlanmıştı. Dördü birden dört katına çıktığında alan 869 → 865 gitti,
   yani muhtemelen bağlayıcı değiller — ama tek tek süpürülmediler.
-- **Oyuncunun gözlemi: sürerken yolda binalara çarpmak.** Bağımsız ve açıklanmamış. Benim engel
-  taramam bunu **doğrulamadı** — vuruşlarının çoğu çok katlı yerlerde ve `Walls::across` orada kat
-  değiştirebiliyor. Kesin cevap `across`'un çarptığı üçgeni döndürmesini gerektiriyor (bugün yalnız
-  boolean); o üçgenin yükseklik aralığı ve yola göre kotu soruyu tek ölçümde kapatır.
-- **Motor pini `3433aef`'te** (2026-08-14'te taşındı, doğrulandı). Motor o günden beri ilerledi;
-  bugünkü render düzeltmelerinden sonrakiler oyuna henüz gelmedi.
+- **Oyuncunun gözlemi: sürerken yolda binalara çarpmak.** 2026-08-20'de ölçülmüş desteğe kavuştu
+  (yukarıya bak): sekiz rotada 2.824 kenarın 138'inde yolun kendi kotunda, arabanın çarpacağı
+  yükseklikte geometri duruyor, 81'i yol ekseninin 6 m'sinde. Kapanmayan kısım: bunların hangisine
+  gerçekten çarpıldığı, ve 4001'in 57 duvarının 39'unun eksenden uzak olması (kiriş şüphesi).
+- **4121'in virajı hâlâ açıklanmamış.** Waypoint 6'daki dört metrelik noktada duran bir şey **yok**:
+  o rotanın en yakın duvarı 225 m ötede. Sebep dünyada değilse pilotta.
+- **Motor pini `58dc2623`'te** (2026-08-20'de taşındı). `BASELINE-SEKIZ-ROTA.md` yükseltme öncesi
+  tabloyu tutuyor; yükseltme sonrası süpürme onunla yan yana konmalı.
 
 ### Kalan aletler
 
 `NFS_HOLE=x,z` (zemin haritası + en yakın düğüm + kavşak kolları), `NFS_BLOCKED=1` (hat boyunca
-engel taraması, yüksekliğe göre ayrılmış), `NFS_FLOOR`/`NFS_FLOORSTEER` (pilotu devreden çıkarıp
-gazı basılı tutmak — bir turu bu çözdü), ve her arabanın kursu **ilk kalıcı olarak bıraktığı**
-an/waypoint/konum.
+engel taraması: kat değiştirmeleri eleyip kalan engeli bordür / arabanın üstünden geçen / duvar
+diye ayırır, her duvarın yol eksenine uzaklığını basar — ve artık arabaların takılıp takılmadığına
+bakmadan koşar, yani `NFS_SECONDS=1` ile saniyeler içinde alınır),
+`NFS_FLOOR`/`NFS_FLOORSTEER` (pilotu devreden çıkarıp gazı basılı tutmak — bir turu bu çözdü), ve
+her arabanın kursu **ilk kalıcı olarak bıraktığı** an/waypoint/konum.
 

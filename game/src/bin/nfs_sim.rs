@@ -885,6 +885,240 @@ async fn run() {
     // answer. Three different failures wear the same number and want completely different work: a
     // car pinned by the fence, a car queued behind another car, and a car stuck against the city.
     let early: Vec<usize> = (0..field.len()).filter(|k| moved_at[*k] < 30.0).collect();
+    // NFS_BLOCKED=1: walk the racing line itself and ask whether anything stands in it.
+    // Everything else here measures the cars; this measures the road. A building sitting in the
+    // course would look, from the cars' side, exactly like six of them running wide at one
+    // corner — and a player reports hitting buildings on the roads.
+    //
+    // It sat inside `if !early.is_empty()` and had no business being there: a measurement **of the
+    // road** that only runs when a car happened to stop in the first thirty seconds is a
+    // measurement whose absence says nothing, and on a route where every car keeps moving the
+    // question would go silently unasked.
+    if std::env::var("NFS_BLOCKED").is_ok() {
+        // Before anything about walls: do the route's own nodes agree with the ground they are
+        // supposed to sit on? Every height query in this file walks from the node's y, so if
+        // the graph and the collision surface disagree the walls answer is about the wrong
+        // floor. This is the prior question and it had not been asked.
+        {
+            let (mut n, mut off2, mut off5, mut none) = (0usize, 0usize, 0usize, 0usize);
+            let mut worst = 0.0f32;
+            for i in 0..net.len() as u32 {
+                let Some(j) = net.node(i) else { continue };
+                if corridor.locate(j.at).map_or(f32::INFINITY, |x| x.distance)
+                    > city::COURSE_HALF_WIDTH
+                {
+                    continue;
+                }
+                n += 1;
+                let hs = ground.heights_at(j.at.x, j.at.z);
+                match hs
+                    .into_iter()
+                    .min_by(|a, b| (a - j.at.y).abs().total_cmp(&(b - j.at.y).abs()))
+                {
+                    None => none += 1,
+                    Some(h) => {
+                        let d = (h - j.at.y).abs();
+                        worst = worst.max(d);
+                        if d > 2.0 {
+                            off2 += 1;
+                        }
+                        if d > 5.0 {
+                            off5 += 1;
+                        }
+                    }
+                }
+            }
+            println!(
+                "\nrota dugumleri zeminle uyusuyor mu: {n} dugumun {off2}'si 2 m'den, {off5}'i 5 m'den \
+                 uzak · {none} tanesinin altinda hic zemin yok · en kotu {worst:.1} m"
+            );
+        }
+        // **How the walk's own evidence is read.** The bool this scan used to ask was
+        // withdrawn as a finding: 32 of the 36 walls it reported on 4002 stood in multi-level
+        // places, where the walk follows the ground onto a deck and then answers about the road
+        // underneath it. `across_hit` hands back what it met and how the floor behaved on the
+        // way, and these constants are what turn that into a verdict instead of a suspicion.
+        //
+        // **The step no road takes.** A carriageway climbs, and the block above measures the
+        // route's nodes as sitting on the ground to 0.0 m, so the course's own gradient is
+        // whatever the nodes say. Two and a half metres inside a single three-metre step is a
+        // 40° face; that is a change of surface, not a gradient.
+        const DECK_STEP: f32 = 2.5;
+        // **How far the walk may drift from the course's own height.** The nodes sit on the
+        // ground exactly, so the line between two of them is the course's elevation to within
+        // the road's curvature over at most 45 m. Three metres is above that and well under the
+        // nine-metre deck separation that produced the false finding.
+        const DECK_OFF: f32 = 3.0;
+        // A kerb's top over the road it stands on. Below this the wheels ride over it.
+        const KERB: f32 = 0.4;
+        // And the other end of the car: geometry whose **lowest** point clears this stands over the
+        // road rather than in it. Not the soffit under a bridge — a soffit is horizontal, which
+        // makes it `Surface::Drivable`, which keeps it out of `Walls` altogether — but the
+        // near-vertical things that come with one: a parapet, a deck's edge fascia, the underside
+        // rail of a gantry. The walk rides 0.5 m up and its step tilts with the floor, so it can
+        // meet one; a car 1.3 m to the roof cannot.
+        const CAR_TOP: f32 = 1.3;
+        // How many rejected hits an edge is allowed before the scan stops asking about it. Every
+        // retry advances at least 1.5 m along an edge of at most 45 m, so this is a guard against a
+        // pathological edge rather than a limit anything real reaches.
+        const RETRIES: usize = 8;
+
+        println!("\nyaris hatti boyunca engel taramasi:");
+        let (mut blocked, mut checked) = (0usize, 0usize);
+        // The three ways a hit can be the walk's own doing rather than the road's, counted apart
+        // because they fail differently: `flat_too` is about the step that hit, `climb` about the
+        // worst step before it, and the offset about where the walk ended up.
+        let (mut no_flat, mut climbed, mut off_course) = (0usize, 0usize, 0usize);
+        // Hits thrown out, and edges by the hit that decided them.
+        let (mut deck, mut deck_multi) = (0usize, 0usize);
+        let (mut kerb, mut soffit, mut wall) = (0usize, 0usize, 0usize);
+        let (mut wall_multi, mut wall_wide) = (0usize, 0usize);
+        // What the second and later questions bought: edges that came back clear once the walk was
+        // resumed past a rejected hit, and edges whose real blocker was only found by resuming.
+        let (mut cleared, mut recovered, mut gave_up) = (0usize, 0usize, 0usize);
+        let mut shown = 0usize;
+        for i in 0..net.len() as u32 {
+            let Some(a) = net.node(i) else { continue };
+            for &l in &a.links {
+                if l <= i {
+                    continue;
+                }
+                let Some(b) = net.node(l) else { continue };
+                let ina = corridor.locate(a.at).map_or(f32::INFINITY, |x| x.distance);
+                let inb = corridor.locate(b.at).map_or(f32::INFINITY, |x| x.distance);
+                if ina > city::COURSE_HALF_WIDTH || inb > city::COURSE_HALF_WIDTH {
+                    continue;
+                }
+                // Long links are the graph's shortcuts between distant nodes; a straight line
+                // between them crosses buildings because the road curves, and that is not a
+                // defect. Only adjacent-node edges say anything about the road itself.
+                //
+                // The cut is on the **full** length rather than the plan-view one, because that is
+                // what the withdrawn scan cut on and the whole point of this run is that its
+                // denominator is the same. `run` below is the walk's own ground-plane run and is a
+                // different number on a slope.
+                if (b.at - a.at).length() > 45.0 {
+                    continue;
+                }
+                let run = Vec3::new(b.at.x - a.at.x, 0.0, b.at.z - a.at.z).length();
+                checked += 1;
+                // **Rejecting a hit is not the same as clearing the way.** `across_hit` returns at
+                // the first thing it meets and the rest of the walk never runs, so an edge whose
+                // first hit is the walk's own change of deck has not been shown to be clear — only
+                // that *that* blocker was not real. Without asking again the scan would trade one
+                // wrong answer for a blank one. So it resumes from just past the rejected hit.
+                let dir = Vec3::new(b.at.x - a.at.x, 0.0, b.at.z - a.at.z).normalize_or_zero();
+                let mut from = a.at;
+                let mut thrown = 0usize;
+                let mut bailed = false;
+                let real = loop {
+                    let Some(hit) = walls.across_hit(&ground, from, b.at, 0.5, 3.0) else {
+                        break None;
+                    };
+                    if thrown == 0 {
+                        blocked += 1;
+                    }
+                    // Where the course itself is, at the point the walk stopped. Measured from the
+                    // edge's own start rather than from where this attempt resumed, so the number
+                    // means the same thing on the first question and the fourth.
+                    let along =
+                        Vec3::new(hit.at.x - a.at.x, 0.0, hit.at.z - a.at.z).length();
+                    let course_y = a.at.y + (b.at.y - a.at.y) * (along / run.max(1e-3)).clamp(0.0, 1.0);
+                    let off = hit.walk_y - course_y;
+                    let (f_flat, f_climb, f_off) =
+                        (!hit.flat_too, hit.climb > DECK_STEP, off.abs() > DECK_OFF);
+                    if f_flat || f_climb || f_off {
+                        no_flat += usize::from(f_flat);
+                        climbed += usize::from(f_climb);
+                        off_course += usize::from(f_off);
+                        deck += 1;
+                        deck_multi += usize::from(hit.layers > 1);
+                        thrown += 1;
+                        if thrown > RETRIES {
+                            gave_up += 1;
+                            bailed = true;
+                            break None;
+                        }
+                        // Half a walk step past it, so the same face cannot answer twice, and along
+                        // the edge rather than along whatever the walk's own drift was doing.
+                        from = hit.at + dir * 1.5;
+                        if (b.at - from).dot(dir) <= 0.0 {
+                            break None;
+                        }
+                        continue;
+                    }
+                    break Some((hit, off, along));
+                };
+                let Some((hit, off, along)) = real else {
+                    // Given up on is not cleared: the edge has no verdict either way.
+                    cleared += usize::from(thrown > 0 && !bailed);
+                    continue;
+                };
+                recovered += usize::from(thrown > 0);
+                let (under, over) = hit.over_floor();
+                if over < KERB {
+                    kerb += 1;
+                    continue;
+                }
+                if under >= CAR_TOP {
+                    soffit += 1;
+                    continue;
+                }
+                wall += 1;
+                wall_multi += usize::from(hit.layers > 1);
+                // **The one alternative explanation left, and it has to be measured too.** The walk
+                // goes node to node in a straight line and the road bends between them: on a curve
+                // the chord leaves the carriageway, and a building on the outside of the bend is
+                // then "in the way" of a line no car would drive. The corridor knows where the road
+                // actually is, so ask it about the hit point itself rather than about the nodes.
+                let off_line = corridor.locate(hit.at).map_or(f32::INFINITY, |x| x.distance);
+                wall_wide += usize::from(off_line > 6.0);
+                if shown < 12 {
+                    shown += 1;
+                    println!(
+                        "   DUVAR {i:>4} -> {l:>4}  ({:>7.0},{:>7.0})  kenarin {along:>4.0} m'sinde \
+                         · yolun {under:>5.1}..{over:>5.1} m arasini kesiyor · zemin {:>2} kat \
+                         · kot farki {off:>5.1} m · yol ekseninden {off_line:>5.1} m",
+                        hit.at.x, hit.at.z, hit.layers
+                    );
+                }
+            }
+        }
+        println!(
+            "   hattin {blocked} / {checked} kenarinda ilk yurumede onunu kesen bir sey var ({:.1}%)",
+            100.0 * blocked as f32 / checked.max(1) as f32
+        );
+        println!(
+            "   {deck} vurus elendi: {no_flat} tanesinde duz adim hicbir seye degmiyor, {climbed} \
+             tanesi tek adimda {DECK_STEP} m'den fazla kat degistirmis, {off_course} tanesi kursun \
+             kotundan {DECK_OFF} m'den uzakta"
+        );
+        println!(
+            "   elenen vurustan sonra yurume devam etti: {cleared} kenar temiz cikti, {recovered} \
+             kenarda gercek engel ancak devam edince bulundu, {gave_up} kenarda {RETRIES} denemede \
+             karar verilemedi"
+        );
+        println!(
+            "   {kerb} kenar bordur boyunda (<{KERB} m), {soffit} kenarda engel arabanin ustunden \
+             geciyor (en alti {CAR_TOP} m'den yuksek)"
+        );
+        println!(
+            "   geriye {wall} gercek duvar kaliyor ({:.1}%) — yolun kendi kotunda, arabanin \
+             carpacagi yukseklikte",
+            100.0 * wall as f32 / checked.max(1) as f32
+        );
+        println!(
+            "   cok katli yerde: duvarlarin {wall_multi}/{wall} tanesi, elenen vuruslarin \
+             {deck_multi}/{deck} tanesi — yani cok katli olmak tek basina eleme sebebi degil"
+        );
+        println!(
+            "   duvarlarin {wall_wide}/{wall} tanesi yol ekseninden 6 m'den uzakta: iki dugum \
+             arasindaki duz cizgi virajda karsiya tasiyor olabilir, geri kalan {} tanesi \
+             dogrudan yarisin surdugu cizgide",
+            wall - wall_wide
+        );
+    }
+
     // **Is there anywhere to go?** Three ways of choosing a different *node* have now been
     // refuted (blacklist, shun the heading, expire the list), and the conclusion was that the
     // answer has to come from outside the node machine — from the city's own geometry. Before
@@ -954,136 +1188,6 @@ async fn run() {
                     }
                 }
             }
-        }
-        // NFS_BLOCKED=1: walk the racing line itself and ask whether anything stands in it.
-        // Everything else here measures the cars; this measures the road. A building sitting in the
-        // course would look, from the cars' side, exactly like six of them running wide at one
-        // corner — and a player reports hitting buildings on the roads.
-        if std::env::var("NFS_BLOCKED").is_ok() {
-            // Before anything about walls: do the route's own nodes agree with the ground they are
-            // supposed to sit on? Every height query in this file walks from the node's y, so if
-            // the graph and the collision surface disagree the walls answer is about the wrong
-            // floor. This is the prior question and it had not been asked.
-            {
-                let (mut n, mut off2, mut off5, mut none) = (0usize, 0usize, 0usize, 0usize);
-                let mut worst = 0.0f32;
-                for i in 0..net.len() as u32 {
-                    let Some(j) = net.node(i) else { continue };
-                    if corridor.locate(j.at).map_or(f32::INFINITY, |x| x.distance)
-                        > city::COURSE_HALF_WIDTH
-                    {
-                        continue;
-                    }
-                    n += 1;
-                    let hs = ground.heights_at(j.at.x, j.at.z);
-                    match hs
-                        .into_iter()
-                        .min_by(|a, b| (a - j.at.y).abs().total_cmp(&(b - j.at.y).abs()))
-                    {
-                        None => none += 1,
-                        Some(h) => {
-                            let d = (h - j.at.y).abs();
-                            worst = worst.max(d);
-                            if d > 2.0 {
-                                off2 += 1;
-                            }
-                            if d > 5.0 {
-                                off5 += 1;
-                            }
-                        }
-                    }
-                }
-                println!(
-                    "\nrota dugumleri zeminle uyusuyor mu: {n} dugumun {off2}'si 2 m'den, {off5}'i 5 m'den \
-                     uzak · {none} tanesinin altinda hic zemin yok · en kotu {worst:.1} m"
-                );
-            }
-            println!("\nyaris hatti boyunca engel taramasi:");
-            let (mut blocked, mut checked) = (0usize, 0usize);
-            let (mut low, mut mid, mut tall) = (0usize, 0usize, 0usize);
-            let (mut tall_multi, mut tall_offdeck) = (0usize, 0usize);
-            for i in 0..net.len() as u32 {
-                let Some(a) = net.node(i) else { continue };
-                for &l in &a.links {
-                    if l <= i {
-                        continue;
-                    }
-                    let Some(b) = net.node(l) else { continue };
-                    let ina = corridor.locate(a.at).map_or(f32::INFINITY, |x| x.distance);
-                    let inb = corridor.locate(b.at).map_or(f32::INFINITY, |x| x.distance);
-                    if ina > city::COURSE_HALF_WIDTH || inb > city::COURSE_HALF_WIDTH {
-                        continue;
-                    }
-                    // Long links are the graph's shortcuts between distant nodes; a straight line
-                    // between them crosses buildings because the road curves, and that is not a
-                    // defect. Only adjacent-node edges say anything about the road itself.
-                    let len = (b.at - a.at).length();
-                    if len > 45.0 {
-                        continue;
-                    }
-                    checked += 1;
-                    // At what height does it stop blocking? A kerb or a ramp lip clears by a metre;
-                    // a building does not clear at all. Same query, three lifts — that is what
-                    // separates "the road has a step in it" from "there is a wall across the road".
-                    // **Is the blocker at the course's own height, or is the query on the wrong
-                    // deck?** Bayview is multi-level — three stacked surfaces were measured at a
-                    // single point — and `across` follows the ground as it walks, so it can step
-                    // onto a bridge and count the road beneath as an obstacle. Counting the
-                    // surfaces under the segment, and how far the course's own height sits from
-                    // the nearest of them, separates "a wall across the road" from "the query
-                    // changed floors".
-                    let mut layers_max = 0usize;
-                    let mut off_deck = 0.0f32;
-                    for k in 0..=8 {
-                        let q = a.at.lerp(b.at, k as f32 / 8.0);
-                        let hs = ground.heights_at(q.x, q.z);
-                        layers_max = layers_max.max(hs.len());
-                        if let Some(near) = hs
-                            .into_iter()
-                            .min_by(|x, y| (x - q.y).abs().total_cmp(&(y - q.y).abs()))
-                        {
-                            off_deck = off_deck.max((near - q.y).abs());
-                        }
-                    }
-                    let at05 = walls.across(&ground, a.at, b.at, 0.5, 3.0);
-                    if at05 {
-                        if walls.across(&ground, a.at, b.at, 3.0, 3.0) {
-                            tall += 1;
-                            if layers_max > 1 {
-                                tall_multi += 1;
-                            }
-                            if off_deck > 2.0 {
-                                tall_offdeck += 1;
-                            }
-                        } else if walls.across(&ground, a.at, b.at, 1.5, 3.0) {
-                            mid += 1;
-                        } else {
-                            low += 1;
-                        }
-                    }
-                    if at05 {
-                        blocked += 1;
-                        if blocked <= 10 {
-                            println!(
-                                "   ENGELLI {i:>4} -> {l:>4}  ({:>7.0},{:>7.0}) -> ({:>7.0},{:>7.0})  {:>5.0} m",
-                                a.at.x, a.at.z, b.at.x, b.at.z, (b.at - a.at).length()
-                            );
-                        }
-                    }
-                }
-            }
-            println!(
-                "   hattin {blocked} / {checked} kenarinda onu kesen geometri var ({:.1}%)",
-                100.0 * blocked as f32 / checked.max(1) as f32
-            );
-            println!(
-                "   bunlarin {low} tanesi 1.5 m'de aciliyor (bordur/rampa), {mid} tanesi 3 m'de, \
-                 {tall} tanesi 3 m'de bile KAPALI (duvar/bina)"
-            );
-            println!(
-                "   o {tall} kapalinin {tall_multi} tanesi COK KATLI yerde, {tall_offdeck} tanesinde \
-                 kursun kotu en yakin zeminden 2 m'den uzak (yani sorgu baska katta olabilir)"
-            );
         }
         println!("\nwhat the stuck cars have around them:");
         for &k in &early {
