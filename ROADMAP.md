@@ -5248,3 +5248,42 @@ olan bitti, ve bu bir sonuç: **kalan kayıp halkanın şeklinde ya da pilotun t
 Ölçü artık doğru yere bakıyor (hattı bırakma, koridoru değil), 11 yerin beşi 31 arabayı açıklıyor,
 ve o beş yerin her biri ayrı bir soru. Sıradaki iş bir kural denemek değil, o yerlerden birinin
 izini baştan sona sürmek.
+
+### 4081'in izi baştan sona sürüldü — teşhis doğru, çıkarılan sonuç yanlış (2026-08-20)
+
+Kural denemeyi bırakıp bir arabanın izini sürme sırasıydı. `Paths4081`, sekiz araba, hattı
+bıraktıkları yer `(−347, −128)`:
+
+```
+t= 33.8 (-326, -82) 81 km/h · koridora  1.3 m · direksiyon  0.02 · nişan 41 m   -2° · düğüm 239
+t= 35.2 (-339,-109) 70 km/h · koridora  0.2 m · direksiyon -0.36 · nişan 35 m   38° · düğüm 205  ← fren 1.00
+t= 36.6 (-348,-131) 52 km/h · koridora  2.9 m · direksiyon -0.62 · nişan 16 m   63°
+t= 38.0 (-352,-149) 47 km/h · koridora  7.1 m · direksiyon -0.64 · nişan 56 m   68° · yanal 4.6
+t= 40.1 (-352,-171) 29 km/h · koridora 17.6 m · direksiyon -0.84 · nişan 30 m   89° · yanal 21.0
+t= 42.9 (-355,-180)  3 km/h · koridora 18.7 m · sıkışmış
+```
+
+**Kırılma anı t=35,2:** araba **80 km/h**'de, koridorun **0,2 m** içinde, direksiyon düz — ve
+**nişan −1°'den 38°'ye tek adımda zıplıyor**, düğüm 239'dan 205'e geçerken. Tam fren ve −0,36
+kilit onu izliyor, kırk metre sonra araba dışarıda.
+
+Sebep yapısal ve bugüne kadar yazılı değildi: **nişan bir düğüme yapışık**, ve düğümler ~30 m
+arayla. Yürüyüş bir adım atınca nişan ışınlanıyor.
+
+**Düzeltme yazıldı — ve bu pilotta ölçülen her şeyden sert biçimde çürüdü.** `NFS_AIMLERP=1`
+nişanı son bacak üzerinde interpole edip tam `look` metreye yerleştiriyor:
+
+| | waypoint | kursta süre | furthest | hattı bırakan |
+|---|---|---|---|---|
+| **düğüme yapışık** (kalan) | — | **%73,8** | **5.951 m** | 40 |
+| ön-takibe yerleştirilmiş | **−664** | %72,5 | **3.981 m** | 37 |
+
+Sekiz rotanın **sekizinde** geride, `furthest` üçte bir eksik.
+
+**Teşhis doğruydu, sonuç yanlış: zıplama gerçek ama kusur değil.** Sayıların söylediği şu —
+**kesiklik taşıyıcı.** Düğüm, yolun gerçekten gittiği bir yer; iki düğüm arasında interpole edilen
+nokta ise yol orada düzse yolun gittiği bir yer. Daha kötüsü, interpole edilmiş nişan sonsuza dek
+tam `look` metrede duruyor: araba yaklaştıkça geri çekiliyor, yani araba **hiçbir yere varmıyor**.
+Bu pilot bir hattı takip etmiyor, bir noktayı **kovalıyor** — direksiyon yasasının kendi belgesi
+bunu yazıyor — ve yakalanamayan bir nokta hedef değildir. Virajdaki ışınlanma, kesikli nokta
+kovalamanın bedeli, ve alternatifinden **on kat** ucuz.

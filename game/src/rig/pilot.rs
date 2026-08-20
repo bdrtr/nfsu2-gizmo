@@ -1098,6 +1098,7 @@ impl Pilot {
             .unwrap_or(LOOKAHEAD_PER_SPEED);
         let look = (speed * per).clamp(LOOKAHEAD_MIN, LOOKAHEAD_MAX);
         let aim_line = std::env::var("NFS_AIMLINE").is_ok_and(|v| !v.is_empty() && v != "0");
+        let aim_lerp = std::env::var("NFS_AIMLERP").is_ok_and(|v| !v.is_empty() && v != "0");
         let (mut cur, mut prev) = (self.at?, self.from);
         let mut aim = net.node(cur)?.at;
         let mut walked = flat(aim - at).length();
@@ -1139,7 +1140,38 @@ impl Pilot {
                 break;
             }
             let p = net.node(next)?.at;
-            walked += flat(p - aim).length();
+            let leg = flat(p - aim).length();
+            // **`NFS_AIMLERP=1`: put the aim *on* the lookahead, not on the node past it.**
+            //
+            // The walk stops at whichever node first carries `walked` past `look`, so the aim is
+            // a network node and nodes are ~30 m apart: when the walk steps, the aim **teleports**.
+            // Traced on `Paths4081`, where eight cars lose the line at one place: at t=35.2 the
+            // car is doing 80 km/h, 0.5 m from the corridor's centre with the wheel straight, and
+            // the aim jumps from **−1° to 38° in one step** as the walk moves from node 239 to
+            // 205. Full brake and −0.36 of lock follow, and forty metres later the car is out.
+            //
+            // Interpolating along the last leg makes the same target continuous: the aim slides
+            // towards the corner instead of arriving at it. Nothing about *which* way it goes
+            // changes — that is `step_avoiding`, and every attempt to influence it is refuted.
+            //
+            // **And it is refuted, harder than anything else measured on this pilot: −664
+            // waypoints, behind on all eight routes, `furthest` 5951 → 3981 m.** The diagnosis was
+            // right and the conclusion was wrong. The jump is real; it is not the defect.
+            //
+            // What the numbers say is that the **discreteness is load-bearing**. A node is a place
+            // the road actually goes, and a point interpolated between two of them is a place the
+            // road only goes if the road is straight there. Worse, an interpolated aim sits at
+            // exactly `look` metres for ever: it recedes as the car approaches, so the car never
+            // arrives anywhere. This pilot does not track a path, it **chases a point** — the
+            // steering law's own doc says so — and a point that cannot be caught is not a target.
+            // The teleport at a corner is what chasing discrete points costs, and it costs less
+            // than the alternative by a factor of ten.
+            if aim_lerp && walked + leg > look && leg > 0.01 {
+                let t = ((look - walked) / leg).clamp(0.0, 1.0);
+                aim = aim + (p - aim) * t;
+                break;
+            }
+            walked += leg;
             aim = p;
             prev = Some(cur);
             cur = next;
