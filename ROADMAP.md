@@ -4521,3 +4521,54 @@ toparlanmanın kendisi.**
 
 Varsayılan rampaya döndürüldü ve doğrulandı (4001 waypoint=46, 4121 waypoint=30, `lvl` koluyla
 bayt-birebir aynı). Geometri `NFS_PURSUIT=1` ile duruyor, kaydıyla birlikte.
+
+### Bütün gün kullandığım ölçü yanıltıcıymış: kursu bırakanların 34'ünden 33'ü geri dönüyor (2026-08-20)
+
+Kursu bırakan 34 arabanın ayrılma **anı** kaydedilmeye başlandı — üç saniyelik eşiğin dolduğu an
+değil, koridorun kenarını geçtiği adım (`çıkarken:` satırı, `tools/leaving.py` ile sayılıyor):
+
+| ayrılma anında | kaç | oran |
+|---|---|---|
+| tam kilitte (\|direksiyon\| ≥ 0,84) | 18 | %52,9 |
+| **nişan arkada (>90°)** | 17 | %50,0 |
+| **hedef arkada (>90°)** | 15 | %44,1 |
+| frende (>0,5) | 12 | %35,3 |
+| hızlı (>60 km/h) | 8 | %23,5 |
+| vazgeçtiği düğüm var | 5 | %14,7 |
+| yavaş (<20 km/h) | 3 | %8,8 |
+| kaçışta | 2 | %5,9 |
+
+Ayrılmaların yarısında pilot **zaten geriye dönmeye çalışıyor**. Ama asıl bulgu bir sonraki soruda
+çıktı: *geri dönüyorlar mı?*
+
+**34 ayrılmanın 33'ü koridora geri dönüyor** — ve azı değil: 22, 32, 38, 47, 50, hatta **55
+saniye** (90 saniyelik yarışta). Yani gün boyu başlık sayısı olarak kullandığım *"kursu hiç
+bırakmadı"*, bir kez üç saniye çıkıp kalan seksen yedi saniyeyi kursta geçiren arabayı, çıkıp bir
+daha dönmeyenle **aynı** sayıyor.
+
+**Doğru ölçü eklendi: kursta geçen sürenin oranı.**
+
+| rota | kiriş: süre / hiç bırakmayan | yürünmüş: süre / hiç bırakmayan |
+|---|---|---|
+| 4001 | %93,7 · 8/8 | %82,9 · **0/8** |
+| 4002 | %92,5 · 7/8 | %90,0 · 7/8 |
+| 4021 | %78,9 · 1/8 | %58,2 · 0/8 |
+| 4041 | %87,3 · 4/8 | %83,6 · **0/8** |
+| 4061 | %67,0 · 1/8 | **%77,6** · 0/8 |
+| 4081 | %99,5 · 8/8 | %93,6 · 6/8 |
+| 4102 | %62,5 · 1/8 | %54,4 · 1/8 |
+| 4121 | %74,5 · 0/8 | %61,4 · 0/8 |
+| **ALAN** | **%82,0** · 30/64 | **%75,2** · 14/64 |
+
+**İkili ölçü 30'a 14 diyor — 2,1 kat, felaket gibi. Süre %82,0'a %75,2 diyor — 1,09 kat.** Ve
+4001'de sekiz arabanın sekizi de bir kez çıkıyor ama yarışın **%83'ünü** kursta geçiriyor. 4061'de
+ikili ölçü 1/8 → 0/8 ile kötüleşme gösterirken süre %67 → %78 ile **iyileşme** gösteriyor: ölçü
+o rotada verdiği hükmü ters çeviriyor.
+
+**Karar değişmiyor ama gerekçesi düzeliyor.** Taban kirişte kalıyor: süre farkı −6,8 puan ve rota
+başına en büyük sapma 20,7 puan, yani günün kuralına göre sağlam bir alan sonucu. Ama "yürünmüş
+halka sürüşte açık ara kötü" ifadesi fazla sertti; doğrusu **ölçülü biçimde kötü, ve bir rotada
+daha iyi**.
+
+**Ve bu, günün dördüncü okuma tuzağı:** bir olayın *olup olmadığını* sayan ölçü, o olayın
+*sürdüğünü* varsayar. Kursu bırakma sürmüyor.

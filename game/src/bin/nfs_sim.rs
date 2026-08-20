@@ -224,6 +224,24 @@ fn knob(name: &str) -> Option<String> {
     std::env::var(name).ok().filter(|v| !v.is_empty())
 }
 
+/// A car's state at the step it crossed off the course, kept so the departures can be counted by
+/// kind rather than described one at a time.
+///
+/// Thirty-four of sixty-four cars leave the course and the buckets they fall into have been read
+/// from traces, a few cars at a time. One line per departure makes the same question a census.
+#[derive(Debug, Clone, Copy)]
+struct Leaving {
+    speed: f32,
+    steer: f32,
+    brake: f32,
+    /// Distance and bearing off the nose of the pure-pursuit aim point.
+    aim: Option<(f32, f32)>,
+    /// The same for the waypoint the pilot was heading for.
+    goal: Option<(f32, f32)>,
+    escaping: bool,
+    given_up: usize,
+}
+
 fn main() {
     pollster::block_on(run());
 }
@@ -724,6 +742,13 @@ async fn run() {
     // Of the steps the fence held a car, how many were at a gap with ground at another level —
     // a road changing height rather than the world ending. See [`rig::Fence`].
     let mut fence_off_level = 0usize;
+    // What the car was doing the step it crossed the corridor's edge, and the copy kept for the
+    // crossing that actually stuck. See [`Leaving`].
+    let mut leaving: Vec<Option<Leaving>> = vec![None; field.len()];
+    let mut left: Vec<Option<Leaving>> = vec![None; field.len()];
+    let mut returned = vec![0.0f32; field.len()];
+    let mut on_course = vec![0.0f32; field.len()];
+    let mut raced = vec![0.0f32; field.len()];
     // The aim-angle census: how often the lookahead point sits well off the nose.
     let (mut aim_steps, mut aim_sum, mut aim_wide, mut aim_hard) = (0usize, 0.0f32, 0usize, 0usize);
     let mut still = vec![0usize; field.len()];
@@ -1090,7 +1115,38 @@ async fn run() {
             f.below = g.below;
             f.ever = g.ever;
             let off = corridor.locate(p.position).map_or(f32::INFINITY, |x| x.distance);
+            // **The measure the day should have been using.** "Never lost the course" counts a
+            // car that dipped off for three seconds once and spent the other eighty-seven back on
+            // it as equal to a car that left and never returned — and 33 of the 34 that leave do
+            // return, several for more than half the race. Time on the corridor is the honest
+            // summary, and it costs one addition.
+            if off <= city::COURSE_HALF_WIDTH {
+                on_course[k] += FIXED_DT;
+            }
+            raced[k] += FIXED_DT;
             if off > city::COURSE_HALF_WIDTH {
+                // **The moment of the crossing, not the moment it is admitted.** A departure is
+                // only *recorded* after three continuous seconds off the corridor, and by then the
+                // car is somewhere else doing something else. The state that explains it is the
+                // step it went over the line.
+                if f.off_for == 0.0 {
+                    let nose = p.rotation * Vec3::NEG_Z;
+                    let fwd = Vec3::new(nose.x, 0.0, nose.z).normalize_or_zero();
+                    let side = Vec3::new(-fwd.z, 0.0, fwd.x);
+                    let bearing = |q: Vec3| {
+                        let d = Vec3::new(q.x - p.position.x, 0.0, q.z - p.position.z);
+                        (d.length(), d.dot(side).atan2(d.dot(fwd)).to_degrees())
+                    };
+                    leaving[k] = Some(Leaving {
+                        speed: p.speed,
+                        steer: cmd[k].2,
+                        brake: cmd[k].1,
+                        aim: pilot.aim().map(bearing),
+                        goal: waypoints.get(pilot.goal()).copied().map(bearing),
+                        escaping: pilot.escaping().is_some(),
+                        given_up: pilot.given_up().len(),
+                    });
+                }
                 f.off_for += FIXED_DT;
             } else {
                 f.off_for = 0.0;
@@ -1113,7 +1169,16 @@ async fn run() {
                 around[k] = Some(ring[k].iter().copied().collect());
                 stuck[k] = Some((now, p.position));
             }
+            // **Does a car that leaves ever come back?** Half of the field leaves and the lost
+            // population banks *more* distinct nodes than the population that stays (25.1 against
+            // 20.0), so leaving is not the end of driving — it is the end of racing, and only if
+            // it sticks. Counted: seconds spent back inside the corridor after a departure was
+            // recorded, and whether it happened at all.
+            if lost[k].is_some() && off <= city::COURSE_HALF_WIDTH {
+                returned[k] += FIXED_DT;
+            }
             if entered[k] && lost[k].is_none() && f.off_for >= 3.0 {
+                left[k] = leaving[k];
                 lost[k] = Some((now, p.position, pilot.covered()));
                 // Freeze what led here. `LOST_BEFORE` is counted back from *this* instant, which is
                 // already three seconds after the car crossed the line, so the window has to be
@@ -1268,6 +1333,28 @@ async fn run() {
                 "            kursu bıraktı: t={t:>6.1}s · waypoint {wp:>3} · ({:>7.0},{:>6.0},{:>7.0})",
                 at.x, at.y, at.z
             );
+            if returned[k] > 0.0 {
+                println!(
+                    "               ve sonra koridora {:.0} s geri döndü",
+                    returned[k]
+                );
+            }
+            if let Some(l) = left[k] {
+                let pair = |v: Option<(f32, f32)>| {
+                    v.map_or("       —".to_string(), |(d, a)| format!("{d:>3.0} m {a:>4.0}°"))
+                };
+                println!(
+                    "               çıkarken: {:>4.0} km/h · direksiyon {:>5.2} · fren {:>4.2} \
+                     · nişan {} · hedef {} · {}vazgeçti {}",
+                    l.speed * 3.6,
+                    l.steer,
+                    l.brake,
+                    pair(l.aim),
+                    pair(l.goal),
+                    if l.escaping { "KAÇIŞ · " } else { "" },
+                    l.given_up
+                );
+            }
         } else if entered[k] {
             println!("            kursu hiç bırakmadı");
         } else {
@@ -2318,6 +2405,20 @@ async fn run() {
              point it was steering at — {:.1}% overall, per car {}",
             if seen > 0 { 100.0 * walled as f32 / seen as f32 } else { 0.0 },
             each.join(" ")
+        );
+    }
+    {
+        let on: f32 = on_course.iter().sum();
+        let all: f32 = raced.iter().sum();
+        let each: Vec<String> = on_course
+            .iter()
+            .zip(&raced)
+            .map(|(o, t)| format!("{:.0}", 100.0 * o / t.max(1e-3)))
+            .collect();
+        println!(
+            "kursta geçen süre: %{:.1} · araba araba %{}",
+            100.0 * on / all.max(1e-3),
+            each.join(" %")
         );
     }
     if aim_steps > 0 {
