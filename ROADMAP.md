@@ -4341,3 +4341,42 @@ altında hiçbir şey yok) → araba halkayı takip edip bloğun içine giriyor 
 durduracak cephe de yok → düşüyor. Zincirin ilk halkası `NFS_WALKLINE` ile zaten kırılıyor
 (%18,4 → %7,1); ikincisi için yarış koridoruna giren 1–10 boşluk rota başına **sayılı ve yerli**,
 yani teker teker bakılabilir.
+
+### Çit neyi çitliyordu: iki adımdan beşi biten yolu değil, kot değiştiren yolu (2026-08-20)
+
+`CarRig::hold_at_edge`'in belgesi bir yerde açıkça duruyordu:
+
+> Zeminin ileride bittiğinin **neden** öyle göründüğü ölçülmedi, ve düzeltme oradan başlamalı:
+> 8 m'lik kot penceresi içindeki düz bir sonda, **biten** yolla **dönen** yolu ayırt edemez.
+
+Ayırt etmek bir sorgu tutuyormuş. `gap_along` bir boşluk bildirdiğinde, o boşluğun tam XZ'sinde
+**herhangi bir kotta** sürülebilir zemin var mı diye soruluyor. Varsa yol bitmiyor, kot
+değiştiriyor — rampa, çukur, tepenin arkası. `Fence { held, off_level }` bunu taşıyor.
+
+**Ölçü, sekiz rota, bugünkü pilot:** çit 1.121 adım tuttu, **451'i (%40)** kot değiştiren yolda.
+Ve dağılımı rastgele değil — belgenin "mesafeye mal oluyor, kimseyi kurtarmıyor" diye mahkûm
+ettiği rotaların ta kendisi:
+
+| rota | çit tuttu | kot değiştiren yolda |
+|---|---|---|
+| 4002 | 381 | **303 (%80)** |
+| 4081 | 132 | **132 (%100)** |
+| 4061 | 48 | 16 (%33) |
+| 4021 · 4041 · 4102 · 4121 | 365 · 97 · 93 · 5 | **0** |
+| 4001 | 0 | — |
+
+**Düzeltme:** kot değişiminde çit ateşlemiyor (`NFS_FENCE_LEVEL=0` eskisini geri getirir).
+
+| | waypoint | kursta | düşen | çit adımı |
+|---|---|---|---|---|
+| eski çit | 1.035 | 30 / 64 | 6 | 1.121 |
+| **kot farkında çit** | **1.046** | 30 / 64 | 6 | **785** |
+
+**Ve asıl argüman waypoint değil.** Alan farkı +11 ve en büyük tek rota +10 (4002) — kendi
+kuralımın kıyısından geçiyor, yani ilerleme kazancı tek rotalık sayılmalı. Argüman şu: **336 daha
+az müdahale, hiçbir ölçüde kayıp yok.** `Paths4081`'de çit 132 ateşlemeden **sıfıra** iniyor ve
+`furthest` bayt-birebir aynı kalıyor (509 m) — yani o 132 müdahalenin tamamı saf gürültüymüş.
+`Paths4002`'de 381 → 180 ve furthest 241 → 235 m. Kalan altı rotanın hepsi değişmiyor.
+
+Bir bariyerin işi arabayı dünyada tutmaktır; aynı sonucu daha az dokunarak veren bariyer daha iyi
+bariyerdir. Kalan 785 müdahale artık gerçekten zeminin bittiği yerlerde.

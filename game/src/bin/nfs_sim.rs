@@ -672,6 +672,9 @@ async fn run() {
     // grinding against geometry, and a car queued behind another car look identical in every number
     // printed so far. Counted per car so the answer is per car.
     let mut fenced = vec![0usize; field.len()];
+    // Of the steps the fence held a car, how many were at a gap with ground at another level —
+    // a road changing height rather than the world ending. See [`rig::Fence`].
+    let mut fence_off_level = 0usize;
     let mut still = vec![0usize; field.len()];
     let mut rolled = vec![0usize; field.len()];
     let mut rescued = vec![0usize; field.len()];
@@ -872,8 +875,11 @@ async fn run() {
             for (k, (rig, _)) in field.iter_mut().enumerate() {
                 let Some(p) = rig.pose(&world) else { continue };
                 let hit = rig.hold_at_edge(&mut world, p, &ground);
-                held += usize::from(hit);
-                fenced[k] += usize::from(hit);
+                held += usize::from(hit.held);
+                fenced[k] += usize::from(hit.held);
+                if hit.held {
+                    fence_off_level += usize::from(hit.off_level);
+                }
             }
         }
         gizmo::physics::physics_step_system(&world, FIXED_DT);
@@ -2243,6 +2249,13 @@ async fn run() {
              point it was steering at — {:.1}% overall, per car {}",
             if seen > 0 { 100.0 * walled as f32 / seen as f32 } else { 0.0 },
             each.join(" ")
+        );
+    }
+    if held > 0 {
+        println!(
+            "çit: {held} adımda tuttu · bunun {fence_off_level}'i ({:.0}%) aynı XZ'de başka kotta \
+             zemin olan bir boşlukta — yani biten yol değil, kot değiştiren yol",
+            100.0 * fence_off_level as f32 / held as f32
         );
     }
     println!(

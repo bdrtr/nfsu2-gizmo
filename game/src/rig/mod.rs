@@ -432,6 +432,20 @@ fn renderer_white(renderer: &Renderer, assets: &mut AssetManager) -> std::sync::
     assets.create_white_texture(&renderer.device, &renderer.queue, &renderer.scene.texture_bind_group_layout)
 }
 
+/// What the edge fence did this step, and what it was looking at.
+///
+/// `held` is the fence's own answer — whether it took velocity away. `off_level` is the question
+/// the fence's doc records as unmeasured: whether the gap that triggered it had drivable ground at
+/// the same XZ but a **different height**. A road that ends has none; a ramp, a dip or the far
+/// side of a crest has some, and a fence that fires there is fencing a road rather than the world.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Fence {
+    /// Whether velocity was removed this step.
+    pub held: bool,
+    /// Whether the gap ahead has ground at another level — a road changing height, not ending.
+    pub off_level: bool,
+}
+
 impl CarRig {
     /// Print what this car turned out to be: its dimensions, and the handling record behind them.
     ///
@@ -646,7 +660,7 @@ impl CarRig {
     ///
     /// Only while the car is on its wheels. A car already in the air is
     /// [`Self::keep_in_world`]'s problem, and a jump that clears a gap is not a barrier violation.
-    pub fn hold_at_edge(&mut self, world: &mut World, pose: Pose, ground: &Ground) -> bool {
+    pub fn hold_at_edge(&mut self, world: &mut World, pose: Pose, ground: &Ground) -> Fence {
         /// How far ahead to look, as a multiple of speed in m/s, and the bounds on it.
         ///
         /// Half a second of travel: long enough to have somewhere to put the car at 100 km/h, short
@@ -659,7 +673,7 @@ impl CarRig {
 
         let (down, total) = self.wheels_down(world);
         if total == 0 || down == 0 {
-            return false;
+            return Fence::default();
         }
 
         let v = {
@@ -669,7 +683,7 @@ impl CarRig {
         let flat = Vec3::new(v.x, 0.0, v.z);
         let speed = flat.length();
         if speed < 0.5 {
-            return false;
+            return Fence::default();
         }
         let dir = flat / speed;
 
@@ -686,8 +700,26 @@ impl CarRig {
             std::env::var("NFS_FENCE_LEAD").ok().and_then(|v| v.parse().ok()).unwrap_or(FENCE_LEAD);
         let from = pose.position + dir * lead;
         let look = (speed * LOOK_PER_SPEED).clamp(LOOK_MIN, LOOK_MAX);
-        if ground.gap_along(from, from + dir * look, SLACK, 2.0).is_none() {
-            return false;
+        let Some(gap) = ground.gap_along(from, from + dir * look, SLACK, 2.0) else {
+            return Fence::default();
+        };
+        // **What the gap actually is**, which the doc above records as unmeasured. `gap_along`
+        // follows a height: it reports a gap where no drivable surface sits within `SLACK` of the
+        // probe's own level. That is a road ending, or a road *changing level* — a ramp, a dip,
+        // the far side of a crest — and the two want opposite responses. Asking the same XZ for
+        // ground at **any** height separates them for the price of one more query.
+        let off_level = !ground.heights_at(from.x + dir.x * gap, from.z + dir.z * gap).is_empty();
+        // **And measured, 2026-08-20: two fifths of everything this fence does is at such a gap.**
+        // Over the eight routes it held 1,121 times and 451 of those (40 %) had ground at another
+        // level ahead. They are not spread evenly — they are exactly the routes the doc above
+        // convicted of costing distance and saving nobody: `Paths4002` is 303 of 381 (80 %) and
+        // `Paths4081` is 132 of 132 (**all of them**), while `Paths4021`, `4041`, `4102` and `4121`
+        // are at zero. A road that changes level is a road; fencing it is the fault, not the fence.
+        // `NFS_FENCE_LEVEL=0` restores the old behaviour, which is how this was swept.
+        if off_level
+            && std::env::var("NFS_FENCE_LEVEL").ok().is_none_or(|v| v != "0")
+        {
+            return Fence { held: false, off_level };
         }
         // **Measured again on 2026-08-13, and it is badly aimed.** The fence still earns its place
         // over eight routes — 2 cars off the world against **9** with it off — but it costs 62
@@ -708,19 +740,21 @@ impl CarRig {
         // start there: a straight probe inside an 8 m height window cannot tell a road that *ends*
         // from a road that *turns*, and on a raised carriageway the second is far more likely. See
         // `ROADMAP.md`.
-        let Some(n) = ground.edge_at(from, look, SLACK) else { return false };
+        let Some(n) = ground.edge_at(from, look, SLACK) else {
+            return Fence { held: false, off_level };
+        };
         let outward = flat.dot(n);
         if outward <= 0.0 {
             // Already leaving the edge behind. A barrier that also stopped a car driving *away*
             // from it would be a trap rather than a fence.
-            return false;
+            return Fence { held: false, off_level };
         }
 
         let mut velocities = unsafe { world.borrow_mut_unchecked::<Velocity>() };
         if let Some(mut x) = velocities.get_mut(self.chassis) {
             x.linear -= n * outward;
         }
-        true
+        Fence { held: true, off_level }
     }
 
     /// Put the car back on the last ground it stood on, if it has left the world. Returns whether
