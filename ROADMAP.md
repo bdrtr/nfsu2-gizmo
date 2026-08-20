@@ -4466,3 +4466,58 @@ sürülebilir olmadığının değil, **nişanın yanlış yere düştüğünün
 `nfs_sim`'de artık tek bir `knob(name)` var: **boş değer = ayarlanmamış**. 26 okuma ona çevrildi;
 `NFS_RESCUE` ve `NFS_SHOTCAM` de aynı tuzaktaydı, onlar da kapatıldı. Sayısal düğmeler zaten
 güvenliydi (boş değer `parse` edilemez, varsayılana düşer).
+
+### Nişan açısı hipotezi çürüdü: on altı noktada korelasyon sıfır (2026-08-20)
+
+Bir önceki bölüm şu ilişkiyi kurmuştu: kursu koruyan tek örnek (4001 kiriş) nişan açısı tek haneli
+olan tek örnekti, ve yürünmüş halkada açı 9° → 21°'ye çıkarken kursta kalan 8/8 → 0/8'e iniyordu.
+İlişki iki uç noktadan okunmuştu; on altı noktada test edildi.
+
+| rota · halka | ortalama nişan | %>45° | kursta |
+|---|---|---|---|
+| 4001 · kiriş | **9°** | %6,4 | **8/8** |
+| 4001 · yürünmüş | 21° | %20,0 | **0/8** |
+| 4002 · yürünmüş | 28° | %15,6 | 7/8 |
+| 4061 · yürünmüş | 28° | %24,7 | 0/8 |
+| 4041 · kiriş | 44° | %34,6 | 4/8 |
+| 4081 · kiriş | 60° | %45,2 | **8/8** |
+| 4121 · yürünmüş | 60° | %50,6 | 0/8 |
+| 4002 · kiriş | **71°** | %51,3 | **7/8** |
+
+**r = −0,01.** İlişki yok. Ve karşı örnekler tek tek yıkıcı: alanın **en kötü** nişan açısına sahip
+kolu (4002 kiriş, 71°, adımların yarısından çoğu 45° üstünde) sekiz arabanın **yedisini** kursta
+tutuyor; 4081 kirişte 60° ile **8/8**; buna karşılık 4001 yürünmüşte 21° ile **0/8**.
+
+**Ders:** bir rotanın iki ucu bir ilişki değildir. Korelasyonu on altı noktada sormak beş dakika
+sürüyor ve mekanizma anlatısını yazmadan **önce** yapılmalıydı. Bu, günün "alan farkı rotalar arası
+yayılımdan küçükse kazandı denmez" kuralının aynısının başka kılığı: **tek rotadan çıkarılan hiçbir
+şey alan hakkında bir iddia değil.**
+
+Gözlemin kendisi yanlış değil — 4001'in arabası gerçekten koridorun 1,3 m içinde, hedefi −3°'de
+iken nişanı 66°'de ve tam frende. O araba için tanı doğru. Alanı açıklamıyor, o kadar.
+
+**Yine de saf-takip yasası uygulandı ve süpürülüyor** (`NFS_PURSUIT=0` rampayı geri getirir), çünkü
+gerekçesi korelasyon değil geometri: gerçek bir virajda iki yasa neredeyse aynı şeyi istiyor
+(21 m yarıçap, 20 m'de 45° → rampa 0,42, geometri 0,41), yalnız ön-takibin virajın arkasına
+düştüğü hâlde ayrılıyorlar (49 m'de 66° → rampa 0,62, geometri **0,19**). Karar süpürmenin.
+
+### Ve saf takip çürüdü: rampa haklı, dürüst geometri burada yanlış (2026-08-20)
+
+`NFS_PURSUIT=1` ile süpürüldü. Her ölçüde birden kaybediyor:
+
+| | waypoint | kursta | kursta kalanın düğümü | furthest | düşen |
+|---|---|---|---|---|---|
+| **rampa** (kalan) | **1.046** | **30 / 64** | **20,0** | **5.299 m** | **6** |
+| saf takip geometrisi | 839 | 27 / 64 | 15,1 | 4.772 m | 7 |
+
+−207 waypoint, **sekiz rotanın yedisinde geride**, hiç beraberlik yok, ve en büyük tek rota −87 —
+yani bugünkü kurala göre sağlam bir alan sonucu, tek rotanın taşıdığı bir şey değil.
+
+**Yanlış yasanın niye kazandığı, bu pilotun ne olduğunu söylüyor: bir hattı *takip etmiyor*, bir
+noktayı *kovalıyor*.** Saf takip "o noktaya hangi yay ulaşır" sorusunu cevaplar; 49 m ötede 66°'deki
+bir noktaya ulaşan yay yumuşaktır — oraya *varmayı* amaçlayan bir araba için doğru, bir saniye
+içinde yeniden yola bakması gereken bir araba için işe yaramaz. **Rampanın fazla direksiyonu,
+toparlanmanın kendisi.**
+
+Varsayılan rampaya döndürüldü ve doğrulandı (4001 waypoint=46, 4121 waypoint=30, `lvl` koluyla
+bayt-birebir aynı). Geometri `NFS_PURSUIT=1` ile duruyor, kaydıyla birlikte.

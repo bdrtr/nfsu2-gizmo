@@ -188,6 +188,16 @@ const BEHIND: f32 = 2.97;
 /// Steering lock the pilot will ask for, as a fraction of the controller's own.
 const STEER_LIMIT: f32 = 0.85;
 
+/// The driven car's wheelbase, in metres — the length pure-pursuit geometry turns a curvature into
+/// a steering angle with.
+///
+/// A constant here and a measurement everywhere else: the sim's own `car ready` line reports the
+/// 240SX at 4.39 m long, and `WheelFit` puts its axles 2.6 m apart. Every car in the eight-route
+/// sweep is that car, so nothing in what is measured depends on the difference — but a pilot
+/// driving a bus would want the bus's number, and the honest place for it is the car rather than
+/// this file. Wire it through when a second car is driven.
+const WHEELBASE: f32 = 2.6;
+
 /// Below this, in m/s, a car asking for throttle is not driving.
 const STALL_SPEED: f32 = 0.7;
 /// How long it has to be true before the pilot tries something else.
@@ -1233,6 +1243,7 @@ impl Pilot {
             }
         }
         self.aim = Some(aim);
+        let reach = flat(aim - at).length();
         let to = flat(aim - at).normalize_or_zero();
         let angle = f.cross(to).y.atan2(f.dot(to));
         // Past [`BEHIND`] the angle carries no usable side, so the side already chosen is kept and
@@ -1276,7 +1287,50 @@ impl Pilot {
         // Not tried, and the better shape of the same idea: a cap that varies with speed — full
         // lock at rest, where turning round is exactly right and the escape machinery depends on
         // it, and little at 60 km/h. What is measured here is the flat cap only.
-        let want = (angle * 2.0 / std::f32::consts::PI).clamp(-1.0, 1.0) * STEER_LIMIT;
+        //
+        // **And the law itself, measured on 2026-08-20.** The ramp above is linear in the angle:
+        // full lock at 90°, half at 45°. Pure pursuit's own geometry is not — the arc from the car
+        // to an aim point `L` away at angle `α` has curvature `2·sin α / L`, so the steer angle is
+        // `atan(wheelbase · 2 sin α / L)` and the lock fraction is that over the car's own lock.
+        // The two agree where the corner is real: at a 21 m radius taken with the aim 20 m ahead
+        // at 45°, the ramp asks 0.42 and the geometry 0.41. They part company exactly where the
+        // pilot was measured to fail — aim **49 m away at 66°**, where the ramp asks 0.62 and the
+        // geometry **0.19**, because a point that far off the nose and that far away is not a
+        // corner, it is the lookahead reaching around one.
+        //
+        // Past 90° the geometry has to be abandoned rather than trusted: `sin α` *falls* again, so
+        // a target directly behind would ask for no lock at all, and the escape machinery depends
+        // on full lock at rest. Saturated there instead, which is also where [`BEHIND`] takes over.
+        //
+        // **Swept, and refuted — the ramp is right and the honest geometry is wrong here.**
+        // `NFS_PURSUIT=1` turns it on; over the eight routes it loses on every measure at once:
+        //
+        // | | waypoints | on course | nodes each | furthest | fell |
+        // |---|---|---|---|---|---|
+        // | **ramp** (kept) | **1046** | **30 / 64** | **20.0** | **5299 m** | **6** |
+        // | pure pursuit | 839 | 27 / 64 | 15.1 | 4772 m | 7 |
+        //
+        // −207 waypoints, behind on **seven of the eight routes** with no ties, and the biggest
+        // single route is −87 — a field result, not one route's.
+        //
+        // Why the wrong law wins is worth keeping, because it says what this pilot is: it does not
+        // *track a path*, it **chases a point**, and chasing hard is what carries it back when the
+        // lookahead swings wide. Pure pursuit's geometry answers "what arc reaches that point", and
+        // an arc that reaches a point 49 m away at 66° is a gentle one — correct for a car that
+        // means to arrive there, useless for a car that needs to be pointing at the road again in
+        // the next second. The ramp's over-steering is the recovery.
+        let geometry = std::env::var("NFS_PURSUIT").is_ok_and(|v| !v.is_empty() && v != "0");
+        let want = if geometry {
+            if angle.abs() >= std::f32::consts::FRAC_PI_2 || reach < 1.0 {
+                angle.signum() * STEER_LIMIT
+            } else {
+                let curve = 2.0 * angle.sin() / reach;
+                let lock = (WHEELBASE * curve).atan() / crate::car::tune::steering_lock();
+                lock.clamp(-1.0, 1.0) * STEER_LIMIT
+            }
+        } else {
+            (angle * 2.0 / std::f32::consts::PI).clamp(-1.0, 1.0) * STEER_LIMIT
+        };
 
         // How fast the wheel catches up with what the pilot wants.
         //
