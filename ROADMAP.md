@@ -5412,3 +5412,30 @@ gerekçe değil; gerekçe şu: **bu bir ayar değil, kırılmış bir ön koşul
 esnetmediği bir halka bayt-birebir aynı çıkıyor, çünkü yalnız geniş bacaklar bölünüyor.
 
 **Varsayılan yapıldı** (`NFS_FILLGAPS=0` kapatır). 4081 %51,0 → **%90,2**, 4001 değişmedi.
+
+### Halka düzelince iki sabit yeniden soruldu — biri yerinde kaldı, biri **atıl** çıktı (2026-08-20)
+
+Günün kendi dersi uygulandı: kurs değişince sabitler yeniden süpürülür.
+
+**Ön-takip (`LOOKAHEAD_PER_SPEED = 1.8`) yerinde kaldı.** 1,3 s karar ölçüsünde +76 waypoint
+kazanıyor (sağlam) ama dört sütunda birden kaybediyor — koridor %77,4 → %76,7, `furthest`
+5.928 → 5.495, hattı bırakan 34 → 40, yan yatma %1,2 → %1,5. 2,4 s'nin +81'i ise taşınıyor
+(en büyük tek rota +98). 0,9 s −59 ile sağlam biçimde geride.
+
+**`PASSED_NEAR` ise artık hiçbir şey yapmıyor:**
+
+| bırakma yarıçapı | alan farkı | kursta süre | furthest | hattı bırakan |
+|---|---|---|---|---|
+| 40 m | +2 | %77,6 | 5.934 m | 34 |
+| **60 m** (bugünkü) | — | %77,4 | 5.928 m | 34 |
+| 90 m | **±0** | %77,4 | 5.928 m | 34 |
+
+90 m sekiz rotanın sekizinde **bayt-birebir aynı**; 40 m tek rotada iki waypoint oynatıyor.
+
+**Ve bu, boşluk teorisinin en temiz doğrulaması.** Bırakma yarıçapı yalnızca halkada ondan
+büyük aralıklar olduğu için önemliydi. `GAP_AT` her aralığı ~1,1 adımın (40 m'lik adımda 44 m)
+altında tuttuğu için hiçbir waypoint artık 60 m'den uzak değil, ve yarıçap hiç bağlamıyor.
+
+Bu, sabahki denetimi çürütmüyor, **açıklıyor**: `PASSED_NEAR` keyfi görünüyordu çünkü halka
+düzensizdi; halka düzenlenince kanıtlanabilir biçimde atıl. **Değeri ölçülemeyen bir sabit
+genellikle başka bir şeyin yerine duruyordur** — burada durduğu şey kursun kendi aralığıydı.

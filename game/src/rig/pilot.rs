@@ -365,6 +365,15 @@ const REACHED: f32 = 18.0;
 /// +30 (one route is −47), and it beats switching the release *off* by +75 of which `Paths4121`
 /// alone is +104 — with off ahead on three of the eight. The release is measured; 60 rather than
 /// 80 is not. See `ROADMAP.md`, 2026-08-20.
+/// **And with a regular ring it does nothing at all** (2026-08-20). Once the pull's stretch is
+/// repaired — `GAP_AT` keeps every gap under about 1.1 steps, so 44 m at a 40 m step — no waypoint
+/// is ever further than this radius, and the radius stops binding. Swept again on that ring: 90 m
+/// gives a **byte-identical** field on all eight routes and 40 m differs by two waypoints on one.
+///
+/// That explains the audit above rather than contradicting it. This constant looked arbitrary
+/// because the ring was irregular; with the ring regular it is provably inert. A constant whose
+/// value cannot be measured is usually standing in for something else, and here the something
+/// else was the course's own spacing.
 const PASSED_NEAR: f32 = 60.0;
 
 /// How near a waypoint counts as having driven past it, for [`Pilot::covered`].
