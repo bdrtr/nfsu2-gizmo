@@ -1,7 +1,9 @@
-# Sekiz-rota baseline — pin yükseltmesinden önce
+# Sekiz-rota baseline — pin yükseltmesinin iki yanı
 
-Bu dosya bir ölçüm kaydı, bir plan değil. Sekiz-rota süpürmesi `nfsu2-gizmo`'da her sürücü/dünya
-değişikliğini yargılayan ölçüm; burada yazan sayılar **motor pini taşınmadan önceki** hâli.
+Bu dosya bir ölçüm kaydı, bir plan değil. **İki tablo var:** yükseltmeden önceki (aşağıda) ve
+2026-08-20'de yükseltmeden sonra alınan (dosyanın sonunda, karşılaştırmasıyla). Sekiz-rota
+süpürmesi `nfsu2-gizmo`'da her sürücü/dünya değişikliğini yargılayan ölçüm; hemen aşağıdaki
+sayılar **motor pini taşınmadan önceki** hâli.
 
 Neden yazıldı: motorun kendi determinizm kapısı (`headless_stress_test`, hash
 `A462C9EB8A09D5CA`) **kendi 200 kutuluk yıkım sahnesini** kilitliyor, bu şehri değil. Motor
@@ -66,3 +68,45 @@ Yükseltmeden sonra aynı komutu koştur, tabloyu yan yana koy ve şuna bak:
 
 Kare süresi bu tabloda yok: `nfs_sim` başsız koşuyor. Render tarafının maliyeti ayrıca
 `nfs_cruise`/`nfs_city` ile ölçülmeli.
+
+## Yükseltmeden sonra — 2026-08-20, pin `58dc2623`
+
+Aynı komut, aynı araç, aynı süre; tek değişen motor. Oyun commit'i `2b58c74`, binary yeniden
+derlendi ve çıktısı doğrulandı.
+
+| rota | away | fallen | furthest | junctions | held | waypoint | distinct nodes |
+|---|---|---|---|---|---|---|---|
+| 4001 | 8 | 0 | 995 | 236 | 105 | 39 | 229 |
+| 4002 | 8 | 0 | 215 | 32 | 350 | 93 | 28 |
+| 4021 | 8 | 1 | 618 | 200 | 19 | 44 | 193 |
+| 4041 | 8 | 2 | 938 | 133 | 111 | 28 | 123 |
+| 4061 | 8 | 0 | 708 | 168 | 3 | 67 | 154 |
+| 4081 | 8 | 0 | 578 | 198 | 55 | 125 | 186 |
+| 4102 | 8 | 0 | 413 | 248 | 2 | 25 | 217 |
+| 4121 | 8 | 0 | 705 | 230 | 27 | 29 | 222 |
+| **TOPLAM** | **64** | **3** | **5170** | **1445** | **672** | **450** | **1352** |
+
+### Okuma: sürüş kaymadı
+
+| ölçü | önce | sonra | fark |
+|---|---|---|---|
+| away | 64 | 64 | **0** |
+| distinct nodes | 1.354 | 1.352 | −0,1 % |
+| waypoint | 435 | 450 | **+3,4 %** |
+| junctions | 1.452 | 1.445 | −0,5 % |
+| furthest | 5.350 | 5.170 | −3,4 % |
+| fallen | 2 | 3 | +1 araba |
+| held | 822 | 672 | −18 % |
+
+Dosyanın kendi kriterleri sırayla: **`away` 64'ün altına düşmedi**, yani kavşak seçimi
+bozulmadı. **Distinct nodes sabit** (1.354 → 1.352) ve **waypoint arttı**, yani gerçek ilerleme
+aynı ya da biraz iyi — daire çizmeye kayma yok. `furthest`'in %3,4 düşmesi tek başına
+"yavaşladı" demek değil: aynı ilerleme için daha az metre, çırpınmanın azalması gibi de okunur, ve
+düşüşün yarısı tek rotadan geliyor (4061, −182; buna karşılık 4001 +104).
+
+**Tek gerçek işaret `fallen` 2 → 3** — 4041'de bir araba daha düştü. Dosyanın uyardığı yer burası
+(`pin..main`'de statik/dinamik sürtünme modeli geldi). 64 arabada bir araba, tek başına bir karar
+verdirmez; sonraki süpürmelerde 4041 izlenmeli, üç olur ve orada kalırsa temas tarafına bakılır.
+
+**Karar: yükseltme sürüşü bozmadı, geri alınacak bir şey yok.** Bu tablo bundan sonraki
+karşılaştırmaların tabanıdır; yukarıdaki yükseltme öncesi tablo tarihsel.
