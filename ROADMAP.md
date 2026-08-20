@@ -5167,3 +5167,50 @@ bakan seçimden iyi — bu, aynı günün "hattın üstünde kal" ve "hatta yak�
 4061 dik bir rampa; 4001'in yedi arabası 29 km/h'de, hedefi 89°'de, alabilecekleri bir virajı
 (gereken yarıçap ~16 m, arabanın minimumu 5,5 m) alamıyor. Üçü üç ayrı soru ve hiçbiri kural
 değil.
+
+### Ölçü düzeltildi: arabalar koridordan çıkarken hattı **medyan 28 m** önce kaybetmiş (2026-08-20)
+
+Bugünkü bütün ayrılma analizi **koridora** karşı yapılmıştı, ve koridor rota dosyasının bütün
+hatlarının birleşimi — yani cömert. `çıkarken` satırına yarış hattına uzaklık eklendi ve ölçü
+kendi kusurunu gösterdi:
+
+> 49 ayrılma · koridordan çıkarken yarış hattına **medyan 28 m** · en yakın 10, en uzak 152 m ·
+> yalnız **2'si** koridorun kendi yarı genişliği (12 m) içinde · 8'i 100 m'den uzakta
+
+Yani koridor çıkışı işin ters gittiği an değil, **görünür olduğu an**. Aynı üç saniyelik kural
+hatta karşı soruldu (`OFF_LINE = 25 m`, çünkü waypoint'ler ~30 m aralıklı ve tam ortadaki araba
+zaten 15 m uzakta) ve harita yerinden oynadı:
+
+| yer | koridor haritası | **gerçek (hat) haritası** | fark |
+|---|---|---|---|
+| 4081 | (−352,−159) · 47 km/h | (−347,−129) · 52 km/h | 30 m önce |
+| 4121 | (−249,1423) · 64 km/h | **(−371,1600) · 68 km/h** | **215 m ve ~10 sn önce** |
+| 4061 | (−2358,1838) · 73 km/h | (−2391,1790) · 77 km/h | 58 m önce |
+| 4102 | (31,−53) · 65 km/h | (−13,−97) · **93 km/h** | 62 m önce, çok daha hızlı |
+| 4041 | — | (1982,−64) · 26 km/h | yeni |
+
+40 araba hattı bırakıyor, 11 yerde, ilk beşi 31 araba.
+
+**Ve 4121'in gerçek yeri bir şey söylüyordu:** araba tam bir düğümün üstünde (0 m) ve koridorun
+**14 cm** içinde — kusursuz sürüyor. Ama halkanın oradaki yarıçapı **13 m**, yani `v = sqrt(a·r)`
+ile ölçülmüş 5,2 m/s²'de **30 km/h**'lik bir viraj, ve arabalar 68 km/h ile geliyor. Gereken yanal
+ivme 27 m/s².
+
+**Bunun üzerine halkanın kendi virajı için fren yazıldı — ve çürüdü.** Çürütülmüş eski sürüm
+**ağın** düğüm poligonuna göre freniliyordu; bu halkanın kendisine göre frenliyor, ki halka artık
+koridora çekilmiş yani dürüst. Yine de:
+
+| | waypoint | kursta süre | yan yatarak | furthest | hattı bırakan |
+|---|---|---|---|---|---|
+| **kapalı** (kalan) | — | **%73,8** | **%0,8** | **5.951 m** | 40 |
+| 5,2 m/s² | **−153** | %69,7 | %1,6 | 5.667 m | **44** |
+| 8 m/s² | −28 | %72,0 | %1,0 | 5.790 m | 39 |
+
+**İki ayarda da kaybediyor, hattı bırakanı azaltmıyor, ve motive eden rotada en çok kaybediyor**
+(4121: −55). Demek ki halkanın tarif ettiği viraj yolun sahip olduğu viraj değil: çekme
+waypoint'leri tek tek taşıyor ve kırık bırakıyor, ve bir şehir sokağında 13 m yarıçap bir firkete
+değil bir kırıktır. O kırıkları yumuşatmak ayrıca ölçüldü ve o da nötr — **halkanın yarıçapları
+frenlenecek kadar güvenilir değil, ve yumuşatmak onları doğru yapmıyor.**
+
+Günün dördüncü "daha az yap" çürütmesi, ve en keskini: aritmetiğin "bu viraj imkânsız" dediği yere
+nişan alındı ve yavaşlamak yine kaybetti.

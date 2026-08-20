@@ -211,6 +211,29 @@ const ESCAPE_FULL: f32 = 2.0;
 /// the eight-route field cannot choose; see `ROADMAP.md`, 2026-08-20.
 const BEHIND: f32 = 2.97;
 
+/// The lateral acceleration the course's own corners are taken at, in m/s². **0: refuted.**
+///
+/// Measured, not chosen: the 90th percentile of the field's own cornering above 28 km/h is
+/// 5.2 m/s² (`ROADMAP.md`, 2026-08-20). `v = sqrt(a·r)` turns the ring's radius into a speed.
+///
+/// | | waypoints | on the corridor | on their side | furthest | lost the line |
+/// |---|---|---|---|---|---|
+/// | **off** (kept) | — | **73.8 %** | **0.8 %** | **5951 m** | 40 |
+/// | 5.2 | **−153** | 69.7 % | 1.6 % | 5667 m | **44** |
+/// | 8 | −28 | 72.0 % | 1.0 % | 5790 m | 39 |
+///
+/// **It loses at both settings, and it fails at the place that asked for it.** `Paths4121` is
+/// where eight cars meet a 13 m radius at 68 km/h; braking for it takes that route **−55**. So
+/// the corner the ring describes is not the corner the road has: the pull moves waypoints one at
+/// a time and leaves kinks, and a 13 m radius in a city street is a kink, not a hairpin. Smoothing
+/// those kinks away was measured separately and is also neutral, which closes the loop — **the
+/// ring's radii are not trustworthy enough to brake on, and making them smoother does not make
+/// them true.**
+///
+/// Fourth refusal of a "do less" lever this day, and the sharpest: it was aimed at a place where
+/// the arithmetic said the corner was impossible, and slowing for it still lost.
+const RING_HELD: f32 = 0.0;
+
 /// Steering lock the pilot will ask for, as a fraction of the controller's own.
 const STEER_LIMIT: f32 = 0.85;
 
@@ -1532,6 +1555,50 @@ impl Pilot {
             let reach = flat(aim - at).length().max(1.0);
             let need = 2.0 * speed * speed * angle.abs().sin() / reach;
             brake = brake.max(((need / grip - 1.0) * BRAKE_GAIN).clamp(0.0, 1.0));
+        }
+
+        // **And the corner the *course* has, which neither of the two above can see.**
+        //
+        // The refutation just above braked on the **network's** node polyline; this asks the
+        // **ring** the pilot is actually steering at, and the difference is that the ring is now
+        // honest — every waypoint outside the race corridor is pulled back into it, which it was
+        // not when that measurement was taken.
+        //
+        // The place that asked for it: on `Paths4121` eight cars lose the line at one node, and
+        // at the moment they do they are **0 m from that node and 14 cm from the corridor's
+        // centre** — driving perfectly. The ring ahead of them turns at a **13 m radius**, which
+        // `v = sqrt(a·r)` at the field's own measured 5.2 m/s² makes a **30 km/h** corner, and
+        // they arrive at 68. Nothing in the pilot was looking that far ahead: `BRAKE_SPEED`
+        // watches the wheel, which only turns once the corner is here, and `GRIP` watches the aim
+        // chord, which is a network node a second away.
+        //
+        // Look ahead by the distance it takes to stop *to* that speed rather than a fixed reach,
+        // because a corner you cannot brake for in time is not information.
+        let ring_held: f32 =
+            std::env::var("NFS_RINGBRAKE").ok().and_then(|v| v.parse().ok()).unwrap_or(RING_HELD);
+        if ring_held > 0.0 && course.len() >= 3 && speed > 1.0 {
+            let n = course.len();
+            let look = (speed * speed / (2.0 * ring_held)).clamp(20.0, 200.0);
+            let mut walked = 0.0;
+            let mut i = self.goal % n;
+            let mut limit = f32::INFINITY;
+            while walked < look {
+                let (a, b, c) = (course[(i + n - 1) % n], course[i], course[(i + 1) % n]);
+                let (u, v) = (flat(b - a), flat(c - b));
+                let (lu, lv) = (u.length(), v.length());
+                if lu > 0.01 && lv > 0.01 {
+                    let turn = (u / lu).cross(v / lv).y.asin().abs();
+                    if turn > 1e-3 {
+                        let r = 0.5 * (lu + lv) / turn;
+                        limit = limit.min((ring_held * r).sqrt());
+                    }
+                }
+                walked += lv;
+                i = (i + 1) % n;
+            }
+            if speed > limit {
+                brake = brake.max(((speed / limit - 1.0) * BRAKE_GAIN).clamp(0.0, 1.0));
+            }
         }
 
         // **The car in front.** Until now a rival would drive into the back of another one, which

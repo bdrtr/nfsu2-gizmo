@@ -36,6 +36,12 @@ use nfsu2::world as city;
 const MASS_KG: f32 = 1220.0;
 const WHEEL_R: f32 = 0.31;
 
+/// How far from the nearest waypoint counts as off the race's own line, in metres.
+///
+/// Not the corridor's half-width: waypoints are about 30 m apart, so a car exactly between two of
+/// them is already 15 m from both without having strayed at all. 25 m is that geometry plus a car.
+const OFF_LINE: f32 = 25.0;
+
 /// Where an off-corridor waypoint is pulled to, as a fraction of the corridor's half-width: 0 is
 /// its centre, 1 its edge. Measured; see the block that uses it.
 const PULL_TO: f32 = 0.0;
@@ -240,6 +246,8 @@ fn knob(name: &str) -> Option<String> {
 /// from traces, a few cars at a time. One line per departure makes the same question a census.
 #[derive(Debug, Clone, Copy)]
 struct Leaving {
+    /// Distance to the nearest waypoint of the race's own line at the crossing.
+    ring: f32,
     /// Where and when the edge was crossed. **Not** where the departure is recorded: that is three
     /// seconds later and, at 90 km/h, a hundred metres away — the place census was clustered on
     /// the late position until this was added, and a hundred metres is a different junction.
@@ -891,6 +899,10 @@ async fn run() {
     let mut raced = vec![0.0f32; field.len()];
     let mut top = vec![0.0f32; field.len()];
     let mut on_side = vec![0.0f32; field.len()];
+    let mut off_line_for = vec![0.0f32; field.len()];
+    let mut left_line: Vec<Option<(f32, Vec3, f32)>> = vec![None; field.len()];
+    let mut line_at = vec![Vec3::ZERO; field.len()];
+    let mut line_speed = vec![0.0f32; field.len()];
     let mut top_gear = vec![0usize; field.len()];
     let mut top_rpm = vec![0.0f32; field.len()];
     let mut top_torque = vec![0.0f32; field.len()];
@@ -1286,6 +1298,29 @@ async fn run() {
                     aim_hard += usize::from(deg > 90.0);
                 }
             }
+            // **Losing the race line, which is not the same as leaving the corridor.** The
+            // corridor is the union of every path in the route file, so a car can be well inside
+            // it and a hundred metres from the race. Measured at the corridor crossings: the
+            // median distance to the nearest waypoint is **28 m** and only 2 of 49 are within the
+            // corridor's own half-width. So the corridor departure is when it became visible; this
+            // is when it happened. Same three-second rule, asked of the line instead.
+            {
+                let here = Vec3::new(p.position.x, 0.0, p.position.z);
+                let d = waypoints
+                    .iter()
+                    .map(|w| (Vec3::new(w.x, 0.0, w.z) - here).length())
+                    .fold(f32::INFINITY, f32::min);
+                if d > OFF_LINE {
+                    off_line_for[k] += FIXED_DT;
+                    if left_line[k].is_none() && off_line_for[k] >= 3.0 {
+                        left_line[k] = Some((now - 3.0, line_at[k], line_speed[k]));
+                    }
+                } else {
+                    off_line_for[k] = 0.0;
+                    line_at[k] = p.position;
+                    line_speed[k] = p.speed;
+                }
+            }
             let f = &mut falls[k];
             f.below = g.below;
             f.ever = g.ever;
@@ -1375,7 +1410,20 @@ async fn run() {
                         let d = Vec3::new(q.x - p.position.x, 0.0, q.z - p.position.z);
                         (d.length(), d.dot(side).atan2(d.dot(fwd)).to_degrees())
                     };
+                    // **How far the race line itself is.** The corridor is the union of every
+                    // path in the route file, so it is generous: a car can be on *a* road, well
+                    // inside it, and a hundred metres from the race. Measured at the crossing,
+                    // this says whether the corridor departure is the moment it went wrong or
+                    // only the moment that became visible.
+                    let ring = waypoints
+                        .iter()
+                        .map(|w| {
+                            (Vec3::new(w.x, 0.0, w.z) - Vec3::new(p.position.x, 0.0, p.position.z))
+                                .length()
+                        })
+                        .fold(f32::INFINITY, f32::min);
                     leaving[k] = Some(Leaving {
+                        ring,
                         at: p.position,
                         t: now,
                         speed: p.speed,
@@ -1573,6 +1621,14 @@ async fn run() {
                 "            kursu bıraktı: t={t:>6.1}s · waypoint {wp:>3} · ({:>7.0},{:>6.0},{:>7.0})",
                 at.x, at.y, at.z
             );
+            if let Some((t, at, v)) = left_line[k] {
+                println!(
+                    "            hattı bıraktı: t={t:>6.1}s ({:>7.0},{:>7.0}) · {:>4.0} km/h",
+                    at.x,
+                    at.z,
+                    v * 3.6
+                );
+            }
             if returned[k] > 0.0 {
                 println!(
                     "               ve sonra koridora {:.0} s geri döndü",
@@ -1585,11 +1641,13 @@ async fn run() {
                 };
                 println!(
                     "               çıkarken: t={:>6.1}s ({:>7.0},{:>7.0}) · {:>4.0} km/h \
-                     · direksiyon {:>5.2} · fren {:>4.2} · nişan {} · hedef {} · {}vazgeçti {}",
+                     · hatta {:>4.0} m · direksiyon {:>5.2} · fren {:>4.2} · nişan {} · hedef {} \
+                     · {}vazgeçti {}",
                     l.t,
                     l.at.x,
                     l.at.z,
                     l.speed * 3.6,
+                    l.ring,
                     l.steer,
                     l.brake,
                     pair(l.aim),
