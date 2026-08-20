@@ -3916,10 +3916,54 @@ tekerleği bağlıyor.
 `BEHIND = 2.97` (170°) varsayılan; `NFS_BEHIND=0` yazı-turayı geri getirir. Alan **986 → 1.000
 waypoint**.
 
+### Kaçış kendi kendini yeniden tetikliyormuş — ve aritmetiği zaten kodda yazılıydı (2026-08-20)
+
+`BEHIND` düzeltmesi takılan arabaya ne yaptı diye bakıldı: kaçış başına ilerleme **0,0 m → 3,0 m**.
+Salınım söndü, araba çıkamadı — yarışın hâlâ %56'sında duruyor. Yeni iz sebebi gösterdi ve sebep
+`CORNER_LIFT`'in kendi belgesinde duruyordu:
+
+> Tam kilitte pedal `1 − 0,85·0,75 = 0,36`'ya iner, bu duruştan ~0,29 m/s²'dir; `STALL_FOR`'un
+> 1,5 saniyesinde 0,44 m/s'ye ulaşır ve `STALL_SPEED` 0,7'yi **hiç geçemez**.
+
+Kaçış arabayı tam kilide sokuyor (hedef arkada), tam kilit gazı 0,36'ya indiriyor, araba kendi
+durma eşiğini geçemiyor, yeniden takılıyor, geri viteste 1,2 saniye harcıyor, yeni bir kaçış
+başlatıyor — ve baştan. Arabanın kendi özeti: **18 kaçış, 3 m**, dururken istenen gaz **0,03**.
+
+**Düzeltme:** kaçış bir viraj değil. Gaz kesme, virajda kaybedilecek hızı olan araba içindir;
+kaçışta ne viraj vardır ne kaybedilecek hız. `self.escape` varken kesme uygulanmıyor.
+
+Araba 0'ın sayıları, üç düzeltme boyunca:
+
+| | kaçış başına ilerleme | dururken istenen gaz | tork | junctions |
+|---|---|---|---|---|
+| başlangıç | **0,0 m** | 0,03 | 966 Nm | 142 |
+| + `BEHIND` | 3,0 m | — | — | 148 |
+| + kaçışta tam gaz | **6,8 m** | **0,23** | 1.568 Nm | 167 |
+
+Hâlâ çıkamıyor, ama üç ölçünün üçü de doğru yönde ve her adım bir öncekinin açtığı kapıdan geçti.
+
+**Süpürme, ve daraltma:**
+
+| kaçış gazı | waypoint | kursu hiç bırakmayan | dünyadan düşen |
+|---|---|---|---|
+| her zamanki gibi kesilir | 1.000 | **33 / 64** | **4** |
+| her hızda tam | 1.038 | 27 / 64 | 7 |
+| **2 m/s altında tam** | **1.035** | 30 / 64 | 6 |
+
+Kazanç mekanizmanın söylediği yerde: `Paths4021` +17, `Paths4041` +19 — takılan arabaların olduğu
+iki rota. **Düşen artışının tamamı 4041'in iki arabası.** Bu bedel gizlenmiyor: bu kurulumda
+**hiç bariyer yok** (`world::collide::Bounds`), yani yeniden hareket eden araba er geç çitsiz bir
+kenar buluyor. Arka-kilit kolunun kusuruyla aynı şey değil — orada tekerleği kısıtlamak arabanın
+kenardan **kaçmasını** engelliyordu, yani sürüş hatasıydı; burada araba çitsiz bir haritada daha
+uzağa gidiyor, ki o bekleyen bariyer maddesi.
+
+`ESCAPE_FULL = 2.0` varsayılan. Alan **1.000 → 1.035 waypoint**.
+
 ## Nerede kaldık (2026-08-14 sonu)
 
-**Alan (2026-08-20 sonu, motor pini `58dc2623`, `GRIP`, `PASSED_NEAR` ve `BEHIND` açıkken):
-1.000 geçilen waypoint, 64 arabanın 33'ü kursu hiç bırakmıyor.** Günün ortasında, yalnız `GRIP`
+**Alan (2026-08-20 sonu, motor pini `58dc2623`, `GRIP`, `PASSED_NEAR`, `BEHIND` ve `ESCAPE_FULL`
+açıkken): 1.035 geçilen waypoint, 64 arabanın 30'u kursu hiç bırakmıyor, 6'sı dünyadan düşüyor.**
+Sabah 883 waypoint ve 22 arabaydı. Günün ortasında, yalnız `GRIP`
 varken: 927 waypoint, 50 araba bırakıyordu. Bir önceki hâli, aşağıdaki paragrafın ölçüldüğü gün:
 865 waypoint, 1.354 düğüm, 51 araba. (Bugün 869
 diye geçen sayı, pilot saati 4× hızlıyken ölçülmüştü; düzeltilince 865 oldu — yani saat platonun

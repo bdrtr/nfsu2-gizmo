@@ -111,6 +111,39 @@ const LOOKAHEAD_PER_SPEED: f32 = 0.9;
 const LOOKAHEAD_MIN: f32 = 12.0;
 const LOOKAHEAD_MAX: f32 = 40.0;
 
+/// Below this speed an escape drives on full throttle, because the lift is what keeps it stuck.
+///
+/// **The escape was re-arming itself, and the arithmetic was already written in [`CORNER_LIFT`].**
+/// At full lock the pedal goes to `1 − 0.85·0.75 = 0.36`, about 0.29 m/s² from rest, which in
+/// [`STALL_FOR`]'s 1.5 s reaches 0.44 m/s against a [`STALL_SPEED`] of 0.7 — the car cannot clear
+/// its own stall threshold. An escape aims at the clearest ground it can find, which for a car
+/// facing a wall is behind it, which is full lock, which is 0.36 of pedal, which is another stall.
+/// Traced on `Paths4021`: **eighteen escapes and three metres moved**, still for 56 % of the race,
+/// on flat ground with eleven of twelve directions clear.
+///
+/// The lift is right for a *corner*, where the car has speed to lose. An escape at rest has no
+/// corner and nothing to lose, so below this speed it is not applied. Above it — an escape that
+/// begins while the car is still rolling — the corner reading is the right one and the lift stays.
+///
+/// **Swept over eight routes**, and the narrowing is what makes it keepable:
+///
+/// | escape throttle | waypoints | never lost the course | fell off the world |
+/// |---|---|---|---|
+/// | lifted as always | 1 000 | **33 / 64** | **4** |
+/// | full, at any speed | 1 038 | 27 / 64 | 7 |
+/// | **full below 2 m/s** | **1 035** | 30 / 64 | 6 |
+///
+/// The gain lands exactly where the mechanism said it would — `Paths4021` +17 and `Paths4041` +19,
+/// the two routes with cars standing still — and **the whole of the extra falling is 4041's two
+/// cars**. That cost is named rather than waved away: this install ships **no barriers at all**
+/// (`world::collide::Bounds`), so a car that starts moving again eventually finds an unfenced edge.
+/// It is not the rear-lock cap's failure in disguise — that one was refuted because clamping the
+/// wheel stopped cars turning *away* from an edge, a driving defect; this is cars driving further
+/// on a map with nothing at its rim, which is the standing barrier item and not this rule's doing.
+///
+/// `NFS_ESCFULL=0` puts the lift back everywhere.
+const ESCAPE_FULL: f32 = 2.0;
+
 /// Past this angle the aim point has no usable side, so the side already chosen is kept.
 ///
 /// **A point dead behind has no side, and pure pursuit tosses a coin about it every tick.** Traced
@@ -1217,7 +1250,13 @@ impl Pilot {
         // for, and it is worth remembering that a 2× improvement on a single route can mean
         // nothing at all.
         self.steer += (want - self.steer) * 0.35;
-        let mut throttle = (1.0 - self.steer.abs() * CORNER_LIFT).max(0.15);
+        // An escape at rest is not a corner — see [`ESCAPE_FULL`] for why the lift is what was
+        // keeping the car there, and for the sweep.
+        let esc_full: f32 =
+            std::env::var("NFS_ESCFULL").ok().and_then(|v| v.parse().ok()).unwrap_or(ESCAPE_FULL);
+        let lift =
+            if self.escape.is_some() && speed.abs() < esc_full { 0.0 } else { CORNER_LIFT };
+        let mut throttle = (1.0 - self.steer.abs() * lift).max(0.15);
 
         // **Brake.** Lifting the throttle was the whole speed policy and it is not enough: with no
         // brake a car carries 90 km/h into a corner, runs wide and leaves the road — measured, 20
