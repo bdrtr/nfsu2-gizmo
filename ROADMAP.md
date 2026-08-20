@@ -3821,6 +3821,51 @@ bütün ölçümlerin ona göre ayarlanmış olduğu için.** Yürünmüş halka
 pilot sabitlerinin (özellikle `GRIP`, çünkü bugün kurgusal virajlara karşı ayarlandı) yeniden
 ayarlanmasını gerektirir. Bu bir süpürme sonucu değil, bilerek verilecek bir proje kararı.
 
+### Halkanın üç kusuru bulundu ve düzeltildi — alan kıpırdamadı (2026-08-20)
+
+Bir önceki bölüm halkanın kendi kusurlarını saymayı bırakmıştı; üçü de bulundu, ikisi düzeltildi ve
+üçüncüsü zaten yoktu.
+
+**1. Bacak, bir öncekinin üstünden geri dönüyordu.** İki anahat köşesi arasındaki en kısa yol,
+çoğu zaman yeni gelinen yolun ta kendisi. Düzeltme: bir bacak, bir öncekinin **girdiği düğüme geri
+dönen adımı** kullanamıyor — sadece o tek adım, çünkü bir kurs bir yoldan sonra yine geçebilir ve
+bunu bütünüyle yasaklamak, çürütülmüş "halkada duramaz" hatasının başka kılığı olurdu.
+
+`Paths4001`: daha önce geçilen yere dönen waypoint **9 → 1**, uzunluk 7.159 → 6.238 m.
+
+**2. Bir bacağın yolu kirişinin 22 katı olabiliyor.** `NFS_WALKLEGS=1` ile bacak bacak bakıldı ve
+`Paths4021`'in 6. bacağı çıktı: **kirişte 108 m, yolda 2.436 m — ×22,6.** Tek başına 5.192 m'lik
+halkanın yarısı, ve o rotanın 80 dönüşünün kaynağı. Böyle bir sapma "graf bu iki köşe için yol
+tanımıyor, bunun yerine bütün bir ada sistemini dolaşıyorum" demektir. Düzeltme: yol, kirişin
+**3 katından** uzunsa o bacak kirişte bırakılıyor (`NFS_WALKDETOUR`).
+
+`Paths4021`: uzunluk **5.192 → 2.811 m**, dönüş **81 → 3**, halka 205 → 115 waypoint.
+
+**3. 4121'in halkasında zaten kusur yoktu** — sıfır katlanma, sıfır dönüş, ilk günden beri.
+
+**Ve alan hiç kıpırdamadı:**
+
+| halka | furthest | kursu hiç bırakmayan | düşen |
+|---|---|---|---|
+| kiriş (varsayılan) | **5.413 m** | **32 / 64** | 4 |
+| yürünmüş + duvar | 5.155 m | 21 / 64 | 3 |
+| + geri dönme yok | 5.157 m | 21 / 64 | 2 |
+| + sapma sınırı | 5.157 m | 21 / 64 | 2 |
+
+**Ve `Paths4021` bunu en sert biçimde gösteriyor:** halkası yarıya indi, 90 waypoint eksildi, ve
+sürüş sonucu **bayt-birebir aynı** kaldı (623 m, sıfır araba kursta). Sebep de bulundu: bacak 0-5'in
+kiriş toplamı 619 m ve arabaların `furthest`'ı 623 m — yani **arabalar tam olarak grafın tarif
+edemediği bacağın başladığı yerde duruyorlar.** Halkanın o bacaktan sonrası hiçbir arabanın
+ulaşmadığı yer; düzeltmenin ölçüye yansımaması bu yüzden.
+
+**Okuma:** halkanın şeklini düzeltmek alanı hareket ettirmiyor. Bu, bir önceki bölümün vardığı
+yerin doğrulanması — iki halka iki farklı kurs ve sınırlayıcı olan halkanın düzgünlüğü değil,
+**pilotun gerçek bir kursu sürebilmesi**. Halka artık dürüst; sıradaki iş orada değil.
+
+**Sıradaki turun somut sorusu:** `Paths4021`'de arabalar 620 m'de, altıncı anahat bacağının
+başında duruyor — grafın 108 m'lik kirişe karşılık 2.436 m'lik yol bulduğu bacağın. Orada ne var?
+`NFS_HOLE` ve `NFS_ARM` o noktayı sormak için hazır.
+
 ## Nerede kaldık (2026-08-14 sonu)
 
 **Alan (2026-08-20 sonu, motor pini `58dc2623`, `GRIP` ve `PASSED_NEAR` açıkken): 986 geçilen

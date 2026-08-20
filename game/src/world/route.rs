@@ -349,10 +349,16 @@ pub fn densify(outline: &[Vec3], step: f32) -> Vec<Vec3> {
 /// `furthest` and "waypoints driven past" **flatter the fictional ring**, and cannot rank the two;
 /// `away` (64 either way) and `fallen` are what survive.
 ///
-/// One real defect did fall out of that count: `Paths4021`'s walked ring revisits somewhere it has
-/// already been at **80** of its waypoints and more than doubles in length, because the shortest
-/// path for one leg retraces the leg before it. Joining legs without regard to the direction the
-/// last one arrived in drives a street twice, and that is this function's own bug to fix.
+/// Two real defects fell out of that count and both are fixed above: a leg that turns straight back
+/// out of where the last one arrived (4001's revisits 9 → 1, its ring 7,159 → 6,238 m) and a leg
+/// whose road is **22.6 times** its chord (4021's leg 6, 108 m across and 2,436 m by road — half
+/// that ring on its own; guarded, the ring goes 5,192 → 2,811 m and its revisits 81 → 3).
+///
+/// **Neither moved the field**, which is the point worth keeping: over eight routes the walked ring
+/// scores 5,155 m and 21 cars before the fixes and 5,157 m and 21 after, with only `fallen` better
+/// at 2. 4021 says it loudest — its ring halved and the driving result is identical, because its
+/// cars stop at 623 m and the leg that was wrong begins at 619. The shape of the ring past where
+/// anybody reaches is not what is holding the field.
 ///
 /// The graph is deliberately untouched by all of this. [`super::Network::drop_walled`] asks whether
 /// the *ground* continues along a link and nothing asks it about walls, because a wall filter
@@ -363,6 +369,7 @@ pub fn along_roads(
     net: &super::Network,
     outline: &[Vec3],
     step: f32,
+    detour: f32,
     passable: impl Fn(u32, u32) -> bool,
 ) -> (Vec<Vec3>, usize) {
     let mut poly: Vec<Vec3> = Vec::new();
@@ -388,11 +395,45 @@ pub fn along_roads(
             })
             .map(|(i, _)| i)
     };
+    // **Where the last leg came in from, so this one does not go straight back out of it.**
+    // Measured on `Paths4021`: joining legs with no memory drives a street twice — 80 of its
+    // waypoints revisit somewhere the ring has already been and the ring more than doubles in
+    // length — because the shortest way to the next corner is often back down the road just
+    // travelled. A race does not do that. Only the one step is forbidden, not the whole leg: a
+    // course *can* legitimately come back along a road later, and forbidding that would be the
+    // refuted "cannot terminate on a cycle" mistake in another costume.
+    let mut arrived_from: Option<u32> = None;
     for w in outline.windows(2) {
         let legs = snap(w[0])
             .zip(snap(w[1]))
-            .and_then(|(a, b)| net.path_where(a, b, &passable))
-            .map(|ids| ids.iter().filter_map(|i| net.node(*i)).map(|n| n.at).collect::<Vec<_>>());
+            .and_then(|(a, b)| {
+                let back = arrived_from;
+                net.path_where(a, b, |x, y| {
+                    passable(x, y) && !(x == a && Some(y) == back)
+                })
+            })
+            .filter(|ids| {
+                // **A road route many times the length of the chord is not this leg's road.**
+                // Measured on `Paths4021`: one leg is 108 m across and 2,436 m by road — **×22.6**,
+                // half the whole ring on its own, and the source of the 80 places that ring comes
+                // back to somewhere it has already been. A detour that large means the graph has no
+                // road for these two corners and is going round a whole block system instead; the
+                // chord is the more honest answer and is at least short. `detour` is the multiple
+                // allowed, and 0 turns the guard off.
+                if detour <= 0.0 {
+                    return true;
+                }
+                let plan = |a: Vec3, b: Vec3| Vec3::new(b.x - a.x, 0.0, b.z - a.z).length();
+                let road: f32 = ids
+                    .windows(2)
+                    .filter_map(|p| Some(plan(net.node(p[0])?.at, net.node(p[1])?.at)))
+                    .sum();
+                road <= plan(w[0], w[1]).max(1.0) * detour
+            })
+            .map(|ids| {
+                arrived_from = ids.iter().rev().nth(1).copied();
+                ids.iter().filter_map(|i| net.node(*i)).map(|n| n.at).collect::<Vec<_>>()
+            });
         match legs {
             Some(pts) if pts.len() > 1 => {
                 for p in pts {
@@ -403,6 +444,7 @@ pub fn along_roads(
             // ring still goes where the race says even where this cannot improve on it.
             _ => {
                 chords += 1;
+                arrived_from = None;
                 push(w[0], &mut poly);
                 push(w[1], &mut poly);
             }

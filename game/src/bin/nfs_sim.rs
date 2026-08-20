@@ -353,7 +353,39 @@ async fn run() {
             }
             println!("kurs kurulumunda duvarlı sayılan bağlantı: {}", blocked.len() / 2);
         }
-        let (w, chords) = city::along_roads(&net, &coarse, step, |a, b| !blocked.contains(&(a, b)));
+        // `NFS_WALKLEGS=1`: what each leg of the outline costs in road, against the chord it
+        // replaces. A ring that doubles in length is either driving real roads round real blocks or
+        // taking a detour, and only the per-leg numbers tell those apart.
+        if std::env::var("NFS_WALKLEGS").is_ok() {
+            println!("anahat bacakları (kiriş → yol):");
+            for (k, cw) in coarse.windows(2).enumerate() {
+                let plan = |a: Vec3, b: Vec3| Vec3::new(b.x - a.x, 0.0, b.z - a.z).length();
+                let chord = plan(cw[0], cw[1]);
+                let road = net
+                    .nearest(cw[0])
+                    .zip(net.nearest(cw[1]))
+                    .and_then(|(a, b)| net.path_where(a, b, |x, y| !blocked.contains(&(x, y))))
+                    .map(|ids| {
+                        ids.windows(2)
+                            .filter_map(|p| {
+                                Some(plan(net.node(p[0])?.at, net.node(p[1])?.at))
+                            })
+                            .sum::<f32>()
+                    });
+                match road {
+                    Some(d) => println!(
+                        "   {k:>2}: {chord:>5.0} m → {d:>5.0} m  (×{:.1})",
+                        d / chord.max(1.0)
+                    ),
+                    None => println!("   {k:>2}: {chord:>5.0} m → yol yok"),
+                }
+            }
+        }
+        // How far round a leg may go before the graph is admitting it has no road for it.
+        let detour: f32 =
+            std::env::var("NFS_WALKDETOUR").ok().and_then(|v| v.parse().ok()).unwrap_or(3.0);
+        let (w, chords) =
+            city::along_roads(&net, &coarse, step, detour, |a, b| !blocked.contains(&(a, b)));
         // **The caution this inherits, measured rather than assumed.** A committed shortest path
         // over this graph crosses joins a car cannot take — the graph links carriageways that
         // merely run beside each other, which is why `guide_to` was refuted in the driving role
