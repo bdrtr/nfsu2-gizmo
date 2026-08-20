@@ -5127,3 +5127,43 @@ günün en iyisi), ve o bir **maksimum** — tek arabanın sürebileceği bir sa
 köşeleri kesiyordu, yürünmüş ve kırpılmış halkalar keskin dönüşleriyle %75'e düşüyordu) — ama
 çekmeden **sonra** artık bağlamıyor. Çekme o kısıtı zaten kaldırmış; üstüne yumuşatmak boş.
 Varsayılan değişmedi, düğme kaydıyla duruyor.
+
+### Ayrılmanın beş yeri haritalandı — ve "bulunduğun hatta kal" çürüdü (2026-08-20)
+
+Kural aramayı bırakıp yerlere bakma sırasıydı. 49 ayrılmanın 34'ünü (%69) açıklayan beş yerin
+kavşakları, kolların **kotu da basılarak** çıkarıldı (`Corridor::locate` plan görünümü olduğu için
+kot hiçbir yerde görünmüyordu):
+
+| yer | araba | kavşak | kollar |
+|---|---|---|---|
+| 4081 `(−352,−159)` | 8 | **206 · 5 kol** | 2'si yarışın hattında (5), **3'ü 30 m doğudaki paralel hatta (33)**, hepsi y≈5 |
+| 4121 `(−249,1423)` | 8 | 275 · **2 kol** | seçim yok |
+| 4001 `(528,973)` | 7 | 13 · 4 kol | **3'ü aynı noktada, üç ayrı hatta**, y = 24,1-24,2 |
+| 4102 `(31,−53)` | 6 | 209 · 3 kol | 2'si `(46,−75)` ve `(47,−75)` — aynı yer, iki hat |
+| 4061 `(−2358,1838)` | 5 | 40 · 3 kol | kotlar **278,7 · 293,5 · 302,2** — 24 m fark, dik rampa |
+
+**Bir güverte hipotezi kuruldu ve hemen çürüdü:** 4001'in altı katlı kavşağında üç kolun da aynı
+kotta (10 cm içinde) olduğu görüldü — farklı güverteler değil, aynı yolun paralel şeritleri.
+
+**Desen:** beş yerin **üçünde** kollar *aynı yere ve aynı kota* giden farklı hatlar, yani grafın
+sunduğu bir seçim gerçek bir seçim değil. Buradan dar bir kural çıktı ve denendi
+(`NFS_SAMEPATH=1`): iki kol plan ve kotta 6 m içinde birbirinin ikiziyse, aralarından **arabanın
+zaten üstünde olduğu hattı** seç.
+
+| | waypoint | kursta süre | yan yatarak | furthest | ayrılma |
+|---|---|---|---|---|---|
+| **bugünkü** | — | **%73,8** | **%0,8** | **5.951 m** | 49 |
+| hatta kal | **−87** | %71,1 | %1,1 | 5.856 m | 49 |
+
+**Çürüdü, ve kurala göre sağlam** (en büyük tek rota −51, alan farkı −87). Üstelik en çok
+kaybettiği iki rota `Paths4001` (−51) ve `Paths4121` (−49) — yani düzeltmeye çalıştığı yerlerin
+ta kendisi. Ayrılma sayısı da hiç oynamıyor (49 → 49).
+
+**Okuma:** ikiz kollar bir kusur değil. Grafın düz-çizgi mesafeyle yaptığı seçim, hattın kimliğine
+bakan seçimden iyi — bu, aynı günün "hattın üstünde kal" ve "hatta yakın kolu tercih et"
+çürütmeleriyle **üçüncü kez** aynı yere varıyor: kol seçimi bu alanda bir kaldıraç değil.
+
+**Beş yerin haritası duruyor**, ve sıradaki iş orada: 4121'de seçim bile yok yani sebep başka;
+4061 dik bir rampa; 4001'in yedi arabası 29 km/h'de, hedefi 89°'de, alabilecekleri bir virajı
+(gereken yarıçap ~16 m, arabanın minimumu 5,5 m) alamıyor. Üçü üç ayrı soru ve hiçbiri kural
+değil.

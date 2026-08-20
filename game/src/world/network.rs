@@ -446,9 +446,46 @@ impl Network {
         // own continuation cannot — which is a fact about the course description, not about this
         // choice. Whatever fixes it starts by asking where node 110's on-line arms go and what is
         // there, not by weighting this `min_by` again.
-        node.links
+        // **`NFS_SAMEPATH=1`: break a tie in favour of the path the car is already on.**
+        //
+        // Not the refuted rule above, and the difference is what it is a fact about. That one
+        // ranked arms by the *race line*, a description the graph does not share; this one only
+        // looks at arms the graph itself says lead to the **same place** — within `TWIN` metres in
+        // plan and in height — and among those takes the one on the current path. Two nodes that
+        // close together on the same deck are one road described twice, so this is not a choice
+        // being made differently, it is a choice that was never real.
+        //
+        // The five places that account for 69 % of the field's departures were mapped, and three
+        // of them have exactly this shape: `Paths4081`'s junction 206 offers three arms on a
+        // parallel path 30 m away, `Paths4001`'s junction 13 offers three at one spot on three
+        // paths at y 24.1-24.2, `Paths4102`'s junction 209 two at (46,−75) and (47,−75).
+        const TWIN: f32 = 6.0;
+        let same_path = std::env::var("NFS_SAMEPATH").is_ok_and(|v| !v.is_empty() && v != "0");
+        let pick = node
+            .links
             .iter()
             .filter(|l| Some(**l) != came_from && !blocked.contains(l))
+            .min_by(|a, b| dist(a).total_cmp(&dist(b)));
+        let pick = match (same_path, pick) {
+            (true, Some(best)) => {
+                let b = self.node(*best);
+                node.links
+                    .iter()
+                    .filter(|l| Some(**l) != came_from && !blocked.contains(l))
+                    .find(|l| {
+                        self.node(**l).is_some_and(|n| {
+                            n.path == node.path
+                                && b.is_some_and(|q| {
+                                    (n.at.x - q.at.x).hypot(n.at.z - q.at.z) <= TWIN
+                                        && (n.at.y - q.at.y).abs() <= TWIN
+                                })
+                        })
+                    })
+                    .or(Some(best))
+            }
+            (_, p) => p,
+        };
+        pick.into_iter()
             .min_by(|a, b| dist(a).total_cmp(&dist(b)))
             // Falling back past its own memory: a car with nowhere left it has not given up on has
             // to go somewhere, and standing still is not somewhere.

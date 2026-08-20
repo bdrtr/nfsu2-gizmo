@@ -2458,9 +2458,15 @@ async fn run() {
                             .locate(n.at)
                             .map_or(f32::INFINITY, |x| x.distance);
                         let on = if d <= city::COURSE_HALF_WIDTH { "YARIŞ HATTI" } else { "yan yol" };
+                        // **Height, because the corridor has none.** `Corridor::locate` is
+                        // plan-view on purpose — a car on a bridge belongs to the bridge's path —
+                        // so two arms at the same XZ on different decks both read "on the race
+                        // line" and nothing downstream can tell them apart. Where the city stacks
+                        // six layers deep, that is the whole question.
                         println!(
-                            "     → düğüm {l:>4} · hat {:>3} · ({:>7.0},{:>7.0}) · koridora {d:>6.1} m · {on}",
-                            n.path, n.at.x, n.at.z, d = d
+                            "     → düğüm {l:>4} · hat {:>3} · ({:>7.0},{:>7.0}) · y={:>6.1} \
+                             · koridora {d:>6.1} m · {on}",
+                            n.path, n.at.x, n.at.z, n.at.y, d = d
                         );
                     }
                 }
