@@ -5038,3 +5038,33 @@ N·m okuması doğru.
 gerçekten olduğundan sert hızlanır. O his isteniyorsa gereken çarpan **ölçüldü**: tork ×1,5 **ve**
 tutuş ×1,5 → 0-100 **8 s**, son sürat 278 km/h. Bu, oyunun kendi verisini bozmadan bir "arcade
 katsayısı" olarak eklenebilir; ama veriye sadakatten vazgeçmek proje kararıdır, ölçüm sonucu değil.
+
+### Rakipler oyuncunun ağını almıyormuş: yan yatarak geçen süre %7,0 → %0,8, düşen 1 → 0 (2026-08-20)
+
+Kalan tek düşüş kovalanırken çok daha görünür bir şey çıktı: **8 arabanın 5'i yan yatıyordu**, ve
+kimi yarışın %87-92'sinde. Sebep koddaydı ve kod bunu zaten açık bir soru olarak yazmıştı:
+
+> `keep_in_world` üç pencereli binary'de de yalnız `state.rig` için çağrılıyor, başka kimse için
+> değil — yani düşen rakip düşük kalıyor, devrilen rakip devrik kalıyor, hem burada hem oyunda.
+> … "alan hiç yakalanmıyor" hiç ölçülmemiş bir karar.
+
+Ölçüldü. Önce doğru ölçü kuruldu: **"yan yatan araba sayısı" yanlış sayaç** — doğrultulan araba
+yeniden devrilebildiği için ağ açılınca o sayı *artıyor* (28 → 32). Görünen şey süre:
+
+| | yan yatarak | kursta süre | düşen | waypoint |
+|---|---|---|---|---|
+| ağ yok | **%7,0** | %77,7 | 1 | — |
+| **rakiplere de ağ** | **%0,8** | %73,8 | **0** | **+59** |
+
+Yan yatarak geçen süre dokuzda birine iniyor (4081 %22,9 → %2,6, 4102 %21,7 → %1,3), sekiz
+arabanın son düşüşü de gidiyor, ve waypoint farkı +59 ile gürültü tabanının (±37) üstünde ve tek
+rotalık değil (en büyük tek rota +37, üç rotada önde beşinde eşit).
+
+**Koridor süresindeki −3,9 puan ise kayıp değil, ölçünün kendi kusuru.** Yan yatmış bir araba yolun
+ortasında duruyorsa koridorda sayılıyor — bedava. Düşüşün **tamamı** `Paths4102` (68,4 → 43,4),
+yani arabaların yarışın beşte birini yatarak geçirdiği rota; öteki yedi rota ±2,7 ya da hiç
+oynamıyor. Ağ, bedava koridor süresini gerçekten süren arabalarla değiştiriyor.
+
+**Açıldı, iki tarafta birden:** `nfs_sim`'de varsayılan (`NFS_RESCUE=0` geri alır) ve `nfs_cruise`'da
+rakipler artık oyuncunun aldığı `keep_in_world`'ü alıyor. Sekiz-rota tablosu: **1.476 waypoint ·
+yan yatarak %0,8 · kursta %73,8 · düşen 0 · furthest 5.951 m.**

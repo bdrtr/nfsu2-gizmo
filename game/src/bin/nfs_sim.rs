@@ -848,6 +848,7 @@ async fn run() {
     let mut on_course = vec![0.0f32; field.len()];
     let mut raced = vec![0.0f32; field.len()];
     let mut top = vec![0.0f32; field.len()];
+    let mut on_side = vec![0.0f32; field.len()];
     let mut top_gear = vec![0usize; field.len()];
     let mut top_rpm = vec![0.0f32; field.len()];
     let mut top_torque = vec![0.0f32; field.len()];
@@ -929,7 +930,7 @@ async fn run() {
     let mut spun = vec![0.0f32; field.len()];
     // When and where each car first lost the corridor for good, and how far along it was.
     let mut lost: Vec<Option<(f32, Vec3, usize)>> = vec![None; field.len()];
-    let rescue = knob("NFS_RESCUE").is_some_and(|v| v != "0");
+    let rescue = knob("NFS_RESCUE").is_none_or(|v| v != "0");
     let mut ticks = vec![0usize; field.len()];
     let mut queued = vec![0usize; field.len()];
     let steps = (seconds / FIXED_DT) as usize;
@@ -1159,7 +1160,19 @@ async fn run() {
             // rival that falls stays fallen and a rival that rolls stays rolled — in the game as
             // well as in here. This sim watches rather than catches on purpose, because only
             // watching answers *why*; but "the field is not caught at all" is a decision that has
-            // never been measured, so it is switchable. `NFS_RESCUE=1` gives the field the net.
+            // never been measured, so it is switchable. `NFS_RESCUE=0` takes the net away again.
+            //
+            // **Measured 2026-08-20, and the net goes on.** Without it the field spends **7.0 %**
+            // of the race lying on its side — 22.9 % on `Paths4081` and 21.7 % on `Paths4102` —
+            // and with it **0.8 %**. The last fall in sixty-four cars goes with it (1 → 0) and
+            // waypoints driven past gain +59, which clears the sweep's ±37 noise floor and is not
+            // one route's (biggest single +37, ahead on three and level on five).
+            //
+            // Time on the corridor reads 77.7 % → 73.8 %, and **that number is the artefact, not
+            // the loss**: a car lying on its side at the middle of the road scores corridor time
+            // for nothing. All of the drop is `Paths4102` (68.4 → 43.4), exactly the route where
+            // cars were down for a fifth of the race; every other route moves by ±2.7 or not at
+            // all. The net trades free corridor time for cars that are actually driving.
             //
             // `keep_in_world` runs `watch_ground` itself, so it is one or the other — calling both
             // would advance the airborne clock twice a step.
@@ -1244,6 +1257,12 @@ async fn run() {
                 on_course[k] += FIXED_DT;
             }
             raced[k] += FIXED_DT;
+            // **Time on its side, not cars that ever rolled.** A car that is set upright can roll
+            // again, so counting cars punishes the net for keeping them racing; what a player
+            // sees is how much of the race is spent lying down.
+            if (p.rotation * Vec3::Y).y < 0.5 {
+                on_side[k] += FIXED_DT;
+            }
             // **Resistance solved from the motion, for one car, once a second.** Everything else
             // here is a guess at what opposes the drive force; this measures it. `m·a` is what
             // reached the car, the drivetrain says what was offered, and the difference is what
@@ -2597,6 +2616,12 @@ async fn run() {
             .zip(&raced)
             .map(|(o, t)| format!("{:.0}", 100.0 * o / t.max(1e-3)))
             .collect();
+        let side: f32 = on_side.iter().sum();
+        println!(
+            "yan yatarak geçen süre: %{:.1} · {} araba hiç yatmadı",
+            100.0 * side / all.max(1e-3),
+            on_side.iter().filter(|v| **v <= 0.0).count()
+        );
         println!(
             "kursta geçen süre: %{:.1} · araba araba %{}",
             100.0 * on / all.max(1e-3),

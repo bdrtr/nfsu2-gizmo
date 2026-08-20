@@ -848,6 +848,18 @@ fn update(world: &mut World, state: &mut CruiseState, dt: f32, input: &Input) {
         }
     });
 
+    // **And the same net the player has.** `keep_in_world` was called for the player and for
+    // nobody else, so a rival that rolled stayed rolled for the rest of the race — which is what a
+    // player sees when the field is lying on its side. Measured over the eight-route sweep: time
+    // spent on their side falls **7.0 % → 0.8 %** and the last fall in sixty-four cars goes with
+    // it (`nfs_sim` carries the numbers and the reading of what it costs).
+    let CruiseState { field, .. } = state;
+    for (r, _) in field.iter_mut() {
+        if let Some(p) = r.pose(world) {
+            let _ = r.keep_in_world(world, p, dt);
+        }
+    }
+
     let Some(pose) = state.rig.pose(world) else { return };
 
     // The city has holes the shipped geometry never covered; a car that finds one must come back,
