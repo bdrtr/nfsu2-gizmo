@@ -52,6 +52,28 @@ use nfsu2::scene::{self, Textures};
 use nfsu2::world::{build_region, CityVisuals};
 use std::collections::HashMap;
 
+/// How much of a texture may be see-through before it is *left opaque*, as a share. **0 is off**,
+/// which is the shipped value, and the reason is measured rather than chosen.
+///
+/// Bayview's foliage is flat cards with the tree cut out of a quad, and the city is spawned
+/// opaque, so those cards render as **dark slabs standing in the air** — which is what a player
+/// reports as objects floating in the sky. The engine offers this path exactly one lever,
+/// `Material::with_transparent`, which is alpha *blending*; the alpha *test* that a cut-out
+/// actually wants (`discard` on `alpha < cutoff`) exists in the renderer's G-buffer shader but is
+/// reachable only from the glTF loader, and `with_baked_lit` does not go through the G-buffer.
+///
+/// Blending fixes the trees and costs the decals. A decal — the circular paving pattern, road
+/// grime, the lane markings' overlay — is coplanar with the surface under it, and the transparent
+/// pass will not hold it there: it vanishes and the plaza reads as flat grey. Measured over
+/// `STREAML4RA`'s 1,500 textures, 235 carry transparency and their shares run smoothly from 0 to
+/// 100 % (quartiles 48 / 68 / 82 %), so **no threshold separates foliage from decals** — at 11
+/// textures the decals are right and the trees are slabs, at 235 the trees are right and the
+/// plaza is grey, and every value between is one or the other.
+///
+/// So this ships off, the black slabs stay, and what the city needs from the engine is one field:
+/// an alpha cutoff on the baked-lit material. `NFS_CUT=1` shows the other side of the trade.
+const CUT_SHARE: f32 = 0.0;
+
 fn main() {
     let path = std::env::args().nth(1).expect("usage: nfs_city STREAM*.BUN OUT.raw [W H]");
     let out = std::env::args().nth(2).expect("usage: nfs_city STREAM*.BUN OUT.raw [W H]");
@@ -1097,6 +1119,19 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
         layout: &renderer.scene.texture_bind_group_layout,
     };
     let mut bound: HashMap<AssetHash, _> = HashMap::new();
+    // Which textures are **cut-outs**: they carry real transparency rather than a full alpha
+    // channel of 255. Bayview's foliage is flat cards with the tree cut out of a quad, and drawn
+    // opaque those cards are dark slabs standing in the air — which is what a player sees and
+    // reports as objects floating in the sky. Only these need the transparent pipeline; putting
+    // the whole city in it would cost a sorted pass for the sake of the trees.
+    let mut cut: std::collections::HashSet<AssetHash> = std::collections::HashSet::new();
+    // How much of a texture has to be see-through before it counts as a cut-out. Measured, not
+    // guessed: at "any transparent pixel at all" 235 of 1500 textures qualify and the roads go
+    // with them — a road's texture carries a few transparent texels and drawing it in the sorted
+    // transparent pass washes the whole surface out.
+    let cut_share: f32 =
+        std::env::var("NFS_CUT").ok().and_then(|v| v.parse().ok()).unwrap_or(CUT_SHARE);
+    let mut shares: Vec<f32> = Vec::new();
     let mut decoded = 0usize;
     let sky_keys = sky_visuals.iter().flat_map(|s| s.meshes.iter()).filter_map(|m| m.texture);
     for key in city.meshes.iter().filter_map(|m| m.texture).chain(sky_keys) {
@@ -1105,13 +1140,54 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
         }
         let own = packs.iter().find_map(|p| p.get(key).and_then(|r| p.decode(r).ok()));
         let Some(image) = own.or_else(|| shared.get(key).cloned()) else { continue };
+        // A pixel under half opacity is the cut part of a cut-out; a texture with none is opaque
+        // whatever its channel says. Counted rather than assumed, and printed, because "how much
+        // of this city is foliage" is a fact about the city nobody here had.
+        let px = image.rgba.len() / 4;
+        let clear = image.rgba.chunks_exact(4).filter(|p| p[3] < 128).count();
+        let share = clear as f32 / px.max(1) as f32;
+        shares.push(share);
+        // **A band, not a floor.** The two things that carry alpha here are not the same kind:
+        // foliage is a card cropped tight to the tree, so only a small share of it is cut away,
+        // while a *decal* — the circular paving pattern, road grime — is mostly transparent by
+        // construction. Blending the first fixes the black slabs; blending the second loses it
+        // entirely, because a decal is coplanar with the surface it sits on and the transparent
+        // pass will not hold it there. So the band takes the low end and leaves the high end
+        // opaque. `NFS_CUT=<share>` moves the ceiling.
+        if cut_share > 0.0 && share > 0.0 && share <= cut_share {
+            cut.insert(key);
+        }
         let name = format!("city_{:08X}", key.0);
         if let Some(bg) = tex.upload(&name, &image.rgba, image.width, image.height) {
             bound.insert(key, bg);
             decoded += 1;
         }
     }
-    println!("{decoded} textures decoded and uploaded");
+    {
+        let mut v: Vec<f32> = shares.iter().copied().filter(|s| *s > 0.0).collect();
+        v.sort_by(f32::total_cmp);
+        if std::env::var("NFS_CUTLIST").is_ok() {
+            let mut hist = [0usize; 10];
+            for x in &v {
+                hist[((x * 10.0) as usize).min(9)] += 1;
+            }
+            for (i, n) in hist.iter().enumerate() {
+                println!("   %{:>3}-{:<3} · {n:>4} doku", i * 10, i * 10 + 10);
+            }
+        }
+        let q = |f: f32| v.get(((v.len() as f32 - 1.0) * f) as usize).copied().unwrap_or(0.0);
+        println!(
+            "{decoded} textures decoded and uploaded · {} carry any transparency · \
+             çeyrekler %{:.1} / %{:.1} / %{:.1} / %{:.1} · {} kesim sayıldı (eşik %{:.0})",
+            v.len(),
+            100.0 * q(0.25),
+            100.0 * q(0.5),
+            100.0 * q(0.75),
+            100.0 * q(0.95),
+            cut.len(),
+            100.0 * cut_share
+        );
+    }
 
     // NFS_ID="x,y": render every merged mesh in a colour that encodes its index, then say which
     // one covers that pixel. Four hypotheses about the flat white ground were each eliminated by
@@ -1157,6 +1233,15 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
         };
         let material = material.with_ambient(lift.0).with_emissive(lift.1);
         let material = if double { material.with_double_sided(true) } else { material };
+        // And the cut-outs get the transparent pipeline. `NFS_ALPHA=0` puts them back the way
+        // they were, which is how the before-and-after was taken.
+        let material = if m.texture.is_some_and(|k| cut.contains(&k))
+            && std::env::var("NFS_ALPHA").as_deref() != Ok("0")
+        {
+            material.with_transparent(true)
+        } else {
+            material
+        };
         scene::spawn_mesh(&mut world, m.mesh.clone(), material, Transform::new(m.origin));
         spawned += 1;
     }

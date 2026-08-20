@@ -4848,3 +4848,35 @@ koridor dışında kalması %36,7 → %2,1. Ama düzeltmediği dört rotayı boz
 paralel hat 30-40 m ötede — yani "hatta" sayılıyordu. Koşu bayt-birebir aynı çıktı. Bir kuralın
 etkisiz görünmesi, kuralın yanlış olduğu anlamına gelmiyor; önce **eşiğinin ölçtüğü şeyi ölçüp
 ölçmediği** sorulmalı.
+
+### Havada duran siyah levhalar: şehir opak çiziliyor, oysa Bayview'in ağaçları kesim kartları (2026-08-20)
+
+Oyun çalıştırıldı ve iki görsel şikâyet geldi: *havada duran cisimler* ve *binaların içleri
+gözüküyor*. İkisi de tek bir kareyle üretildi (`nfs_city`, `STREAML4RA`, şehir merkezi) ve ikisi de
+tek bir sebebe indi.
+
+**"Binaların içleri" değil.** `NFS_DOUBLE=1` — arka yüzleri de çiz — ile aynı kare alındığında
+921.600 pikselin yalnız **383'ü** değişiyor (%0,04). Winding doğru; hiçbir binanın içi görünmüyor.
+
+**Havada duranlar ağaç.** Yakınlaştırınca siyah levhaların içinde ağaç siluetleri seçiliyor:
+Bayview'in bitki örtüsü **düz kartlara kesilmiş dokular**. Şehir `Material::new(...).with_baked_lit(...)`
+ile **opak** doğuyor, yani kartın saydam olması gereken kısmı koyu dolu çiziliyor — gökyüzünde
+duran koyu levhalar tam olarak bu.
+
+**Ve düzeltmesi bu motorda yok.** Bu yolda tek kaldıraç `with_transparent`, yani alfa
+*karıştırma*. Bir kesimin istediği alfa *testi* (`alpha < cutoff` → `discard`) renderer'ın
+G-buffer shader'ında **var** ama yalnız glTF yükleyicisinden besleniyor, ve `with_baked_lit`
+G-buffer'dan geçmiyor.
+
+Karıştırma ağaçları düzeltiyor, **decal'ları kaybettiriyor**: dairesel taş deseni, yol kiri, şerit
+kaplamaları — hepsi altındaki yüzeyle eş düzlemde, ve saydam geçiş onları orada tutmuyor; meydan
+düz griye dönüyor.
+
+**Eşikle ayrılamıyor, ölçüldü.** `STREAML4RA`'nın 1.500 dokusunun 235'i saydamlık taşıyor ve
+oranları %0 ile %100 arasında **düzgün** dağılmış (çeyrekler %48 / %68 / %82). 11 dokuda decal'lar
+doğru ve ağaçlar levha; 235'te ağaçlar doğru ve meydan gri; aradaki her değer ikisinden biri.
+
+**Sonuç:** `CUT_SHARE = 0` ile kapalı gidiyor (siyah levhalar kalıyor, çünkü zemin karenin çok daha
+büyük kısmı), `NFS_CUT=1` takasın öbür yüzünü gösteriyor. Şehrin motordan istediği tek şey belli
+ve dar: **`baked_lit` materyalinde bir alfa kesim eşiği.** Motor bilerek pinli olduğu için burada
+değiştirilmedi; bu, karşı tarafa geçirilecek bir istek.
