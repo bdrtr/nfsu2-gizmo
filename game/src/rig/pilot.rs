@@ -1016,7 +1016,16 @@ impl Pilot {
         // because the ratio of junctions to *distinct* nodes does not move (1.29 → 1.30), so the
         // extra junctions are new road rather than a car going round in circles — on 4102, where the
         // distance fell, the ratio goes 1.28 → 1.00 and every junction it takes is somewhere new.
-        let look = (speed * LOOKAHEAD_PER_SPEED).clamp(LOOKAHEAD_MIN, LOOKAHEAD_MAX);
+        // `NFS_LOOK` re-opens the sweep that fixed this at 0.9. It was fixed against the chord
+        // ring, and the ring has since moved: with the ring pulled onto the corridor the field's
+        // departures changed character completely — "goal stranded behind, full lock" fell from
+        // 44-53 % of them to 19-22 %, and what is left is **66 % braking hard and 59 % above
+        // 60 km/h**, which is this constant's own subject.
+        let per: f32 = std::env::var("NFS_LOOK")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(LOOKAHEAD_PER_SPEED);
+        let look = (speed * per).clamp(LOOKAHEAD_MIN, LOOKAHEAD_MAX);
         let (mut cur, mut prev) = (self.at?, self.from);
         let mut aim = net.node(cur)?.at;
         let mut walked = flat(aim - at).length();

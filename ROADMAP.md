@@ -4749,3 +4749,37 @@ değildir.** Bu ölçüyle:
 
 Ve yeni varsayılanın (1.317) çatallanmanın şanssız tarafına düşmesi bir kusur değil, gürültü;
 0,0005 ile 1.352 veriyor. Peşine düşülecek bir şey yok.
+
+### Halka değişince ayrılmanın **imzası** değişti — ve `GRIP` gürültünün içine düştü (2026-08-20)
+
+Çekilmiş halka varsayılan olunca ayrılma sayımı yeniden koşuldu. Sayı neredeyse aynı (34 → 32) ama
+**sebep bambaşka**:
+
+| ayrılma anında | kiriş | çekilmiş |
+|---|---|---|
+| frende (>0,5) | 12 (%35) | **21 (%66)** |
+| hızlı (>60 km/h) | 8 (%24) | **19 (%59)** |
+| hedef arkada | 15 (%44) | 7 (%22) |
+| tam kilitte | 18 (%53) | 6 (%19) |
+| nişan arkada | 17 (%50) | 4 (%13) |
+
+**Çekme, teşhis ettiği kusuru düzeltmiş:** "hedef yanda kalıyor, arkaya düşüyor, tam kilit geliyor"
+imzası yarıdan beşte bire indi. Yerine geçen imza bir **hız** imzası: arabalar 43-68 km/h ile,
+nişanı 45-96° yanda olan bir virajı alırken çıkıyorlar.
+
+Ayrılma yerleri ise **aynı kaldı** (4102 hâlâ 7 araba, 4061 hâlâ 6, 4121 8'e çıktı). Yani o dört
+yer pilotun ne yaptığından bağımsız olarak arabaları düşürüyor; değişen yalnız *nasıl* düştükleri.
+
+**Yeni imza `GRIP`'i işaret ediyordu; süpürüldü ve gürültünün içine düştü:**
+
+| `GRIP` | waypoint farkı | kursta süre | hiç bırakmayan | düşen |
+|---|---|---|---|---|
+| 5 (fiziksel) | **±0** | %75,6 | 24 | 2 |
+| 6,5 | −26 | %78,6 | 27 | 3 |
+| **8 (kalan)** | — | **%78,9** | **32** | 3 |
+| 12 | −50 | %76,1 | 27 | 2 |
+
+Kiriş halkasında 8 ile 5 arasında ~100 waypoint vardı; çekilmiş halkada fark **tam sıfır**. Bu,
+`GRIP`'in belgesinde yazılı hikâyenin nihayet göründüğü yer: kiriş, kirişin açısı yolun eğriliğini
+abarttığı için yüksek bir eşik istiyordu; halka dürüstleşince eşik **önemsizleşti**. Fiziksel değer
+kazanmıyor, ama artık kaybetmiyor da. 8 yerinde kalıyor (ikincil ölçülerde önde) ve kaydı düzeldi.
