@@ -4680,3 +4680,35 @@ kalıyor. Dürüst çizgilerin keskin dönüşlerini bu pilot süremiyor.
 Kırpma varsayılan yapılmadı; düşen sayısındaki 6 → 1 kazancı kaydıyla `NFS_TRIM=1` altında duruyor.
 Bir sonraki adayın şekli de buradan belli: **koridor içinde kalan ama yumuşak** bir halka — yani
 kırpılmış waypoint'ler arasını düz çizgiyle değil, ağı yürüyerek doldurmak.
+
+### Halkayı atmak yerine **çekmek**: alan 1.046 → 1.317 waypoint, düşen 6 → 3 (2026-08-20)
+
+Kırpma bölümünün kendi sonucu "koridor içinde ama yumuşak bir halka" diyordu. Waypoint'i atmak
+yerine **koridora çekmek** ikisini birden veriyor: halkanın şekli korunuyor, noktalar kursun
+içine giriyor. `Fix` artık en yakın noktayı da taşıyor (`Fix::at`), yani izdüşüm bir sorguya
+düşüyor.
+
+Nereye çekileceği ölçüldü ve fark büyük:
+
+| halka | waypoint | kursta | kursta kalanın düğümü | furthest | düşen | kursta süre |
+|---|---|---|---|---|---|---|
+| kiriş, dokunulmamış | 1.046 | 30 | 20,0 | 5.299 m | 6 | **%82,0** |
+| **merkeze çekilmiş** (yeni varsayılan) | **1.317** | **32** | **22,1** | **5.784 m** | **3** | %78,9 |
+| kenara çekilmiş | 1.292 | 20 | 22,6 | 5.030 m | 4 | %72,2 |
+| koridora kırpılmış | — | 20 | 23,6 | 5.723 m | **1** | %73,6 |
+
+**Kenar ile merkez arasındaki fark, deneyin kendi kusurunu gösterdi:** ilk sürüm waypoint'i
+koridorun *kenarına* çekiyordu, yani halka tam sınır boyunca gidiyor ve en küçük hata arabayı
+dışarı atıyor. Kursta kalan 20, süre %72,2. Merkeze çekince aynı fikir 32 araba ve %78,9 veriyor.
+Bir ölçüm kötü çıktığında önce fikrin mi yoksa uygulamanın mı ölçüldüğü sorulmalı.
+
+**Caveat, açıkça:** "geçilen waypoint" yakınlıkla ölçülüyor, dolayısıyla halkayı arabaların zaten
+sürdüğü yere doğru taşımak o sütunu kendiliğinden şişirir — deney kendi ödevini not veriyor.
+Bağımsız olanlar: **`furthest` +485 m** (sekiz rotanın altısında ileride, en büyük tek rota +306,
+yani kurala göre sağlam), **düşen 6 → 3**, **kursta kalan 30 → 32**, ve kursta kalan araba başına
+düğüm 20,0 → 22,1. Dört bağımsız ölçü aynı yöne gidiyor; bir tanesi — koridorda geçen süre,
+%82,0 → %78,9 — ters yöne.
+
+Bugün halkayı dürüstleştirmenin dört yolu denendi (ağda yürüme, kırpma, kenara çekme, merkeze
+çekme) ve yalnız sonuncusu sürüşü ileri taşıdı. Ortak ders: **halkanın yumuşaklığı, doğruluğu
+kadar önemli** — ve çekmek doğruluğu yumuşaklığı bozmadan veren tek işlem.

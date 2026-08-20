@@ -31,6 +31,10 @@ use nfsu2::rig::{spawn_car, CarRig, Controls, Pilot, Placement, FIXED_DT};
 use nfsu2::scene;
 use nfsu2::world as city;
 
+/// Where an off-corridor waypoint is pulled to, as a fraction of the corridor's half-width: 0 is
+/// its centre, 1 its edge. Measured; see the block that uses it.
+const PULL_TO: f32 = 0.0;
+
 /// How far apart the driven waypoints are after the outline is subdivided.
 ///
 /// Short enough that a grid is never far from one and long enough that a pilot is not chasing a
@@ -551,7 +555,57 @@ async fn run() {
     // A filter rather than a repair: a waypoint the race's own paths do not cover is not a place
     // the race goes, and the pilot has no business steering at it. What is left is bridged by the
     // gap between the survivors, which is why the largest one is printed.
-    let waypoints = if knob("NFS_TRIM").is_some_and(|v| v != "0") {
+    // `NFS_PULL=1`: keep every waypoint, but pull the ones outside the corridor back inside it.
+    //
+    // The measurement that asks for this is the third of a row: every way of making the ring more
+    // honest costs the same 7-8 points of time on the corridor — walked 75.2 %, trimmed 73.6 %,
+    // against the fictional chord ring's **82.0 %** — and the reason is that the chord ring cuts
+    // corners, so it is *smoother*, and the pilot can follow smooth. Dropping a waypoint leaves a
+    // 394 m straight line across whatever is there; moving it leaves the ring's shape alone.
+    //
+    // `NFS_PULL` is where to pull *to*, as a fraction of the half-width: 1 is the corridor's edge
+    // and 0 its centre. Both were measured and the centre wins clearly — the edge leaves the ring
+    // running along the boundary, where any error at all puts a car outside, and it scores 72.2 %
+    // of race time on the corridor against the centre's 77.3 %. `NFS_PULL=0` turns the whole thing
+    // off and drives the raw chord ring.
+    //
+    // | ring | waypoints | on course | nodes each | furthest | fell | time on corridor |
+    // |---|---|---|---|---|---|---|
+    // | chord, untouched | 1046 | 30 | 20.0 | 5299 m | 6 | **82.0 %** |
+    // | **pulled to the centre** | **1352** | 30 | **22.5** | **5811 m** | **4** | 77.3 % |
+    // | pulled to the edge | 1292 | 20 | 22.6 | 5030 m | 4 | 72.2 % |
+    // | trimmed instead | — | 20 | 23.6 | 5723 m | **1** | 73.6 % |
+    //
+    // **The caveat, stated because it is real:** waypoints driven past is measured by proximity, so
+    // moving the ring towards where the cars already drive can only help it — that column is
+    // partly the experiment marking its own work. What is not is `furthest` (+512 m, ahead on six
+    // of eight routes, biggest single route +306), the falls, and the nodes banked per car that
+    // keeps the course. Three independent measures agree; one, time on the corridor, disagrees.
+    let waypoints = if knob("NFS_PULL").is_none_or(|v| v != "0") {
+        let to: f32 = knob("NFS_PULL").and_then(|v| v.parse().ok()).unwrap_or(PULL_TO).clamp(0.0, 1.0);
+        let mut moved = 0usize;
+        let mut worst = 0.0f32;
+        let pulled: Vec<Vec3> = waypoints
+            .iter()
+            .map(|w| {
+                let Some(f) = corridor.locate(*w) else { return *w };
+                if f.distance <= city::COURSE_HALF_WIDTH {
+                    return *w;
+                }
+                moved += 1;
+                worst = worst.max(f.distance);
+                let back = f.distance - city::COURSE_HALF_WIDTH * to;
+                let dir = Vec3::new(f.at.x - w.x, 0.0, f.at.z - w.z).normalize_or_zero();
+                *w + dir * back
+            })
+            .collect();
+        println!(
+            "halka koridora çekildi (yarı genişliğin {to}'i): {moved} / {} waypoint taşındı · \
+             en uzağı {worst:.0} m'deydi",
+            waypoints.len()
+        );
+        pulled
+    } else if knob("NFS_TRIM").is_some_and(|v| v != "0") {
         let kept: Vec<Vec3> = waypoints
             .iter()
             .copied()

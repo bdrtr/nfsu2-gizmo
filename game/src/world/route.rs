@@ -677,6 +677,12 @@ pub struct Fix {
     pub progress: f32,
     /// Which path of the file the nearest segment belongs to.
     pub path: u16,
+    /// The nearest point itself, in plan view — `at.y` is the asker's own height, untouched.
+    ///
+    /// Carried because "how far off the course is this" and "where would it be *on* it" are the
+    /// same query, and the second has no cheaper answer: repeating `locate`'s grid walk outside
+    /// would cost the same and could disagree with it about which segment won.
+    pub at: Vec3,
 }
 
 /// The road network of one route file, as something to ask questions of.
@@ -770,7 +776,13 @@ impl Corridor {
                     let (a, b, pa, pb, path) = self.segments[*i as usize];
                     let (d, t) = point_to_segment(at, a, b);
                     if best.is_none_or(|f| d < f.distance) {
-                        best = Some(Fix { distance: d, progress: pa + (pb - pa) * t, path });
+                        let on = a + (b - a) * t;
+                        best = Some(Fix {
+                            distance: d,
+                            progress: pa + (pb - pa) * t,
+                            path,
+                            at: Vec3::new(on.x, at.y, on.z),
+                        });
                     }
                 }
             }
