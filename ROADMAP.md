@@ -3990,6 +3990,37 @@ alandaydı ve eşikler genişti. **2 m/s** ile, 1.035'lik alanda tekrar denendi:
 8, 4 ve 2 m/s — üçü de çürük. **Düşük hızda gaz kesmek göründüğü gibi genel bir kusur değil;
 yalnızca kaçışın içinde yanlış**, çünkü orada ortada viraj yoktur.
 
+### Bugünkü pilot düzeltmeleri kirişe özel: kazanç taşınmıyor, bedel taşınıyor (2026-08-20)
+
+Kursu bırakan 31 arabanın imzası yeniden çıkarıldı: **arka nişan hâlâ en büyüğü** (imzası okunan 36
+arabanın 15'i). `BEHIND` yalnız 180°'deki salınımı söndürdü; hedefin arkaya düşmesini engellemedi ve
+o, halka tarafına bağlanan bilinen zor vaka.
+
+Bunun üzerine açık bırakılan döngü kapatıldı: **yürünmüş halka, bugünün dört düzeltmesinden önce
+ölçülmüştü.** Aynı halka, aynı üç halka düzeltmesi, iki farklı pilotla:
+
+| | waypoint | halkanın oranı | furthest | kursta kalan | düşen |
+|---|---|---|---|---|---|
+| kiriş · sabahki pilot | 986 | %13,3 | 5.413 | **32** | **4** |
+| kiriş · bugünkü pilot | **1.035** | %13,9 | 5.305 | 30 | 6 |
+| yürünmüş · sabahki pilot | 1.665 | **%15,3** | 5.157 | 21 | **2** |
+| yürünmüş · bugünkü pilot | 1.662 | %15,3 | 5.104 | 15 | 3 |
+
+**İki okuma, ve ikincisi bir uyarı.**
+
+1. **Yürünmüş halka kendi kursunun daha büyük payını sürdürüyor** — aynı pilotla %15,3'e karşı
+   %13,9 — üstelik daha uzun ve üç ilâ altı kat daha virajlı bir kurs olduğu hâlde.
+2. **Bugünkü iki pilot düzeltmesinin kazancı taşınmıyor, bedeli taşınıyor.** Kirişte +49 waypoint
+   ve −2 araba; yürünmüş halkada **waypoint'te sıfır fark** (1.665 → 1.662) ve **−6 araba**. Dört
+   sabit de kirişe göre süpürüldü, ve kiriş kursun %55'inde yol değil.
+
+*(Bu bölümün ilk hâli `walk2` ile `walknow`'u kıyaslıyordu; o ikisi arasında halka düzeltmeleri de
+değişiyordu. Yukarıdaki tablo pilot değişikliğini yalıtan `walk5` ile alınmıştır.)*
+
+**Sonuç, ve bugünün en geniş dersi:** pilot sabitlerinin hangi kursa göre ayarlandığı, sabitlerin
+kendisi kadar önemli. Yürünmüş halkaya geçme kararı verilirse dört sabit de yeniden süpürülmeli —
+ve o zaman kirişte kazandıran şeyin orada da kazandırdığı varsayılmamalı.
+
 ## Nerede kaldık (2026-08-14 sonu)
 
 **Alan (2026-08-20 sonu, motor pini `58dc2623`, `GRIP`, `PASSED_NEAR`, `BEHIND` ve `ESCAPE_FULL`
