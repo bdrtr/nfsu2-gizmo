@@ -3959,6 +3959,37 @@ uzağa gidiyor, ki o bekleyen bariyer maddesi.
 
 `ESCAPE_FULL = 2.0` varsayılan. Alan **1.000 → 1.035 waypoint**.
 
+### Alanın güncel arıza sayımı, ve gaz kesmenin üçüncü kez çürütülmesi (2026-08-20)
+
+Bugünün dört düzeltmesinden sonra 64 arabanın tamamı, yarışlarının **nasıl bittiğine** göre
+sayıldı — takılanlar da dahil, çünkü artık onların da izi var:
+
+| son | araba | pay | araba başına waypoint |
+|---|---|---|---|
+| kursu bıraktı (takılmadan) | **31** | %48 | 15,6 |
+| sorunsuz | 14 | %22 | **21,7** |
+| **takıldı, kursta kaldı** | 13 | %20 | 12,1 |
+| dünyadan düştü | 6 | %9 | 15,0 |
+| takıldı *ve* kursu bıraktı | 0 | — | — |
+
+Yani alan artık üçe ayrılıyor: yarısı kursu bırakıyor, beşte biri kursun üstünde takılıyor, beşte
+biri sorunsuz sürüyor.
+
+**Takılanların izi bir sonraki katmanı gösterdi ve o katman çürüdü.** `ESCAPE_FULL` düzeltmesinden
+sonra araba 0'ın izi aynı tuzağı kaçışın *dışında* gösteriyor: direksiyon 0,84, gaz **0,37**, nişan
+69-96 m ötede −88°, ve araba kaçış çağrılmadan önce takılıyor. `CORNER_LIFT`'in kesmesini 4 ve
+8 m/s'nin altında iptal etmek zaten çürütülmüştü (821 ve 690'a karşı 869) — ama o ölçüm 869'luk bir
+alandaydı ve eşikler genişti. **2 m/s** ile, 1.035'lik alanda tekrar denendi:
+
+| kol | waypoint | kursta kalan | düşen |
+|---|---|---|---|
+| mevcut | **1.035** | 30 | 6 |
+| 2 m/s altında kesme yok | 919 | 29 | 7 |
+
+4021'de +16 (takılan arabanın rotası), buna karşılık **4121 −56, 4102 −35, 4061 −34**. Üç eşik —
+8, 4 ve 2 m/s — üçü de çürük. **Düşük hızda gaz kesmek göründüğü gibi genel bir kusur değil;
+yalnızca kaçışın içinde yanlış**, çünkü orada ortada viraj yoktur.
+
 ## Nerede kaldık (2026-08-14 sonu)
 
 **Alan (2026-08-20 sonu, motor pini `58dc2623`, `GRIP`, `PASSED_NEAR`, `BEHIND` ve `ESCAPE_FULL`

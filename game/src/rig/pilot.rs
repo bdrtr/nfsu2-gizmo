@@ -373,6 +373,15 @@ const GRIP: f32 = 8.0;
 /// gives **821** and **690** waypoints driven past against **869** with it charged flat. Full
 /// pedal at full lock from rest does not rescue a car, it launches one; the two mechanisms looked
 /// alike from the trace and only the sweep told them apart.
+///
+/// **And a third threshold, on a field twice as good, says the same.** After the escape fix
+/// ([`ESCAPE_FULL`]) the trace shows the identical trap outside an escape — 0.84 of lock, 0.37 of
+/// pedal, aiming 69-96 m away at −88°, stalling before an escape is even called for — so charging
+/// the lift only above **2 m/s** was swept on a field scoring 1,035 rather than 869. It gains 16
+/// waypoints on `Paths4021`, the route with the stuck car, and loses **56 on 4121, 35 on 4102 and
+/// 34 on 4061**: 919 against 1,035. Three thresholds now, 8, 4 and 2 m/s, all refuted. The lift at
+/// low speed is not the general defect it keeps looking like; it is only wrong *inside an escape*,
+/// where there is no corner at all.
 const CORNER_LIFT: f32 = 0.75;
 
 /// How far ahead to look for another car, as a multiple of speed in m/s, and the floor under it.
