@@ -325,6 +325,7 @@ pub fn densify(outline: &[Vec3], step: f32) -> Vec<Vec3> {
 /// |---|---|---|---|
 /// | chord | **5 413 m** | **32 / 64** | 4 |
 /// | walked | 5 193 m | 15 / 64 | 2 |
+/// | walked, refusing walled links | 5 155 m | 21 / 64 | 3 |
 ///
 /// **And the reason is the one the graph's own header warns about.** This network joins roads that
 /// merely run beside each other, so a *committed* shortest path crosses joins a car cannot take —
@@ -335,11 +336,28 @@ pub fn densify(outline: &[Vec3], step: f32) -> Vec<Vec3> {
 /// clean ring is the one that did not move. The pilot is being steered through a central
 /// reservation.
 ///
-/// So the next attempt is not a different search: it is teaching this one that a link with a wall
-/// across it is not a road. [`super::Network::drop_walled`] already asks whether the *ground*
-/// continues along a link and nothing yet asks whether anything stands in it.
+/// **Teaching the search that a walled link is not a road recovers a third of the loss and confirms
+/// the diagnosis** — the `passable` argument, and `NFS_WALKWALLS=0` to take it away again. Refusing
+/// the links something stands across takes the ring's own crossed pairs from 15 to 8 on 4001 and
+/// the field's cars-that-stay-on-course from 15 back to **21**, at the price of four legs that can
+/// no longer be joined and fall back to the chord. It is not enough: the chord ring still keeps 32.
+///
+/// The remaining gap is two routes — 4121 loses 363 m and 4001 all eight of its cars — and it is
+/// **not** more wall filtering, because 4081 with the same treatment goes past the chord (5 cars to
+/// 8). Something else about those two rings is wrong, and the tool to find it is the one that found
+/// this: count what the ring itself does, route by route, before changing the search again.
+///
+/// The graph is deliberately untouched by all of this. [`super::Network::drop_walled`] asks whether
+/// the *ground* continues along a link and nothing asks it about walls, because a wall filter
+/// inside the graph was swept and thrown out once already — this test is given to the course
+/// builder alone.
 #[must_use]
-pub fn along_roads(net: &super::Network, outline: &[Vec3], step: f32) -> (Vec<Vec3>, usize) {
+pub fn along_roads(
+    net: &super::Network,
+    outline: &[Vec3],
+    step: f32,
+    passable: impl Fn(u32, u32) -> bool,
+) -> (Vec<Vec3>, usize) {
     let mut poly: Vec<Vec3> = Vec::new();
     let mut chords = 0usize;
     // Two nodes of a route file can sit on top of each other; a polyline with a zero-length segment
@@ -366,7 +384,7 @@ pub fn along_roads(net: &super::Network, outline: &[Vec3], step: f32) -> (Vec<Ve
     for w in outline.windows(2) {
         let legs = snap(w[0])
             .zip(snap(w[1]))
-            .and_then(|(a, b)| net.path(a, b))
+            .and_then(|(a, b)| net.path_where(a, b, &passable))
             .map(|ids| ids.iter().filter_map(|i| net.node(*i)).map(|n| n.at).collect::<Vec<_>>());
         match legs {
             Some(pts) if pts.len() > 1 => {

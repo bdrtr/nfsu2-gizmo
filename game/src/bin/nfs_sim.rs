@@ -329,7 +329,31 @@ async fn run() {
     // was taken against, and what put 55 % of the ring outside the corridor.
     let walk = std::env::var("NFS_WALKLINE").is_ok_and(|v| v != "0");
     let waypoints = if walk {
-        let (w, chords) = city::along_roads(&net, &coarse, step);
+        // **A link with a wall across it is not a road, and the ring is where that matters.** The
+        // graph joins carriageways that merely run beside each other, so a committed shortest path
+        // crosses joins a car cannot take — measured on the first version of this ring, 15
+        // consecutive-waypoint pairs on 4001 alone with something standing between them. Tested
+        // once per link here rather than inside the search, and given only to the course builder:
+        // the graph the *pilot* walks is left exactly as it is, because a wall filter inside
+        // `drop_walled` was swept and thrown out once already.
+        let mut blocked: std::collections::HashSet<(u32, u32)> = Default::default();
+        if std::env::var("NFS_WALKWALLS").map_or(true, |v| v != "0") {
+            for i in 0..net.len() as u32 {
+                let Some(a) = net.node(i) else { continue };
+                for &l in &a.links {
+                    if l <= i {
+                        continue;
+                    }
+                    let Some(b) = net.node(l) else { continue };
+                    if walls.across(&ground, a.at, b.at, 0.5, 3.0) {
+                        blocked.insert((i, l));
+                        blocked.insert((l, i));
+                    }
+                }
+            }
+            println!("kurs kurulumunda duvarlı sayılan bağlantı: {}", blocked.len() / 2);
+        }
+        let (w, chords) = city::along_roads(&net, &coarse, step, |a, b| !blocked.contains(&(a, b)));
         // **The caution this inherits, measured rather than assumed.** A committed shortest path
         // over this graph crosses joins a car cannot take — the graph links carriageways that
         // merely run beside each other, which is why `guide_to` was refuted in the driving role

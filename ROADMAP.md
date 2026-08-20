@@ -3761,6 +3761,30 @@ Sıradaki adım başka bir arama değil, bu aramaya **duvarı olan bağlantını
 öğretmek**: `drop_walled` zaten bir bağlantı boyunca *zeminin* devam edip etmediğini soruyor, ama
 hiçbir şey içinde bir şey **durup durmadığını** sormuyor.
 
+### Aramaya duvar öğretildi: kaybın üçte biri geri geldi, teşhis doğrulandı (2026-08-20)
+
+Bir önceki bölümün sıradaki adımı uygulandı: halka kurulurken **üzerinde araç boyunda bir şey duran
+bağlantılar yol sayılmıyor** (`Network::path_where`, ve bağlantı başına bir kez ölçülen duvar
+testi). Graf değişmedi — `drop_walled`'a filtre eklemek bir kez süpürülüp atılmıştı — test yalnız
+kurs kurucusuna verildi.
+
+| halka | furthest | kursu hiç bırakmayan | düşen |
+|---|---|---|---|
+| kiriş (mevcut) | **5.413 m** | **32 / 64** | 4 |
+| yürünmüş | 5.193 m | 15 / 64 | 2 |
+| yürünmüş, duvarlı bağlantıyı reddederek | 5.155 m | **21 / 64** | 3 |
+
+4001'de halkanın kendi duvardan geçen ardışık çifti **15 → 8**, alanda kursta kalan araba
+**15 → 21**. Bedeli: dört bacak artık birleştirilemeyip kirişe düşüyor. Yani teşhis doğru, düzeltme
+yetersiz.
+
+**Kalan fark iki rotada:** 4121 −363 m, ve 4001'in sekiz arabasının sekizi de kursta kalmıyor. Daha
+fazla duvar filtresi değil, çünkü **4081 aynı işlemle kirişi geçiyor** (kursta kalan 5 → 8). O iki
+rotanın halkasında başka bir şey var, ve onu bulacak alet bunu bulan alet: halkanın kendisini rota
+rota saymak.
+
+`NFS_WALKLINE` varsayılan kapalı, `NFS_WALKWALLS` onunla birlikte açık.
+
 ## Nerede kaldık (2026-08-14 sonu)
 
 **Alan (2026-08-20 sonu, motor pini `58dc2623`, `GRIP` ve `PASSED_NEAR` açıkken): 986 geçilen

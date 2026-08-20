@@ -301,6 +301,24 @@ impl Network {
     /// scaled integer because `f32` is not `Ord`.
     #[must_use]
     pub fn path(&self, from: u32, to: u32) -> Option<Vec<u32>> {
+        self.path_where(from, to, |_, _| true)
+    }
+
+    /// The same, over the links a caller is willing to use.
+    ///
+    /// **Why the caller decides.** Whether a link is drivable is a question about the *city*, not
+    /// about the table — and the graph already answers half of it ([`Self::drop_walled`] drops the
+    /// links where the ground does not continue) but not the other half: two carriageways with a
+    /// barrier between them have good road on both sides and a link across it. Baking a wall test
+    /// into the graph itself was tried once and swept out, so the test stays out here where it can
+    /// be given to one caller — the course builder — without touching the graph the pilot drives.
+    #[must_use]
+    pub fn path_where(
+        &self,
+        from: u32,
+        to: u32,
+        passable: impl Fn(u32, u32) -> bool,
+    ) -> Option<Vec<u32>> {
         use std::collections::BinaryHeap;
         if from as usize >= self.nodes.len() || to as usize >= self.nodes.len() {
             return None;
@@ -325,6 +343,9 @@ impl Network {
             let Some(node) = self.node(i) else { continue };
             for &l in &node.links {
                 let Some(n) = self.node(l) else { continue };
+                if !passable(i, l) {
+                    continue;
+                }
                 let step = best[i as usize] + plan(node.at, n.at);
                 if step + 1e-3 < best[l as usize] {
                     best[l as usize] = step;
