@@ -64,6 +64,35 @@ const PULL_SPREAD: usize = 0;
 /// its centre, 1 its edge. Measured; see the block that uses it.
 const PULL_TO: f32 = 0.0;
 
+/// How wide a gap the pull may leave, as a multiple of [`WAYPOINT_STEP`].
+///
+/// **Not a tuned constant — a precondition the rest of the pilot already assumes.** `PASSED_NEAR`
+/// releases a waypoint driven past *within 60 m* and the advance rule steps on when the next
+/// waypoint is nearer than the held one; both take for granted that waypoints are about a step
+/// apart. The pull breaks that: moving points one at a time stretches the ring to 106 m on
+/// `Paths4102`, 97 on `Paths4081` and 228 on `Paths4121` at a 40 m step, and a goal beyond the
+/// release radius is a goal that strands — traced at 92 km/h on `Paths4102`, the car takes a
+/// waypoint **103 m away and 39° off the nose** and is 34 m out sixteen seconds later.
+///
+/// The threshold is measured and it is sharp. Sweeping it on `Paths4081`, whose race time on the
+/// corridor the pull costs 37.6 points:
+///
+/// | split above | widest gap | time on corridor |
+/// |---|---|---|
+/// | 1.05 × | 43 m | **90.3 %** |
+/// | **1.1 ×** | 44 m | **90.2 %** |
+/// | 1.2 × | 47 m | 48.0 % |
+/// | 1.3 × | 51 m | 48.0 % |
+/// | 1.5 × | 60 m | 51.0 % |
+///
+/// Above about 45 m that route halves; below it, it holds. Over the eight routes 1.1 keeps almost
+/// all of a full re-sample's gain and none of its cost — corridor time 73.8 % → **77.4 %** against
+/// the full re-sample's 78.4, but `furthest` **5928 m** against its 5496 and the incumbent's 5951.
+/// Cars that lose the race line go 40 → **34** and cars that never lose the course 15 → **17**.
+///
+/// Only the wide segments are touched: a ring the pull did not stretch comes out byte-identical.
+const GAP_AT: f32 = 1.1;
+
 /// How far apart the driven waypoints are after the outline is subdivided.
 ///
 /// Short enough that a grid is never far from one and long enough that a pilot is not chasing a
@@ -725,15 +754,18 @@ async fn run() {
         // and the reason is plausibly that it moves everything: a route with no wide gap has no
         // defect to fix and gets resampled anyway. This is the surgical form — a segment under
         // `1.5 × step` is not touched at all, so a ring without gaps comes out byte-identical.
-        let ring = if knob("NFS_FILLGAPS").is_some_and(|v| v != "0") {
+        // The width a segment has to exceed before it is split, as a multiple of the step.
+        let gap_at: f32 =
+            knob("NFS_FILLGAPS").and_then(|v| v.parse().ok()).unwrap_or(GAP_AT).max(1.0);
+        let ring = if knob("NFS_FILLGAPS").is_none_or(|v| v != "0") {
             let mut w = pulled;
-            for _ in 0..4 {
+            for _ in 0..8 {
                 let mut out: Vec<Vec3> = Vec::with_capacity(w.len());
                 let mut split = 0usize;
                 for pair in w.windows(2) {
                     out.push(pair[0]);
                     let d = Vec3::new(pair[1].x - pair[0].x, 0.0, pair[1].z - pair[0].z).length();
-                    if d > step * 1.5 {
+                    if d > step * gap_at {
                         split += 1;
                         let n = (d / step).ceil().max(2.0) as usize;
                         for k in 1..n {

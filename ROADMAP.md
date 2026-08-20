@@ -5372,3 +5372,43 @@ oradan çıktıklarında gerçekten çıkmış oluyorlar. "Hattı bırakan 48 �
 
 Çekme kalıyor. `Paths4081`'in −37,6'sı gerçek, sebebi bilinen (esnetme) ve çaresi ölçülmüş ama
 alan düzeyinde bedelli — bir sonraki oturumun elinde tam olarak bu duruyor.
+
+### Çekmenin esnetmesi düzeltildi: eşik ölçüldü, keskin çıktı, ve bir varsayımı geri koyuyor (2026-08-20)
+
+Cerrahi boşluk doldurmanın eşiği süpürüldü ve **keskin bir sınır** çıktı. `Paths4081`, çekmenin
+37,6 puan kaybettirdiği rota:
+
+| eşik (adımın katı) | en geniş aralık | kursta geçen süre |
+|---|---|---|
+| 1,05 × | 43 m | **%90,3** |
+| **1,1 ×** | 44 m | **%90,2** |
+| 1,2 × | 47 m | %48,0 |
+| 1,3 × | 51 m | %48,0 |
+| 1,5 × | 60 m | %51,0 |
+
+Yaklaşık **45 m'nin üstünde o rota yarıya iniyor, altında duruyor.** Bu bir çatallanma değil —
+1,05 ile 1,1 aynı, 1,2/1,3/1,5 aynı — gerçek ve tekrarlanabilir bir eşik.
+
+**Ve neden orada olduğu belli: pilot zaten bu varsayımı yapıyor.** `PASSED_NEAR` geçilen bir
+waypoint'i **60 m içindeyse** bırakıyor, ilerleme kuralı da bir sonraki waypoint tutulandan yakınsa
+adım atıyor; ikisi de waypoint'lerin **bir adım aralıklı** olduğunu varsayıyor. Çekme bunu
+bozuyordu (adım 40 m iken aralık 106 · 97 · 228 m), ve bırakma yarıçapının ötesindeki hedef
+mahsur kalıyordu — 4102'de 92 km/h'de izlendiği gibi.
+
+**Alan sonucu:**
+
+| | kursta süre | yan yatarak | furthest | hattı bırakan | hiç bırakmayan |
+|---|---|---|---|---|---|
+| esnek (eski) | %73,8 | **%0,8** | 5.951 m | 40 | 15 |
+| tam sıklaştırma | **%78,4** | %1,3 | 5.496 m | **33** | **19** |
+| **boşluk eşiği 1,1×** (yeni) | %77,4 | %1,2 | **5.928 m** | 34 | 17 |
+
+1,1× tam sıklaştırmanın kazancının neredeyse tamamını veriyor ve **bedelini vermiyor**:
+`furthest` 5.928 m, tam sıklaştırmanın 5.496'sına karşı, yani eski hâlin 5.951'iyle aynı.
+Hattı bırakan 40 → **34**, kursu hiç bırakmayan 15 → **17**.
+
+Koridor süresindeki +3,6 puan kurala göre 4081'in +39,2'siyle **taşınıyor**, ve bu kabul için
+gerekçe değil; gerekçe şu: **bu bir ayar değil, kırılmış bir ön koşulun onarımı.** Çekmenin
+esnetmediği bir halka bayt-birebir aynı çıkıyor, çünkü yalnız geniş bacaklar bölünüyor.
+
+**Varsayılan yapıldı** (`NFS_FILLGAPS=0` kapatır). 4081 %51,0 → **%90,2**, 4001 değişmedi.
