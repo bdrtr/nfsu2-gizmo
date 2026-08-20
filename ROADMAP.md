@@ -4380,3 +4380,30 @@ az müdahale, hiçbir ölçüde kayıp yok.** `Paths4081`'de çit 132 ateşlemed
 
 Bir bariyerin işi arabayı dünyada tutmaktır; aynı sonucu daha az dokunarak veren bariyer daha iyi
 bariyerdir. Kalan 785 müdahale artık gerçekten zeminin bittiği yerlerde.
+
+**Ek ölçü — ve çit değişikliğinin asıl kanıtı bu.** Waypoint farkı (+11) küçüktü; duran arabalara
+bakılınca sebep de görüldü:
+
+| | duran araba | bunun çitle tutulanı |
+|---|---|---|
+| eski çit | 13 | **8** |
+| kot farkında çit | 10 | **1** |
+
+Eski çitin çiviledikleri, kot değiştiren yolu çitlediği iki rotanın ta kendisi:
+
+```
+4002 araba 3: yarışın %43'inde duruyor · çit 65 kez
+4002 araba 4: yarışın %61'inde duruyor · çit 62 kez
+4002 araba 6: yarışın %84'inde duruyor · çit 40 kez
+4081 araba 2: yarışın %54'inde duruyor · çit 49 kez
+4081 araba 3: yarışın %42'inde duruyor · çit 39 kez
+4081 araba 7: yarışın %47'inde duruyor · çit 44 kez
+```
+
+Yeni çitte bu listede yalnız `4121 araba 2` kalıyor (4 kez, %22) — ve o gerçek bir kenarda.
+Yani belgenin *"4002'nin alanı yarışı 0 km/h'de bitiriyor, kenar boyunca kayarak değil"* kuşkusu
+doğruymuş, sebebi de bulundu: kayacak bir kenar yoktu, **yol oradan aşağı iniyordu**.
+
+Waypoint kazancının yine de küçük olması şaşırtıcı değil: kurtulan yedi araba 4002 ve 4081'de, ve
+o iki rota zaten alanın en az ilerleyen rotaları (75 ve 79 waypoint). Çivilenmemek ilerlemek
+değil — ama çivilenmek kesinlikle ilerlememek.
