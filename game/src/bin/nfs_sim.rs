@@ -718,6 +718,57 @@ async fn run() {
         // segments the pull opened up; those can land outside the corridor, so the same pull runs
         // once more over the result — one pass, not a loop, because the inserted points lie
         // between two points that are already inside and cannot be far out.
+        // `NFS_FILLGAPS=1`: split **only** the segments the pull left too wide, and leave every
+        // other waypoint exactly where it was.
+        //
+        // Re-sampling the whole ring wins on the route whose gap was traced and loses two others,
+        // and the reason is plausibly that it moves everything: a route with no wide gap has no
+        // defect to fix and gets resampled anyway. This is the surgical form — a segment under
+        // `1.5 × step` is not touched at all, so a ring without gaps comes out byte-identical.
+        let ring = if knob("NFS_FILLGAPS").is_some_and(|v| v != "0") {
+            let mut w = pulled;
+            for _ in 0..4 {
+                let mut out: Vec<Vec3> = Vec::with_capacity(w.len());
+                let mut split = 0usize;
+                for pair in w.windows(2) {
+                    out.push(pair[0]);
+                    let d = Vec3::new(pair[1].x - pair[0].x, 0.0, pair[1].z - pair[0].z).length();
+                    if d > step * 1.5 {
+                        split += 1;
+                        let n = (d / step).ceil().max(2.0) as usize;
+                        for k in 1..n {
+                            let p = pair[0].lerp(pair[1], k as f32 / n as f32);
+                            out.push(match corridor.locate(p) {
+                                Some(f) if f.distance > city::COURSE_HALF_WIDTH => {
+                                    let back = f.distance - city::COURSE_HALF_WIDTH * to;
+                                    let dir = Vec3::new(f.at.x - p.x, 0.0, f.at.z - p.z)
+                                        .normalize_or_zero();
+                                    p + dir * back
+                                }
+                                _ => p,
+                            });
+                        }
+                    }
+                }
+                if let Some(last) = w.last() {
+                    out.push(*last);
+                }
+                w = out;
+                if split == 0 {
+                    break;
+                }
+            }
+            let g = w
+                .windows(2)
+                .map(|p| Vec3::new(p[1].x - p[0].x, 0.0, p[1].z - p[0].z).length())
+                .fold(0.0f32, f32::max);
+            println!("   yalnız boşluklar dolduruldu: {} waypoint · en geniş {g:.0} m", w.len());
+            w
+        } else {
+            pulled
+        };
+        let pulled = ring;
+
         // **`NFS_REDENSIFY=1`: measured, and it does not win.** See the table under `PULL_TO`.
         if knob("NFS_REDENSIFY").is_some_and(|v| v != "0") {
             // **Iterated, because the two operations fight.** Re-sampling closes a gap by putting

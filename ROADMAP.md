@@ -5328,3 +5328,47 @@ birer rota belirliyor — değişiklik yok. Geçilen waypoint burada hakem olama
 
 **Kayda değer olan:** çekmenin esnetmesi gerçek, ölçülmüş ve yeri belli. Bir sonraki deneyen
 kişinin elinde hem sebep hem tur sayısı hem de hangi rotaların ne yönde tepki verdiği var.
+
+### Çekmenin tam bilançosu, ve itiraz eden tek sütunun açıklaması (2026-08-20)
+
+Boşluk doldurma cerrahi biçimde denendi ve **nötr** çıktı (kursta süre −0,2, `furthest` −311) —
+üstelik izi sürülen rota `Paths4081` **hiç değişmedi** (%51,0 → %51,0), oysa tam sıklaştırma onu
+%90,3 yapıyordu. Demek ki 4081'i düzelten şey boşluğun kapanması değil.
+
+Waypoint adımı da süpürüldü (20 · 30 · 40 · 60 m) ve kararsız çıktı — 30 m hem 20'den hem 40'tan
+kötü, yani o sütun bu örneklem büyüklüğünde gürültülü. 40 kalıyor.
+
+**Sonra doğru soru soruldu: çekme nerede zararlı?** Çekme kapatılıp rota rota bakıldı:
+
+| rota | çekmesiz | çekmeli | fark |
+|---|---|---|---|
+| 4021 | %68,5 | %94,2 | **+25,7** |
+| 4041 | %82,3 | %91,7 | +9,4 |
+| 4061 | %58,8 | %62,0 | +3,2 |
+| 4001 | %92,7 | %92,8 | +0,1 |
+| 4002 | %90,2 | %89,4 | −0,8 |
+| 4102 | %52,0 | %43,4 | −8,6 |
+| 4121 | %80,1 | %66,2 | −13,9 |
+| **4081** | **%88,6** | **%51,0** | **−37,6** |
+
+**`Paths4081`'de çekme zararlı, ve fena hâlde.** O rotanın halkasını 97 m'lik boşluklarla esnetiyor
+(adım 40 m), ve tam sıklaştırma onu geri getiriyor (%90,3) — ama iki rotayı bozarak.
+
+**Tam bilanço, bugün eklenen her sütunla:**
+
+| | waypoint | kursta süre | yan yatarak | düşen | furthest | hattı bırakan |
+|---|---|---|---|---|---|---|
+| çekmesiz (kiriş) | 1.026 | **%76,7** | %1,1 | 0 | 5.805 m | 48 |
+| **çekmeli** (kalan) | **1.476** | %73,8 | **%0,8** | 0 | **5.951 m** | **40** |
+
+**+450 waypoint**, sekiz rotanın yedisinde önde, kurala göre sağlam. Ve bugün kurulan daha dürüst
+ölçüde de önde: **hattı bırakan 48 → 40**.
+
+**İtiraz eden tek sütun koridor süresi, ve artık sebebi belli.** Koridor rota dosyasının bütün
+hatlarının **birleşimi** — paralel şeritler dahil — yani cömert. Köşeleri kesen kiriş halkası
+arabayı o birleşimin içinde tutuyor; çekilmiş halka onları **yarışın kendi yoluna** koyuyor, ve
+oradan çıktıklarında gerçekten çıkmış oluyorlar. "Hattı bırakan 48 → 40" ile "koridorda kalan
+%76,7 → %73,8" aynı şeyin iki yüzü: cömert ölçü kötüleşirken dürüst ölçü iyileşiyor.
+
+Çekme kalıyor. `Paths4081`'in −37,6'sı gerçek, sebebi bilinen (esnetme) ve çaresi ölçülmüş ama
+alan düzeyinde bedelli — bir sonraki oturumun elinde tam olarak bu duruyor.
