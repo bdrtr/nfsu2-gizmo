@@ -4712,3 +4712,40 @@ düğüm 20,0 → 22,1. Dört bağımsız ölçü aynı yöne gidiyor; bir tanes
 Bugün halkayı dürüstleştirmenin dört yolu denendi (ağda yürüme, kırpma, kenara çekme, merkeze
 çekme) ve yalnız sonuncusu sürüşü ileri taşıdı. Ortak ders: **halkanın yumuşaklığı, doğruluğu
 kadar önemli** — ve çekmek doğruluğu yumuşaklığı bozmadan veren tek işlem.
+
+### Süpürmenin gürültü tabanı ölçüldü: ±37 waypoint (%2,8) — ve tek bir rotanın çatallanması (2026-08-20)
+
+Yeni varsayılan `PULL_TO = 0` ile daha önce `NFS_PULL=0.001` ile koşulan kol arasında 35 waypoint
+fark çıktı. Aradaki tek fark, waypoint konumunda **1,2 santimetre**. Bu, ölçünün kendisi hakkında
+bir soru: fiziksel olarak anlamsız bir kayma alanı ne kadar oynatıyor?
+
+Dört hedef (0 · 0,0005 · 0,001 · 0,002 — en fazla **2,4 cm**), sekiz rota:
+
+| rota | 0 | 0,0005 | 0,001 | 0,002 | yayılım |
+|---|---|---|---|---|---|
+| 4001 | 366 | 366 | 366 | 366 | **0** |
+| 4002 | 56 | 56 | 56 | 56 | **0** |
+| 4021 | **100** | **142** | **142** | **142** | **42** |
+| 4041 | 252 | 252 | 252 | 253 | 1 |
+| 4061 | 162 | 155 | 155 | 156 | 7 |
+| 4081 | 154 | 154 | 154 | 154 | **0** |
+| 4102 | 108 | 108 | 108 | 108 | **0** |
+| 4121 | 119 | 119 | 119 | 119 | **0** |
+| **TOPLAM** | 1.317 | 1.352 | 1.352 | 1.354 | **37** |
+
+**Simülasyon büyük ölçüde kararlı** — sekiz rotanın altısı bayt-birebir aynı. Gürültünün tamamına
+yakını `Paths4021`'in **iki sonuç arasında çatallanması**: 100 ya da 142, arada bir değer yok. Bu
+kayan nokta hatasının birikmesi değil, bir arabanın bir kavşakta öbür kolu seçmesi.
+
+**Sonuç, bugünün bütün sayılarını kalibre ediyor: alan farkı ~40 waypoint'in altındaysa sonuç
+değildir.** Bu ölçüyle:
+
+* Bugün kabul edilen çekme (+271) ve çürütülen saf takip (−207) ile kilit sınırı (−174…−364)
+  gürültünün çok üstünde — hepsi sağlam.
+* **Çitin +11'i gürültünün içinde.** Zaten öyle yazılmıştı: çitin gerekçesi waypoint değil, 336 az
+  müdahale ve çivilenen arabanın 8 → 1 olmasıydı. İyi ki ona dayanmamışız.
+* **`PASSED_NEAR` 60'ın 80'e (+13) ve 100'e (+30) üstünlüğü de gürültünün içinde.** Bu, aynı gün
+  rota dağılımıyla varılan sonucun bağımsız ikinci kanıtı: o ince ayarlar ölçülmüş değil.
+
+Ve yeni varsayılanın (1.317) çatallanmanın şanssız tarafına düşmesi bir kusur değil, gürültü;
+0,0005 ile 1.352 veriyor. Peşine düşülecek bir şey yok.
