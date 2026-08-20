@@ -188,12 +188,28 @@ const BEHIND: f32 = 2.97;
 /// Steering lock the pilot will ask for, as a fraction of the controller's own.
 const STEER_LIMIT: f32 = 0.85;
 
-/// How much of the steering lock is left at [`CAP_SPEED`], as a fraction.
+/// How much of the steering lock is left at [`CAP_SPEED`], as a fraction. **1.0: refuted.**
 ///
-/// 1.0 is no cap, which is the shipped value until the sweep says otherwise. The flat cap this
-/// replaces was refuted because it takes the lock away from a *standing* car as well, and a car
-/// that cannot turn cannot turn away from an edge — falls tripled. Scaling it with speed keeps
-/// everything the flat cap broke.
+/// The flat cap was refuted because it takes the lock away from a *standing* car too, and a car
+/// that cannot turn cannot turn away from an edge — falls tripled. Scaling with speed fixes
+/// exactly that, and the fix works: over the eight routes falls stay at 6, 6, 6 and 8 against the
+/// flat cap's 5 and 6 from a baseline of 2. The idea still loses, at every setting swept:
+///
+/// | at 60 km/h | waypoints | time on course | never lost | fell |
+/// |---|---|---|---|---|
+/// | **no cap** (kept) | **1046** | **82.0 %** | **30** | **6** |
+/// | 70 % | 872 | 74.2 % | 26 | 6 |
+/// | 50 % | 861 | 76.0 % | 27 | 6 |
+/// | 35 % | 682 | 70.7 % | 26 | 8 |
+///
+/// Solid by the route-spread rule: −174, −185 and −364 with the biggest single route −107, −82 and
+/// −120, and the baseline ahead on seven, five and seven of the eight.
+///
+/// **Two independent experiments now say the same thing.** Pure pursuit's own geometry, which asks
+/// for less lock when the aim swings wide, lost by 207; this, which asks for less lock at speed,
+/// loses by 174 to 364. Every way of making this pilot steer *less* is worse, and the reason is
+/// the one written at the steering law: it does not track a path, it chases a point, and the
+/// over-steering is how it gets back. The lever that is left is not the steering response.
 const CAP_FAST: f32 = 1.0;
 
 /// The speed, in m/s, at which [`CAP_FAST`] is reached. 16.7 m/s is 60 km/h.

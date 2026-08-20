@@ -4609,3 +4609,28 @@ kilit (kaçış makinesi ona bağlı), 60 km/h'de az. Düz sınır çürütülm�
 kilidi alıyor ve kenardan dönemeyen araba düşüyor (düşen üç katına çıkmıştı). Bugünkü sayım tam
 buraya işaret ediyor: 34 ayrılmanın **18'i tam kilitte**, 8'i 60 km/h üstünde. `NFS_CAPFAST`
 eklendi ve süpürülüyor.
+
+### Hıza göre kilit sınırı da çürüdü — ve iki deney artık aynı şeyi söylüyor (2026-08-20)
+
+`NFS_CAPFAST` süpürüldü. Üç ayarın üçü de her ölçüde kaybediyor:
+
+| 60 km/h'de kalan kilit | waypoint | kursta süre | hiç bırakmayan | düşen |
+|---|---|---|---|---|
+| **sınır yok** (kalan) | **1.046** | **%82,0** | **30** | **6** |
+| %70 | 872 | %74,2 | 26 | 6 |
+| %50 | 861 | %76,0 | 27 | 6 |
+| %35 | 682 | %70,7 | 26 | 8 |
+
+Günün kuralına göre sağlam: −174, −185, −364 ve en büyük tek rota −107, −82, −120.
+
+**Ama teşhis doğruymuş.** Düz sınırın çürütülme sebebi düşenlerin üçe katlanmasıydı (2 → 5, 6);
+hıza göre olan bunu **tekrarlamıyor** (6, 6, 6, 8). Yani "duran arabadan kilidi alma" teşhisi
+doğruydu ve düzeltilmesi fikri kurtarmadı — fikir kendi başına yanlış.
+
+**Ve bugün iki bağımsız deney aynı şeye varıyor.** Nişan yana savrulunca daha az kilit isteyen saf
+takip geometrisi −207 ile kaybetti; hızda daha az kilit isteyen sınır −174 ile −364 arasında
+kaybetti. **Bu pilotu daha az direksiyon kırdıran her yol daha kötü.** Sebebi direksiyon yasasının
+yanında yazılı: bir hattı takip etmiyor, bir noktayı kovalıyor, ve fazla direksiyon toparlanmanın
+kendisi. **Kalan kaldıraç direksiyon tepkisi değil.**
+
+Sabit `CAP_FAST = 1.0` olarak, kaydıyla birlikte duruyor (`NFS_CAPFAST` ile geri açılır).
