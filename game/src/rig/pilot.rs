@@ -185,6 +185,51 @@ const BRAKE_SPEED: f32 = 9.0;
 /// How hard the brake comes on past that.
 const BRAKE_GAIN: f32 = 1.5;
 
+/// What a corner may ask of the tyres before the brake comes on, in m/s².
+///
+/// **This exists because [`BRAKE_SPEED`]'s rule cannot see a corner until it is in one.** That rule
+/// is `(speed / BRAKE_SPEED) * |steer|`, and the wheel only turns once the corner has arrived.
+/// Traced with `NFS_LOST=1` at the place six of eight cars leave the course on `Paths4121`, it
+/// peaks at **0.92** against a threshold of 1.0 — the brake never comes on at all — while the car
+/// enters a 48° bend at 66 km/h. Lowering the threshold instead is separately refuted: it brakes
+/// everywhere, and what is missing is not harder but earlier.
+///
+/// Pure pursuit follows an arc through the aim point of radius `L / (2 sin θ)`, so holding that
+/// line at that speed costs `2 v² sin θ / L` of lateral acceleration. That is a number in m/s²
+/// which can be compared against what a tyre has, rather than a tuned ratio — and on the same trace
+/// it passes 9.6 m/s² **three and a half seconds and sixty metres** before the car goes wide.
+///
+/// **Swept over eight routes.** Waypoints driven past is the measure that decides it, for the same
+/// reason it decides the traffic look: it cannot be inflated by a lost car.
+///
+/// | grip | waypoints | distinct nodes | never lost the course | fallen |
+/// |---|---|---|---|---|
+/// | off | 883 | 1 352 | 9 / 64 | 3 |
+/// | 6 | 602 | 953 | **22 / 64** | 1 |
+/// | **8** | **927** | 1 280 | 14 / 64 | 2 |
+/// | 12 | 815 | 1 192 | 13 / 64 | 1 |
+///
+/// Eight is the only value that beats the field with the rule off, and the curve is unimodal around
+/// it. **Six is the trap**: it keeps 22 of 64 cars on the course and is far the worst arm, because
+/// those cars stay on it by crawling — 10.2 waypoints each against 20.1 at eight and 18.8 with the
+/// rule off. Keeping the car on the road is not the goal; getting it round is.
+///
+/// **The honest part of the record.** Per route, eight wins four (4001 +95, 4041 +26, 4102 +18,
+/// 4121 +11) and loses three (4061 −48, 4021 −34, 4081 −24), so the +44 net is carried by one
+/// route and a future reader is entitled to distrust it. Junctions (−6.6 %) and distinct nodes
+/// (−5.3 %) also fall, and that is worth the paragraph it takes to say why it is not lost progress:
+/// splitting both by whether the car ever lost the course, the cars that **stayed** on it go from 9
+/// banking 187 nodes and 169 waypoints to 14 banking 279 and 282, while the lost population shrinks
+/// from 55 cars to 50. The whole of the fall is fewer lost cars wandering the graph — the same
+/// inflation `nfs_sim` records when it notes that a flipped car goes on taking junctions. The ratio
+/// of junctions to distinct nodes is unmoved, 1.069 → 1.054.
+///
+/// It does **not** fix 4121: seven of eight still leave at waypoint 6, now 19 m further round the
+/// bend and at 50 km/h instead of 66. What is left there is the steering, which asks for 0.50 of
+/// lock at −54° because the angle-to-lock map is a straight ramp rather than the arc's own
+/// geometry.
+const GRIP: f32 = 8.0;
+
 /// How much steering costs throttle.
 ///
 /// **Ramping this in with speed is refuted, and the reasoning that led there is worth keeping
@@ -996,6 +1041,21 @@ impl Pilot {
             std::env::var("NFS_BRAKE").ok().and_then(|v| v.parse().ok()).unwrap_or(BRAKE_SPEED);
         let over = (speed / bs) * self.steer.abs();
         let mut brake = ((over - 1.0) * BRAKE_GAIN).clamp(0.0, 1.0);
+
+        // **And the corner the car has not reached yet**, which the rule above cannot see: it
+        // watches how hard the wheel *is* turned, and the wheel only turns once the corner is here.
+        // What the aim arc costs in lateral acceleration is visible seconds earlier — see [`GRIP`],
+        // which carries the measurement and the sweep.
+        //
+        // An aim point behind the car has a small `sin θ` and asks for nothing here; that is
+        // deliberate. It is a separate failure with a separate fix, and this term must not paper
+        // over it by braking for it.
+        let grip: f32 = std::env::var("NFS_GRIP").ok().and_then(|v| v.parse().ok()).unwrap_or(GRIP);
+        if grip > 0.0 {
+            let reach = flat(aim - at).length().max(1.0);
+            let need = 2.0 * speed * speed * angle.abs().sin() / reach;
+            brake = brake.max(((need / grip - 1.0) * BRAKE_GAIN).clamp(0.0, 1.0));
+        }
 
         // **The car in front.** Until now a rival would drive into the back of another one, which
         // the module said out loud and which turned out to cost more than it looked: three of eight

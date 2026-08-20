@@ -3265,9 +3265,52 @@ kez daha var (nişan 144 m, −160°), o seferinde toparlanıyor.
 bekliyor"**. Sıradaki iş bu iki arızayı ayrı ayrı ele almak; ikisi de ölçülebilir ve ikisi de
 sekiz-rota süpürmesiyle yargılanacak.
 
+### Fren virajı nişan yayından görüyor artık — ve bu, çürütülmeyen ilk viraj kolu (2026-08-20)
+
+İzin söylediği şey açıktı: eski fren kuralı arabanın *şu an* ne kadar döndüğüne bakıyor, direksiyon
+ise viraj gelene kadar dönmüyor. Yeni terim aynı nişan noktasının **yayını** kullanıyor. Saf takip
+`L / (2 sin θ)` yarıçaplı bir yay izler, dolayısıyla o çizgiyi o hızda tutmanın bedeli
+`2·v²·sin θ / L` — m/s² cinsinden, yani ayarlanmış bir orana değil **lastiğin verebileceğine**
+karşı kıyaslanabilir bir sayı.
+
+**Sekiz rota, dört kol.** Karar veren ölçü "waypoints driven past": şişirilemeyen tek sayı.
+
+| grip | waypoint | distinct nodes | kursu hiç bırakmayan | fallen | junctions |
+|---|---|---|---|---|---|
+| kapalı | 883 | 1.352 | 9 / 64 | 3 | 1.445 |
+| 6 | 602 | 953 | **22 / 64** | 1 | 1.024 |
+| **8** | **927** | 1.280 | 14 / 64 | 2 | 1.349 |
+| 12 | 815 | 1.192 | 13 / 64 | 1 | 1.287 |
+
+Sekiz, kural kapalıyken alınan alanı geçen **tek** değer ve eğri onun etrafında tek tepeli.
+
+**Altı, tuzağın kendisi.** 64 arabanın 22'sini kursta tutuyor — bugüne kadarki en iyi rakam — ve
+kolların en kötüsü. Çünkü o arabalar kursta *sürünerek* kalıyor: kursta kalan araba başına **10,2**
+waypoint, sekizde 20,1 ve kural kapalıyken 18,8. Arabayı yolda tutmak hedef değil; yoldan
+geçirmek hedef.
+
+**Kaydın dürüst kısmı.** Rota rota sekiz, dördünde kazanıyor (4001 +95, 4041 +26, 4102 +18,
+4121 +11) ve üçünde kaybediyor (4061 −48, 4021 −34, 4081 −24). Yani +44'lük net, tek bir rotanın
+sırtında ve bunu okuyan biri ona güvenmemekte haklıdır.
+
+Junctions (−%6,6) ve distinct nodes (−%5,3) de düşüyor. Bunun kayıp ilerleme **olmadığı**
+ölçüldü: ikisini de "araba kursu bıraktı mı" diye ayırınca, **kursta kalanlar 9 arabadan 187 düğüm
+ve 169 waypoint'ten, 14 arabadan 279 düğüm ve 282 waypoint'e** çıkıyor; kaybolan nüfus ise 55'ten
+50'ye iniyor. Düşüşün tamamı, grafta dolanan daha az kaybolmuş arabadan geliyor — `nfs_sim`'in
+kendi notunun söylediği şişme ("takla atmış bir araba kavşak saymaya devam eder"). Junctions /
+distinct nodes oranı yerinde duruyor: 1,069 → 1,054.
+
+**4121'i çözmüyor.** Sekiz arabanın yedisi hâlâ waypoint 6'da çıkıyor — ama virajın **19 m
+ilerisinde ve 66 yerine 50 km/h ile**, ve biri artık hiç bırakmıyor. İzden okunan kalan eksik
+direksiyonda: −54°'de pilot kilidin yalnız 0,50'sini istiyor, çünkü açı→kilit haritası yayın
+kendi geometrisi değil düz bir rampa (`(açı·2/π)·STEER_LIMIT`). Saf takibin kendi formülü
+`δ = atan(2·L_dingil·sin θ / L)`; sıradaki aday o, ve o da sekiz rotayla yargılanacak.
+
 ## Nerede kaldık (2026-08-14 sonu)
 
-**Alan: 865 geçilen waypoint, 1.354 ayrık düğüm, 64 arabanın 51'i kursu bırakıyor.** (Bugün 869
+**Alan (2026-08-20, motor pini `58dc2623` ve `GRIP` açıkken): 927 geçilen waypoint, 1.280 ayrık
+düğüm, 64 arabanın 50'si kursu bırakıyor.** Bir önceki hâli, aşağıdaki paragrafın ölçüldüğü gün:
+865 waypoint, 1.354 düğüm, 51 araba. (Bugün 869
 diye geçen sayı, pilot saati 4× hızlıyken ölçülmüştü; düzeltilince 865 oldu — yani saat platonun
 sebebi değildi.) En iyi araba 144'ün **29'unda**, ve 600 saniye vermek onu 26'dan 29'a taşıyor:
 **sınır zaman değil.**
@@ -3303,11 +3346,14 @@ elenmeyen dörtte −70. Karar yalnız sekiz rotadan çıkar.
   (yukarıya bak): sekiz rotada 2.824 kenarın 138'inde yolun kendi kotunda, arabanın çarpacağı
   yükseklikte geometri duruyor, 81'i yol ekseninin 6 m'sinde. Kapanmayan kısım: bunların hangisine
   gerçekten çarpıldığı, ve 4001'in 57 duvarının 39'unun eksenden uzak olması (kiriş şüphesi).
-- **4121'in virajı: sebep bulundu, düzeltme yok.** Duran bir şey yok (en yakın duvar 225 m), ve
-  `NFS_LOST=1` izine göre altı araba aynı noktada, `over` = 0,92 ile — yani **fren eşiğin %8
-  altında kalarak hiç gelmeden**. Gereken yanal ivme 3,5 saniye önce 9,6 m/s²'yi geçiyor. Ayrıca
-  ikinci bir arıza: nişan noktası bir düğümde 180° dönüp tam kilit istiyor (araba 5 ve 2).
-  İkisi de sekiz-rota süpürmesiyle yargılanacak.
+- **4121'in virajı: sebebin yarısı düzeltildi.** Duran bir şey yok (en yakın duvar 225 m); iz,
+  frenin eşiğin %8 altında kalarak hiç gelmediğini gösterdi ve nişan yayının eğriliğinden fren
+  yapan terim (`GRIP = 8`) sekiz rotada **883 → 927 waypoint**, kursta kalan araba **9 → 14**
+  getirdi. 4121 hâlâ çözülmedi: yedi araba virajın 19 m ilerisinde, 50 km/h ile çıkıyor. Kalan
+  eksik direksiyonda — açı→kilit haritası düz bir rampa, saf takibin kendi formülü değil.
+- **İkinci ve ayrı arıza: nişan noktası bir düğümde 180° dönüyor** ve pilot tam kilit + tam fren
+  istiyor (araba 5 ve 2, `NFS_LOST=1` izinde). Tutulan düğüm değişmiyor, mesafe 0 → 31 m
+  büyüyor. Henüz teşhis edilmedi; ize kaçış durumu ve hedef waypoint eklenmeli.
 - **Motor pini `58dc2623`'te** (2026-08-20'de taşındı). `BASELINE-SEKIZ-ROTA.md` yükseltme öncesi
   tabloyu tutuyor; yükseltme sonrası süpürme onunla yan yana konmalı.
 

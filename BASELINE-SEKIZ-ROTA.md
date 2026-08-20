@@ -110,3 +110,8 @@ verdirmez; sonraki süpürmelerde 4041 izlenmeli, üç olur ve orada kalırsa te
 
 **Karar: yükseltme sürüşü bozmadı, geri alınacak bir şey yok.** Bu tablo bundan sonraki
 karşılaştırmaların tabanıdır; yukarıdaki yükseltme öncesi tablo tarihsel.
+
+**Not, aynı gün:** bu tablo alındıktan sonra pilota `GRIP` freni eklendi (`ROADMAP.md`,
+2026-08-20) ve alanı 883 → 927 waypoint, 1.352 → 1.280 ayrık düğüm, kursta kalan araba 9 → 14
+taşıdı. Yani buradaki sayılar **motorun** yükseltmesini yargılar; sürücü tarafındaki bir sonraki
+değişiklik `GRIP` açık hâliyle kıyaslanmalı.
