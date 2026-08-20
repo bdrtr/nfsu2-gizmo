@@ -526,13 +526,16 @@ async fn run() {
     // are opposite findings. One is a choice a rule can make better; the other is a graph that does
     // not contain the road, and no steering rule fixes that.
     //
-    // **It answered neither: the walk never leaves the course at all.** On `Paths4102` and
-    // `Paths4121`, over ninety seconds and eight cars each, the count of steps from a node inside
-    // the corridor to one outside it is **zero**. The held nodes stay on the course the whole way,
-    // and the car that ends up steering backwards was never routed off it. What is behind is the
-    // *waypoint*, not the road — see the counter's own arm below. Kept because the question is the
-    // first one anybody will ask again, and a measured zero is worth more than the assumption it
-    // replaced.
+    // **The first version of this asked the wrong thing and answered zero.** It compared the held
+    // node against the *corridor*, and the corridor is built from every path in the route file
+    // merged together — so a car driving a different carriageway of the same route is "on course"
+    // by that test however far it is from the race. It measured zero on two routes and the zero was
+    // real and useless.
+    //
+    // What it asks now is the distance from the held node to the nearest **waypoint**, which is the
+    // race's own line. That is the number that was hiding: on `Paths4121` the cars run at 60 km/h
+    // inside the corridor with their goal waypoint **150-159 m** away, and the place where seven of
+    // eight finally cross out has no waypoint within 80 m of it.
     let wrongway = std::env::var("NFS_WRONGWAY").is_ok();
     let mut held_node: Vec<Option<u32>> = vec![None; field.len()];
     // **A car cannot leave a course it was never on.** Some grids sit outside the corridor: on
@@ -762,23 +765,25 @@ async fn run() {
             if wrongway {
                 let now_node = pilot.node();
                 if now_node != held_node[k] {
+                    // Distance from a node to the race's own line — the nearest waypoint, not the
+                    // corridor, for the reason in the declaration above.
                     let off = |i: u32| {
                         net.node(i).map_or(f32::INFINITY, |n| {
-                            corridor.locate(n.at).map_or(f32::INFINITY, |x| x.distance)
+                            waypoints
+                                .iter()
+                                .map(|w| Vec3::new(w.x - n.at.x, 0.0, w.z - n.at.z).length())
+                                .fold(f32::INFINITY, f32::min)
                         })
                     };
                     if let (Some(a), Some(b)) = (held_node[k], now_node) {
-                        // Only the step that crosses out matters: from a node on the course to one
-                        // off it. A walk already outside has nothing left to choose wrongly.
-                        if off(a) <= city::COURSE_HALF_WIDTH && off(b) > city::COURSE_HALF_WIDTH {
+                        // Only the step that crosses out matters: from a node on the race's line to
+                        // one off it. A walk already outside has nothing left to choose wrongly.
+                        if off(a) <= WAYPOINT_STEP && off(b) > WAYPOINT_STEP {
                             // How many of the arms out of `a` — other than the one it came from —
                             // would have stayed on the course. This is the whole of the finding.
-                            let kept = net.node(a).map_or(0, |n| {
-                                n.links
-                                    .iter()
-                                    .filter(|l| off(**l) <= city::COURSE_HALF_WIDTH)
-                                    .count()
-                            });
+                            let kept = net
+                                .node(a)
+                                .map_or(0, |n| n.links.iter().filter(|l| off(**l) <= WAYPOINT_STEP).count());
                             strayed_at.push((now, k, a, b, off(b), kept));
                         }
                     }
@@ -1130,6 +1135,111 @@ async fn run() {
     // answer. Three different failures wear the same number and want completely different work: a
     // car pinned by the fence, a car queued behind another car, and a car stuck against the city.
     let early: Vec<usize> = (0..field.len()).filter(|k| moved_at[*k] < 30.0).collect();
+    // NFS_CURVE=1: the course's own speed limit, from its own geometry.
+    //
+    // **Why this and not another pilot sweep.** The corner that takes most of `Paths4121` has now
+    // been attacked through the brake, the steering rate, the aim distance and the lock, and every
+    // one of those asks "what should the driver do". None of them asks the prior question: *how
+    // fast can anything go round here at all.* The circle through three consecutive waypoints gives
+    // the racing line's own radius, and `v = sqrt(a · r)` with the lateral acceleration the field
+    // has actually been measured holding turns that into a speed. Where that speed is below what
+    // the cars arrive at, no steering rule can save them and the brake is the only lever; where it
+    // is above, the corner is not the problem.
+    if std::env::var("NFS_CURVE").is_ok() {
+        // Measured, not chosen: the 90th percentile of `v · dψ/dt` over the field's own cornering
+        // above 28 km/h is 5.2 m/s² and the 95th is 5.6 (`ROADMAP.md`, 2026-08-20). This is what a
+        // 240SX on Bayview's tarmac in this build actually holds, whatever a tyre datasheet says.
+        const HELD: f32 = 5.2;
+        let radius = |i: usize| -> Option<f32> {
+            let n = waypoints.len();
+            if n < 3 {
+                return None;
+            }
+            let (a, b, c) = (
+                waypoints[(i + n - 1) % n],
+                waypoints[i % n],
+                waypoints[(i + 1) % n],
+            );
+            let (u, v) = (
+                Vec3::new(b.x - a.x, 0.0, b.z - a.z),
+                Vec3::new(c.x - b.x, 0.0, c.z - b.z),
+            );
+            let (lu, lv) = (u.length(), v.length());
+            // Two waypoints on top of each other, or a straight: no circle worth reporting.
+            if lu < 1.0 || lv < 1.0 {
+                return None;
+            }
+            let turn = u.normalize().cross(v.normalize()).y.clamp(-1.0, 1.0).asin().abs();
+            (turn > 1e-3).then(|| 0.5 * (lu + lv) / turn)
+        };
+        let mut worst: Vec<(f32, usize)> = (0..waypoints.len())
+            .filter_map(|i| radius(i).map(|r| (r, i)))
+            .collect();
+        worst.sort_by(|a, b| a.0.total_cmp(&b.0));
+        println!(
+            "\nkursun kendi hız sınırı — {} waypoint, tutulabilen yanal ivme {HELD} m/s²:",
+            waypoints.len()
+        );
+        for (r, i) in worst.iter().take(10) {
+            let w = waypoints[*i];
+            println!(
+                "   waypoint {i:>4} · yarıçap {r:>6.0} m · en fazla {:>5.0} km/h · ({:>7.0},{:>7.0})",
+                (HELD * r).sqrt() * 3.6,
+                w.x,
+                w.z
+            );
+        }
+        // `NFS_CURVE=x,z` walks the waypoints near a place. **The place is what you have**: the
+        // per-car report names where a car lost the course, and its "waypoint N" is the *count* it
+        // had driven past, not an index — so a coordinate is the only handle on "the corner where
+        // they keep going off".
+        let spec = std::env::var("NFS_CURVE").unwrap_or_default();
+        if let (Some(cx), Some(cz)) = {
+            let mut it = spec.split(',').filter_map(|v| v.trim().parse::<f32>().ok());
+            (it.next(), it.next())
+        } {
+            let here = Vec3::new(cx, 0.0, cz);
+            println!("   ({cx:.0},{cz:.0}) çevresindeki waypoint'ler:");
+            for (j, w) in waypoints.iter().enumerate() {
+                let d = Vec3::new(w.x - here.x, 0.0, w.z - here.z).length();
+                if d > 80.0 {
+                    continue;
+                }
+                match radius(j) {
+                    Some(r) => println!(
+                        "     {j:>4} · {d:>4.0} m ötede · yarıçap {r:>6.0} m · en fazla {:>5.0} km/h",
+                        (HELD * r).sqrt() * 3.6
+                    ),
+                    None => println!("     {j:>4} · {d:>4.0} m ötede · düz"),
+                }
+            }
+        }
+        if let Ok(i) = spec.parse::<usize>() {
+            println!("   waypoint {i} çevresi:");
+            let hi = (i + 4).min(waypoints.len().saturating_sub(1));
+            for (j, w) in waypoints.iter().enumerate().take(hi + 1).skip(i.saturating_sub(4)) {
+                match radius(j) {
+                    Some(r) => println!(
+                        "     {j:>4} · yarıçap {r:>6.0} m · en fazla {:>5.0} km/h · ({:>7.0},{:>7.0})",
+                        (HELD * r).sqrt() * 3.6,
+                        w.x,
+                        w.z
+                    ),
+                    None => println!("     {j:>4} · düz · ({:>7.0},{:>7.0})", w.x, w.z),
+                }
+            }
+        }
+        let under = |kmh: f32| {
+            worst.iter().filter(|(r, _)| (HELD * r).sqrt() * 3.6 < kmh).count()
+        };
+        println!(
+            "   {} waypoint 40 km/h'nin, {} tanesi 60'ın, {} tanesi 80'in altında bir sınır dayatıyor",
+            under(40.0),
+            under(60.0),
+            under(80.0)
+        );
+    }
+
     // NFS_BLOCKED=1: walk the racing line itself and ask whether anything stands in it.
     // Everything else here measures the cars; this measures the road. A building sitting in the
     // course would look, from the cars' side, exactly like six of them running wide at one
@@ -1435,7 +1545,10 @@ async fn run() {
             }
         }
         if wrongway {
-            println!("\nyürüyüş kurstan nerede çıktı, ve başka kolu var mıydı:");
+            println!(
+                "\nyürüyüş yarış hattından nerede çıktı (waypoint'e {WAYPOINT_STEP} m'den uzak), \
+                 ve başka kolu var mıydı:"
+            );
             let (mut had, mut none) = (0usize, 0usize);
             for (t, k, a, b, off, kept) in &strayed_at {
                 if *kept > 0 {

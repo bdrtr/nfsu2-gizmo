@@ -3608,6 +3608,44 @@ raporlandı, ve eksiklik iki rotanın gridinden geliyor. Kollar arası **farklar
 her kolda aynı), ama mutlak sayılar düşük. Bugünün kolları düzeltilmiş sayaçla yeniden koşuldu ve
 sayılar aşağıda yerine kondu.
 
+### 4121'in "virajı" bir viraj değilmiş: arabalar 250 m önce yanlış kola sokuluyor (2026-08-20)
+
+Üç açık sorunun sonuncusu — düpedüz açılan arabalar — kapandı, ve cevap bugüne kadarki bütün viraj
+çalışmasının zeminini kaydırıyor.
+
+**Önce yolun kendi hız sınırı ölçüldü** (`NFS_CURVE=1`): ardışık üç waypoint'ten geçen çemberin
+yarıçapı, ve `v = √(a·r)` ile alanın gerçekten tuttuğu 5,2 m/s²'ye karşılık gelen hız. 4121'in en dar
+yerleri **22-28 m yarıçap, yani 39-43 km/h**. Ama arabaların çıktığı yer bunların hiçbiri değil.
+
+**Sonra "waypoint 6" ifadesinin bir konum olmadığı fark edildi.** Rapor satırındaki sayı, arabanın o
+ana kadar **geçtiği waypoint sayısı**; indeks değil. Gerçek yer `(-334, 1374)` ve orada — `NFS_CURVE=x,z`
+ile sorulunca — **80 m yarıçapında tek bir waypoint bile yok.** Yarış hattı oradan geçmiyor.
+
+**Ve kapatan ölçüm.** `NFS_WRONGWAY`'in ilk hâli düğümü *koridora* karşı soruyordu; koridor rota
+dosyasının bütün hatlarını birleştirdiği için, yarıştan 150 m uzaktaki bir şeritte giden araba da
+"kursta" çıkıyordu. Sıfır ölçmüştü ve sıfır gerçekti ama işe yaramazdı. Soru **en yakın waypoint'e**
+uzaklık olarak sorulunca:
+
+```
+4121: sekiz arabanın sekizi de  düğüm 110 → 111 · yeni düğüm hattan 50,9 m · hatta kalan kol: 2
+4102: yedi araba               düğüm  11 →  10 · yeni düğüm hattan 58,6 m · hatta kalan kol: 1
+toplam 21 çıkış · 21'inde de hatta kalan bir kol VARDI · 0'ında yoktu
+```
+
+**Yirmi bir vakanın yirmi birinde de yarış hattında kalan bir kol vardı ve seçilmedi.** Arabalar
+sonra 250 m boyunca koridorun içinde, 60 km/h ile, hedef waypoint'leri 150-159 m uzaktayken sürüyor
+ve nihayet açılıp koridoru terk ediyorlar. Üç süpürmenin "viraj" diye saldırdığı yer, yanlış kola
+sokulmuş bir arabanın o yolun büküldüğü noktada dışarı çıkması.
+
+**Sebep `Network::step_avoiding`'in kendisi:** hedefe **düz mesafede** en yakın komşuyu seçiyor.
+Yarış hattı ile paralel giden bir şerit, hedefe düz mesafede pekâlâ daha yakın olabilir — özellikle
+hedef ileride ve yanda ise. Graf da o iki şeridi birbirine bağladığı için seçenek gerçekten var.
+
+**Sıradaki iş, ve neden çürütülenlerden farkı:** kol seçimine "yarış hattına yakın kal" terimi
+eklemek. ROADMAP'te çürütülmüş üç rotalama mekanizması (kara liste, yönü şucu, listeyi eskitme) hep
+*kurtarma* mekanizmalarıydı — araba çuvalladıktan sonra ne yapmalı. Bu ise seçimin kendisi, ve
+ölçüm ilk kez seçilmeyen doğru kolun **var olduğunu** gösteriyor. Sekiz rota yargılayacak.
+
 ## Nerede kaldık (2026-08-14 sonu)
 
 **Alan (2026-08-20 sonu, motor pini `58dc2623`, `GRIP` ve `PASSED_NEAR` açıkken): 986 geçilen
@@ -3649,7 +3687,11 @@ elenmeyen dörtte −70. Karar yalnız sekiz rotadan çıkar.
   (yukarıya bak): sekiz rotada 2.824 kenarın 138'inde yolun kendi kotunda, arabanın çarpacağı
   yükseklikte geometri duruyor, 81'i yol ekseninin 6 m'sinde. Kapanmayan kısım: bunların hangisine
   gerçekten çarpıldığı, ve 4001'in 57 duvarının 39'unun eksenden uzak olması (kiriş şüphesi).
-- **4121'in virajı: sebebin yarısı düzeltildi.** Duran bir şey yok (en yakın duvar 225 m); iz,
+- **4121'in "virajı" viraj değilmiş** (2026-08-20 sonu, yukarıya bak): sekiz arabanın sekizi de
+  düğüm 110 → 111 adımıyla yarış hattından **50,9 m** uzağa sokuluyor, ve o kavşakta hatta kalan
+  **iki kol** vardı. 4102'de aynı şey (58,6 m, bir kol). 21 vakanın 21'inde doğru kol mevcut ve
+  seçilmiyor. Sıradaki iş kol seçimine "hatta yakın kal" terimi eklemek.
+- **Viraj cephesinin eski kaydı, artık bu ışıkta okunmalı:** Duran bir şey yok (en yakın duvar 225 m); iz,
   frenin eşiğin %8 altında kalarak hiç gelmediğini gösterdi ve nişan yayının eğriliğinden fren
   yapan terim (`GRIP = 8`) sekiz rotada **883 → 927 waypoint**, kursta kalan araba **9 → 14**
   getirdi. 4121 hâlâ çözülmedi: yedi araba virajın 19 m ilerisinde, 50 km/h ile çıkıyor. Kalan
