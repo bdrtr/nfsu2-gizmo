@@ -637,6 +637,48 @@ async fn run() {
         waypoints
     };
 
+    // `NFS_SMOOTH=<n>`: n passes of a three-point average over the ring, each one followed by the
+    // same pull back into the corridor.
+    //
+    // The pull moves waypoints **one at a time**, so it can leave a kink where the chord bulged
+    // out and its neighbours did not. And a kink is a corner the pilot has to take: the ring still
+    // imposes a sub-60 km/h limit at 7-12 waypoints a route while the field runs at 95-105. What
+    // this asks is whether those corners are the road's or the pull's — if smoothing raises the
+    // ring's own speed limit while every point stays inside the corridor, they were the pull's.
+    //
+    // Re-pulled after every pass rather than only at the end: an average of three points that
+    // straddle a bend cuts the corner, and cutting a corner is exactly how a waypoint leaves the
+    // course. The two operations have to alternate or the second undoes the first's guarantee.
+    let smooth: usize = knob("NFS_SMOOTH").and_then(|v| v.parse().ok()).unwrap_or(0);
+    let waypoints = if smooth > 0 && waypoints.len() >= 3 {
+        let mut w = waypoints;
+        for _ in 0..smooth {
+            let n = w.len();
+            let mut next = w.clone();
+            for i in 0..n {
+                let a = w[(i + n - 1) % n];
+                let b = w[i];
+                let c = w[(i + 1) % n];
+                let mixed = (a + b * 2.0 + c) * 0.25;
+                // Back inside, the same way and to the same place as the pull above.
+                next[i] = match corridor.locate(mixed) {
+                    Some(f) if f.distance > city::COURSE_HALF_WIDTH => {
+                        let back = f.distance - city::COURSE_HALF_WIDTH * PULL_TO;
+                        let dir =
+                            Vec3::new(f.at.x - mixed.x, 0.0, f.at.z - mixed.z).normalize_or_zero();
+                        mixed + dir * back
+                    }
+                    _ => mixed,
+                };
+            }
+            w = next;
+        }
+        println!("halka {smooth} geçişte yumuşatıldı, her geçişten sonra koridora çekildi");
+        w
+    } else {
+        waypoints
+    };
+
     // **Tell the graph which of its roads this race uses.** Without it the walk picks the neighbour
     // nearest the goal in a straight line, and on Bayview that is regularly a parallel carriageway:
     // measured, 21 of 21 departures from the racing line had an arm that would have stayed on it.

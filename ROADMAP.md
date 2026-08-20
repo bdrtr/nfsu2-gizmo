@@ -5096,3 +5096,34 @@ durduruyor. Kazançlar **taşınıyor** (10,5'in en büyük tek rotası −55'e 
 **Ve bu, bugün ölçülen ilk "daha az yaparak kazandıran" kaldıraç** — sabah ne yaptıysak
 (saf takip, kilit sınırı) daha az direksiyon daha kötüydü; burada daha az fren daha çok ilerleme
 veriyor. Reddedilme sebebi de **bu sabah var olmayan bir ölçü**: yan yatarak geçen süre.
+
+### Halkayı yumuşatmak kırıkları alıyor ama alanı kıpırdatmıyor (2026-08-20)
+
+Çekme waypoint'leri **tek tek** taşıyor, yani kirişin dışarı taştığı yerde komşusu taşınmayınca
+kırık kalabilir — ve kırık, pilotun almak zorunda olduğu bir viraj. Çekilmiş halka gerçekten de
+rota başına 7-12 waypoint'te 60 km/h'nin, ~30 waypoint'te 80'in altında sınır dayatıyor, oysa alan
+95-105 gidiyor.
+
+`NFS_SMOOTH=<n>` eklendi: üç noktalı ortalamanın n geçişi, **her geçişten sonra aynı çekme** ile
+koridora geri alınıyor (ikisi dönüşümlü olmalı; yoksa ortalama virajı keser ve waypoint kurstan
+çıkar).
+
+**Kırıklar gerçekten çekmenin:** `Paths4102`'de 80 km/h altı waypoint **29 → 16** (2 geçiş),
+60 altı **12 → 5** (6 geçiş).
+
+**Ama sürüş umursamıyor:**
+
+| | waypoint | kursta süre | yan yatarak | furthest |
+|---|---|---|---|---|
+| **yumuşatma yok** (kalan) | — | %73,8 | **%0,8** | 5.951 m |
+| 2 geçiş | −39 | %74,0 | %1,2 | **6.373 m** |
+| 6 geçiş | −83 | %71,6 | %1,3 | 5.752 m |
+
+−39 gürültü tabanının (±37) kıyısında ve taşınıyor (en büyük tek rota −81); koridor süresi
+kıpırdamıyor; yan yatma biraz kötüleşiyor. Tek gerçek kazanç 2 geçişin `furthest`'ı (+422 m,
+günün en iyisi), ve o bir **maksimum** — tek arabanın sürebileceği bir sayı.
+
+**Okuma:** halkanın yumuşaklığı sabah bağlayıcıydı (kiriş %82 koridor süresi veriyordu çünkü
+köşeleri kesiyordu, yürünmüş ve kırpılmış halkalar keskin dönüşleriyle %75'e düşüyordu) — ama
+çekmeden **sonra** artık bağlamıyor. Çekme o kısıtı zaten kaldırmış; üstüne yumuşatmak boş.
+Varsayılan değişmedi, düğme kaydıyla duruyor.
