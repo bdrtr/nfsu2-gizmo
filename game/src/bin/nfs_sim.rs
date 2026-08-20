@@ -1725,6 +1725,145 @@ async fn run() {
         );
     }
 
+    // NFS_HOLE=course: the same question asked of the whole race line at once. One hole beside
+    // one junction is a story about one junction; the fall bucket only becomes actionable if we
+    // know whether the world is missing ground *along the course*, and where. Every waypoint is
+    // sampled across the corridor's own width, so a cell counted here is somewhere a car driving
+    // the race is entitled to be.
+    if std::env::var("NFS_HOLE").is_ok_and(|v| v == "course") {
+        const LAT: [f32; 5] = [-10.0, -5.0, 0.0, 5.0, 10.0];
+        // A hole matters differently depending on what it is under. The ring carries two kinds of
+        // waypoint: ones the network actually walked to, and ones left on the raw chord because
+        // no road joined the two corners (`along_roads`' detour guard, and every waypoint of the
+        // default ring). Missing ground under the first is the world's; under the second it is
+        // the ring's own fiction, already measured. `ON_ROAD` is the line between them.
+        const ON_ROAD: f32 = 20.0;
+        let mut cells = 0usize;
+        let mut empty = 0usize;
+        let mut on_road = 0usize;
+        let mut on_road_empty = 0usize;
+        let mut worst: Vec<(usize, usize, Vec3)> = Vec::new();
+        for (i, w) in waypoints.iter().enumerate() {
+            // Across the course, not across the world: the corridor's direction here comes from
+            // the step to the next waypoint, and a lone waypoint has none.
+            let ahead = waypoints.get(i + 1).copied().unwrap_or(*w) - *w;
+            let side = Vec3::new(-ahead.z, 0.0, ahead.x);
+            if side.length() <= 0.01 {
+                continue;
+            }
+            let side = side.normalize();
+            let road = net.nearest(*w).and_then(|n| net.node(n)).map_or(f32::INFINITY, |n| {
+                (Vec3::new(n.at.x, 0.0, n.at.z) - Vec3::new(w.x, 0.0, w.z)).length()
+            }) <= ON_ROAD;
+            let mut gone = 0usize;
+            for off in LAT {
+                let at = *w + side * off;
+                cells += 1;
+                on_road += road as usize;
+                if ground.heights_at(at.x, at.z).into_iter().next().is_none() {
+                    empty += 1;
+                    on_road_empty += road as usize;
+                    gone += 1;
+                }
+            }
+            if gone > 0 {
+                worst.push((gone, i, *w));
+            }
+        }
+        println!(
+            "\nyarış hattı boyunca zemin: {cells} örnekten {empty}'inde zemin yok (%{:.1}) · \
+             {} waypoint'in en az bir yanı boşlukta",
+            100.0 * empty as f32 / cells.max(1) as f32,
+            worst.len()
+        );
+        println!(
+            "   bunun {on_road_empty}'i yolun üstünde ({on_road} örnek düğüme {ON_ROAD:.0} m'den \
+             yakın, %{:.1}'inde zemin yok) · {} tanesi kiriş dolgusunda ({} örnek, %{:.1})",
+            100.0 * on_road_empty as f32 / on_road.max(1) as f32,
+            empty - on_road_empty,
+            cells - on_road,
+            100.0 * (empty - on_road_empty) as f32 / (cells - on_road).max(1) as f32
+        );
+        worst.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
+        for &(gone, i, at) in worst.iter().take(12) {
+            let d = net.nearest(at).and_then(|n| net.node(n)).map_or(f32::INFINITY, |n| {
+                (Vec3::new(n.at.x, 0.0, n.at.z) - Vec3::new(at.x, 0.0, at.z)).length()
+            });
+            println!(
+                "   waypoint {i:>4} ({:>7.0},{:>7.0}) · 5 örnekten {gone}'inde zemin yok · \
+                 en yakın düğüm {d:>5.0} m",
+                at.x, at.z
+            );
+        }
+        if worst.len() > 12 {
+            println!("   (… {} waypoint daha)", worst.len() - 12);
+        }
+    }
+
+    // NFS_HOLE=x,z: is there ground there? A car that stops or falls at a particular place is
+    // asking a question about the world, not about its driver, and the cheapest honest answer
+    // is a grid of height queries around the spot.
+    if let Ok(spec) = std::env::var("NFS_HOLE") {
+        let mut it = spec.split(',').filter_map(|v| v.trim().parse::<f32>().ok());
+        if let (Some(cx), Some(cz)) = (it.next(), it.next()) {
+            println!("\nground coverage around ({cx:.0}, {cz:.0}), 8 m steps:");
+            for iz in -6..=6 {
+                let z = cz + iz as f32 * 8.0;
+                let row: String = (-6..=6)
+                    .map(|ix| {
+                        let x = cx + ix as f32 * 8.0;
+                        match ground.heights_at(x, z).into_iter().next() {
+                            Some(_) => '#',
+                            None => '.',
+                        }
+                    })
+                    .collect();
+                println!("   z={z:>7.0}  {row}");
+            }
+            println!("   ('#' = zemin var, '.' = yok · orta sütun/satır sorulan nokta)");
+            // How far is the racing line from here? A hole beside the course and a hole in it
+            // are different findings: the first blames whatever pushed the car off the line,
+            // the second blames the world.
+            let here = Vec3::new(cx, 0.0, cz);
+            let mut best = (f32::INFINITY, 0u32);
+            for i in 0..net.len() as u32 {
+                if let Some(n) = net.node(i) {
+                    let d = (Vec3::new(n.at.x, 0.0, n.at.z) - here).length();
+                    if d < best.0 {
+                        best = (d, i);
+                    }
+                }
+            }
+            if let Some(n) = net.node(best.1) {
+                println!(
+                    "   en yakın rota düğümü: {:.0} m ötede, ({:.0},{:.0},{:.0})",
+                    best.0, n.at.x, n.at.y, n.at.z
+                );
+            }
+            let on_course = corridor.locate(here).map(|x| x.distance);
+            println!("   koridora uzaklık: {on_course:?} (yarı genişlik {})", city::COURSE_HALF_WIDTH);
+            // The branches on offer here, and which of them the race is actually on. `path` is
+            // which of the file's paths a node belongs to, so a junction whose links span
+            // several paths is exactly where "follow the network" and "follow the race" part
+            // company.
+            if let Some(j) = net.node(best.1) {
+                println!("   kavşak {}: hat {} · {} kol", best.1, j.path, j.links.len());
+                for &l in &j.links {
+                    if let Some(n) = net.node(l) {
+                        let d = corridor
+                            .locate(n.at)
+                            .map_or(f32::INFINITY, |x| x.distance);
+                        let on = if d <= city::COURSE_HALF_WIDTH { "YARIŞ HATTI" } else { "yan yol" };
+                        println!(
+                            "     → düğüm {l:>4} · hat {:>3} · ({:>7.0},{:>7.0}) · koridora {d:>6.1} m · {on}",
+                            n.path, n.at.x, n.at.z, d = d
+                        );
+                    }
+                }
+            }
+        }
+    }
+
     // **Is there anywhere to go?** Three ways of choosing a different *node* have now been
     // refuted (blacklist, shun the heading, expire the list), and the conclusion was that the
     // answer has to come from outside the node machine — from the city's own geometry. Before
@@ -1732,69 +1871,6 @@ async fn run() {
     // open ground around it that it is failing to use, or is it genuinely boxed in? Twelve
     // directions, drivable ground at the car's own height, nothing standing across the way.
     if !early.is_empty() {
-        // NFS_HOLE=x,z: is there ground there? A car that stops or falls at a particular place is
-        // asking a question about the world, not about its driver, and the cheapest honest answer
-        // is a grid of height queries around the spot.
-        if let Ok(spec) = std::env::var("NFS_HOLE") {
-            let mut it = spec.split(',').filter_map(|v| v.trim().parse::<f32>().ok());
-            if let (Some(cx), Some(cz)) = (it.next(), it.next()) {
-                println!("\nground coverage around ({cx:.0}, {cz:.0}), 8 m steps:");
-                for iz in -6..=6 {
-                    let z = cz + iz as f32 * 8.0;
-                    let row: String = (-6..=6)
-                        .map(|ix| {
-                            let x = cx + ix as f32 * 8.0;
-                            match ground.heights_at(x, z).into_iter().next() {
-                                Some(_) => '#',
-                                None => '.',
-                            }
-                        })
-                        .collect();
-                    println!("   z={z:>7.0}  {row}");
-                }
-                println!("   ('#' = zemin var, '.' = yok · orta sütun/satır sorulan nokta)");
-                // How far is the racing line from here? A hole beside the course and a hole in it
-                // are different findings: the first blames whatever pushed the car off the line,
-                // the second blames the world.
-                let here = Vec3::new(cx, 0.0, cz);
-                let mut best = (f32::INFINITY, 0u32);
-                for i in 0..net.len() as u32 {
-                    if let Some(n) = net.node(i) {
-                        let d = (Vec3::new(n.at.x, 0.0, n.at.z) - here).length();
-                        if d < best.0 {
-                            best = (d, i);
-                        }
-                    }
-                }
-                if let Some(n) = net.node(best.1) {
-                    println!(
-                        "   en yakın rota düğümü: {:.0} m ötede, ({:.0},{:.0},{:.0})",
-                        best.0, n.at.x, n.at.y, n.at.z
-                    );
-                }
-                let on_course = corridor.locate(here).map(|x| x.distance);
-                println!("   koridora uzaklık: {on_course:?} (yarı genişlik {})", city::COURSE_HALF_WIDTH);
-                // The branches on offer here, and which of them the race is actually on. `path` is
-                // which of the file's paths a node belongs to, so a junction whose links span
-                // several paths is exactly where "follow the network" and "follow the race" part
-                // company.
-                if let Some(j) = net.node(best.1) {
-                    println!("   kavşak {}: hat {} · {} kol", best.1, j.path, j.links.len());
-                    for &l in &j.links {
-                        if let Some(n) = net.node(l) {
-                            let d = corridor
-                                .locate(n.at)
-                                .map_or(f32::INFINITY, |x| x.distance);
-                            let on = if d <= city::COURSE_HALF_WIDTH { "YARIŞ HATTI" } else { "yan yol" };
-                            println!(
-                                "     → düğüm {l:>4} · hat {:>3} · ({:>7.0},{:>7.0}) · koridora {d:>6.1} m · {on}",
-                                n.path, n.at.x, n.at.z, d = d
-                            );
-                        }
-                    }
-                }
-            }
-        }
         if wrongway {
             println!(
                 "\nyürüyüş yarış hattından nerede çıktı (waypoint'e {WAYPOINT_STEP} m'den uzak), \

@@ -4208,3 +4208,51 @@ yanlış olur; belgelerinin her birine bu ayrım eklendi.
 **Ve asıl sonuç yön veriyor:** sekiz rotalık alan, ince ayarları ayırt edecek kadar duyarlı değil.
 Bir sonraki kazanç ayar aramakta değil, hâlâ kursu bırakan 31 arabanın (%48) ve altı düşüşün
 kaynağında — orada farklar rota gürültüsünün çok üstünde.
+
+### Düşen arabalar: dünyada delik var, ama deliğin dörtte üçü halkanın kendi kurgusu (2026-08-20)
+
+Denetim "sıradaki kazanç ayar aramakta değil, kursu bırakan 31 arabada ve altı düşüşte" diye
+bitmişti. Düşüşlerden başlandı. `nfs_sim`'in kendi raporu altı düşüşün beşi için *"yol 3–9 m
+ileride bitiyor"*, biri için *"yol 80 m sürüyor — **yüzeyin içinden geçti**"* diyor (bu sonuncusu
+ayrı bir çarpışma kusuru, 15 km/h'de). Ve `Paths4041`'in **iki arabası aynı noktada** düşüyor:
+`(1984, −121)`, kursun 7 m yanında.
+
+**Önce o nokta soruldu — ve `NFS_HOLE` hiç çalışmadı.** Sorgu `if !early.is_empty()`'nin içine
+gömülüymüş: dünyaya sorulan bir soru, herhangi bir arabanın takılmasına bağlıydı. Dışarı alındı.
+Cevap geldiğinde delik gerçekti:
+
+```
+   z=   -129  #####.#######
+   z=   -121  ###...#######
+   z=   -113  ###....######
+   z=   -105  ###..########
+   en yakın rota düğümü: 12 m ötede · koridora uzaklık: 6.6 m (yarı genişlik 12)
+   kavşak 113: hat 6 · 4 kol — dördü de YARIŞ HATTI
+```
+
+Yaklaşık **30 × 30 m zemin yok**, dört kollu bir kavşağın dibinde, koridorun **içinde**.
+
+**Tek nokta mı desen mi? `NFS_HOLE=course` yazıldı:** halkanın her waypoint'inde, koridorun kendi
+genişliği boyunca beş örnek (−10, −5, 0, +5, +10 m). Sekiz rota:
+
+| halka | yolun üstünde (düğüme <20 m) | kiriş dolgusunda |
+|---|---|---|
+| kiriş (varsayılan) | 2.250 örnek · **%3,2 zemin yok** | 2.350 örnek · **%18,4 zemin yok** |
+| yürünmüş | **5.155 örnek** · %1,6 zemin yok | 1.605 örnek · %7,1 zemin yok |
+
+Üç şey birden okunuyor:
+
+1. **Halkanın kaçta kaçı gerçek yolda:** kirişte %49, yürünmüşte **%76**. `along_roads`'ın
+   ölçülmüş asıl kazancı bu — waypoint sayısı ya da furthest değil.
+2. **Eksik zeminin dörtte üçü halkanın kurgusu.** Kiriş halkasında yol dışı hücrelerin **%18,4'ünün
+   altında hiçbir şey yok**; toplamda %11,0 olan eksik zemin, yürünmüş halkada **%2,9**'a iniyor.
+   Yani "yol 3–9 m ileride bitiyor" diyen beş düşüş, çoğunlukla dünyanın değil halkanın kusuru.
+3. **Ama bir kalıntı gerçekten dünyanın:** yürünmüş halkada bile gerçek yolun üstündeki örneklerin
+   **%1,6'sında zemin yok** ve bu rotaya göre yığılıyor — `Paths4041` tek başına %4,3, ötekilerin
+   hepsi %0,4–1,8. İki arabanın düştüğü kavşak orada. Dağılımı bir blok değil (üç ayrı yerde),
+   yani "bir bölüm yüklenmedi" açıklaması tutmuyor; en yakın hipotez, o yüzeylerin çarpışma
+   kümesine hiç girmediği — "yüzeyin içinden geçti" diyen düşüşle aynı hipotez.
+
+**Sıradaki somut iş bu kalıntıda:** `Paths4041`'in üç deliğinin altında hangi collider'ın olması
+gerektiği. Halkanın kurgusu artık ölçülmüş ve çaresi de belli (`NFS_WALKLINE`); dünyanın kendi
+eksiği ölçülmemiş bir şey ve düşüşlerin geri kalanını o taşıyor.
