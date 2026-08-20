@@ -235,6 +235,11 @@ fn knob(name: &str) -> Option<String> {
 /// from traces, a few cars at a time. One line per departure makes the same question a census.
 #[derive(Debug, Clone, Copy)]
 struct Leaving {
+    /// Where and when the edge was crossed. **Not** where the departure is recorded: that is three
+    /// seconds later and, at 90 km/h, a hundred metres away — the place census was clustered on
+    /// the late position until this was added, and a hundred metres is a different junction.
+    at: Vec3,
+    t: f32,
     speed: f32,
     steer: f32,
     brake: f32,
@@ -1226,6 +1231,8 @@ async fn run() {
                         (d.length(), d.dot(side).atan2(d.dot(fwd)).to_degrees())
                     };
                     leaving[k] = Some(Leaving {
+                        at: p.position,
+                        t: now,
                         speed: p.speed,
                         steer: cmd[k].2,
                         brake: cmd[k].1,
@@ -1432,8 +1439,11 @@ async fn run() {
                     v.map_or("       —".to_string(), |(d, a)| format!("{d:>3.0} m {a:>4.0}°"))
                 };
                 println!(
-                    "               çıkarken: {:>4.0} km/h · direksiyon {:>5.2} · fren {:>4.2} \
-                     · nişan {} · hedef {} · {}vazgeçti {}",
+                    "               çıkarken: t={:>6.1}s ({:>7.0},{:>7.0}) · {:>4.0} km/h \
+                     · direksiyon {:>5.2} · fren {:>4.2} · nişan {} · hedef {} · {}vazgeçti {}",
+                    l.t,
+                    l.at.x,
+                    l.at.z,
                     l.speed * 3.6,
                     l.steer,
                     l.brake,

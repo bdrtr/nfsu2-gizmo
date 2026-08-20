@@ -115,3 +115,41 @@ karşılaştırmaların tabanıdır; yukarıdaki yükseltme öncesi tablo tarihs
 2026-08-20) ve alanı 883 → 927 waypoint, 1.352 → 1.280 ayrık düğüm, kursta kalan araba 9 → 14
 taşıdı. Yani buradaki sayılar **motorun** yükseltmesini yargılar; sürücü tarafındaki bir sonraki
 değişiklik `GRIP` açık hâliyle kıyaslanmalı.
+
+## Üçüncü tablo — 2026-08-20 akşamı, günün bütün değişikliklerinden sonra
+
+Aynı ölçüm, aynı sekiz rota, aynı 8 araba ve 90 saniye. Aradaki fark **yalnız** oyun tarafı; motor
+pini değişmedi.
+
+| | |
+|---|---|
+| oyun commit'i | `390c322` (`roadmap`) |
+| halka | **koridora çekilmiş** (`PULL_TO = 0`) — kirişin koridor dışı waypoint'leri içeri taşınıyor |
+| pilot | `LOOKAHEAD_PER_SPEED = 1.8` (0,9'du), `GRIP = 8`, `PASSED_NEAR = 60`, `BEHIND = 170°`, `ESCAPE_FULL = 2` |
+| çit | kot değiştiren yolda ateşlemiyor |
+| gürültü tabanı | ±37 waypoint (%2,8) — ölçülmüş, aynı gün |
+
+| rota | away | düşen | furthest | junctions | held | geçilen waypoint | kursta süre | ayrık düğüm |
+|---|---|---|---|---|---|---|---|---|
+| 4001 | 8 | 0 | 1.136 | 318 | 2 | 360 | %92,8 | 318 |
+| 4002 | 8 | 0 | 415 | 82 | 153 | 74 | %90,9 | 73 |
+| 4021 | 8 | 0 | 609 | 235 | 10 | 186 | %94,2 | 225 |
+| 4041 | 8 | 1 | 1.078 | 261 | 0 | 240 | %90,8 | 261 |
+| 4061 | 8 | 0 | 1.103 | 169 | 2 | 181 | %64,7 | 161 |
+| 4081 | 8 | 0 | 583 | 221 | 0 | 156 | %53,6 | 209 |
+| 4102 | 8 | 0 | 312 | 126 | 9 | 62 | %68,4 | 96 |
+| 4121 | 8 | 0 | 787 | 178 | 10 | 158 | %66,2 | 170 |
+| **toplam** | **64 / 64** | **1** | **6.023 m** | **1.590** | **186** | **1.417** | **%77,7** | |
+
+**Günün başına göre:** geçilen waypoint 1.035 → **1.417**, düşen 6 → **1**, `furthest` 5.305 →
+**6.023 m**, çitin müdahalesi 1.121 → **186**, ve sekiz rotanın sekizinde **bütün arabalar kavşak
+alıyor**.
+
+**Yeni sütun — kursta geçen süre.** Gün boyu başlık sayısı "kursu hiç bırakmayan araba"ydı; o gün
+içinde çürütüldü: kursu bırakan 34 arabanın 33'ü koridora geri dönüyor, kimi yarışın yarısından
+fazlasında. Karşılaştırmalar artık bu sütunla yapılmalı.
+
+**Ve okuma uyarısı:** "geçilen waypoint" iki farklı halka arasında karşılaştırılamaz — halka
+değişirse (yürünmüş, kırpılmış) sayının ölçeği değişir. Çekilmiş halka waypoint'leri *taşıdığı*
+için sayıları kirişle karşılaştırılabilir, ama o karşılaştırma da halkayı arabaların sürdüğü yere
+yaklaştırdığı için hafif yanlıdır; bağımsız sütunlar `furthest`, `düşen` ve `kursta süre`.

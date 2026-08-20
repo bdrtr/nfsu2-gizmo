@@ -14,7 +14,8 @@ import sys
 
 ROUTES = "4001 4002 4021 4041 4061 4081 4102 4121".split()
 LINE = re.compile(
-    r"çıkarken:\s*(-?\d+) km/h · direksiyon\s*(-?[\d.]+) · fren\s*([\d.]+)"
+    r"çıkarken: t=\s*([\d.]+)s \(\s*(-?\d+),\s*(-?\d+)\)"
+    r" · \s*(-?\d+) km/h · direksiyon\s*(-?[\d.]+) · fren\s*([\d.]+)"
     r" · nişan (?:\s*(\d+) m\s*(-?\d+)°|\s+—) · hedef (?:\s*(\d+) m\s*(-?\d+)°|\s+—)"
     r" · (KAÇIŞ · )?vazgeçti (\d+)"
 )
@@ -45,9 +46,9 @@ def main(argv):
             "frende (>0.5)": 0,
         }
         for _, m in rows:
-            aim = int(m.group(5)) if m.group(5) else None
-            goal = int(m.group(7)) if m.group(7) else None
-            speed, steer, brake = int(m.group(1)), abs(float(m.group(2))), float(m.group(3))
+            aim = int(m.group(8)) if m.group(8) else None
+            goal = int(m.group(10)) if m.group(10) else None
+            speed, steer, brake = int(m.group(4)), abs(float(m.group(5))), float(m.group(6))
             if aim is not None and abs(aim) > 90:
                 buckets["nişan arkada (>90°)"] += 1
             if goal is not None and abs(goal) > 90:
@@ -55,8 +56,8 @@ def main(argv):
             buckets["tam kilitte (|d| ≥ 0.84)"] += steer >= 0.84
             buckets["yavaş (<20 km/h)"] += abs(speed) < 20
             buckets["hızlı (>60 km/h)"] += abs(speed) > 60
-            buckets["kaçışta"] += bool(m.group(8))
-            buckets["vazgeçtiği düğüm var"] += int(m.group(9)) > 0
+            buckets["kaçışta"] += bool(m.group(11))
+            buckets["vazgeçtiği düğüm var"] += int(m.group(12)) > 0
             buckets["frende (>0.5)"] += brake > 0.5
         print(f"  {name}: {n} ayrılma")
         for k, v in sorted(buckets.items(), key=lambda x: -x[1]):
