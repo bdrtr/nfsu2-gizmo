@@ -4966,3 +4966,38 @@ kuvvet 3.684 N — ama arabaya ulaşan 821 N. Bu `gizmo-physics-dynamics`'in tek
 eşlemesine ait ve motor bilerek pinli; ölçüsüyle birlikte karşı tarafa geçirilecek.
 
 Alet repoda: `NFS_RESIST=1`.
+
+### DÜZELTME — motor suçsuz: düz zeminde araba 179 km/h yapıyor (2026-08-20)
+
+Bir önceki bölüm "aktarma 4.700-8.900 N sunuyor, arabaya 800-3.200 N ulaşıyor · sabit ~3.800 N
+kayıp · `gizmo-physics-dynamics`'in tekerlek→şasi eşlemesine ait" diye bitiyordu. **Bu hüküm
+yanlıştı ve şimdi çürütüldü.**
+
+Önce kodu okumak iki hipotezi eledi: `tire_force` ile `reaction_torque` **aynı** `final_long`'dan
+türüyor (yani birbirini tutmamaları imkânsız), ve `apply_force_at_point` doğrusal bileşeni
+tam uyguluyor (`vel.linear += force * inv_mass * dt`).
+
+Sonra `nfs_top` yazıldı: düz zemin, tam gaz, direksiyon sıfır, şehir yok, varlık yok — aracın
+sayıları (1.220 kg, oranlar, son sürüş 4,083, tepe 216 Nm, kırmızı çizgi 6.500, r = 0,31) doğrudan
+kurulup motorun `update_vehicle`'ı çağrılıyor. Sonuç:
+
+| ölçü | değer |
+|---|---|
+| 0-100 km/h | **13 s** |
+| 0-150 km/h | 27 s |
+| en yüksek hız | **179 km/h** |
+| vitesler | 1 → 2 → 3 → 4, sırayla ve zamanında |
+
+**Yani şehirdeki 103 km/h tavanı aktarmanın değil, kursun.** Ölçtüğüm "sabit ~3.800 N kayıp"
+viraj sürüklemesiydi: yarış hattındaki araba sürekli dönüyor, yanal lastik kuvveti sürtünme
+çemberinden boyuna kuvveti yiyor, ve bu hıza kabaca bağımsız göründüğü için sabit bir kayıp gibi
+okundu. `NFS_FLATOUT=1` freni kapatıyor ama **direksiyonu kapatmıyor** — o yüzden tavan orada da
+103'te kalmıştı.
+
+**Ders, ve bugün üçüncü kez:** bir ölçü "sabit ve açıklanamaz" görünüyorsa, önce ölçünün içinde
+kalan değişken aranır. Kurstaki bir arabadan aktarma sorusu sorulamaz; sorunun cevabı ancak kursun
+olmadığı yerde alınır.
+
+**Geriye kalan gerçek soru bir ayar sorusu:** 0-100 için 13 saniye, NFSU2'nin kendi 240SX'i için
+fazla. Oyunun kendi verisiyle sürülen bir araba arcade hissi vermiyorsa bakılacak yer tork eğrisi
+ve `GLOBALB`'den okunan katsayılar — motor değil.
