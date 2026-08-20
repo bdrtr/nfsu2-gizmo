@@ -1375,6 +1375,42 @@ async fn run() {
             no_ground,
             off_cor
         );
+        // **What the ring does with itself.** Being on the road is necessary and not sufficient: a
+        // ring can be entirely on tarmac and still double back, or visit one street twice, or reach
+        // its next corner by a detour. Those are the shapes that would explain why the walked ring
+        // wins on `Paths4081` and loses on 4001 and 4121, and none of them shows up in the
+        // on-the-road counts above.
+        {
+            let plan = |a: Vec3, b: Vec3| Vec3::new(b.x - a.x, 0.0, b.z - a.z);
+            let total: f32 = waypoints.windows(2).map(|w| plan(w[0], w[1]).length()).sum();
+            // A step that turns more than 150° is the ring folding back on itself.
+            let folds = waypoints
+                .windows(3)
+                .filter(|w| {
+                    let (u, v) = (plan(w[0], w[1]), plan(w[1], w[2]));
+                    u.length() > 0.5
+                        && v.length() > 0.5
+                        && u.normalize().dot(v.normalize()) < -0.87
+                })
+                .count();
+            // And a place the ring comes back to: within 10 m of a point it left more than five
+            // waypoints ago. A lap would be one; a street driven twice is many.
+            let revisits = waypoints
+                .iter()
+                .enumerate()
+                .filter(|(i, w)| {
+                    waypoints
+                        .iter()
+                        .enumerate()
+                        .any(|(j, o)| j + 5 < *i && plan(**w, *o).length() < 10.0)
+                })
+                .count();
+            println!(
+                "   halkanın şekli: {:.0} m uzunluk · {folds} yerde kendi üstüne katlanıyor \
+                 · {revisits} waypoint daha önce geçilmiş bir yere dönüyor",
+                total
+            );
+        }
         let under = |kmh: f32| {
             worst.iter().filter(|(r, _)| (HELD * r).sqrt() * 3.6 < kmh).count()
         };

@@ -342,10 +342,17 @@ pub fn densify(outline: &[Vec3], step: f32) -> Vec<Vec3> {
 /// the field's cars-that-stay-on-course from 15 back to **21**, at the price of four legs that can
 /// no longer be joined and fall back to the chord. It is not enough: the chord ring still keeps 32.
 ///
-/// The remaining gap is two routes — 4121 loses 363 m and 4001 all eight of its cars — and it is
-/// **not** more wall filtering, because 4081 with the same treatment goes past the chord (5 cars to
-/// 8). Something else about those two rings is wrong, and the tool to find it is the one that found
-/// this: count what the ring itself does, route by route, before changing the search again.
+/// **The remaining gap is not a defect in this ring: it is that the two rings are different
+/// courses.** Counted route by route, every walked ring is longer than its chord (+5 % to **+118 %**)
+/// and three to six times as twisty — waypoints imposing a limit under 80 km/h go from 4-13 to
+/// 24-61. Of course they do: it follows the roads and the chord cuts across the blocks. So
+/// `furthest` and "waypoints driven past" **flatter the fictional ring**, and cannot rank the two;
+/// `away` (64 either way) and `fallen` are what survive.
+///
+/// One real defect did fall out of that count: `Paths4021`'s walked ring revisits somewhere it has
+/// already been at **80** of its waypoints and more than doubles in length, because the shortest
+/// path for one leg retraces the leg before it. Joining legs without regard to the direction the
+/// last one arrived in drives a street twice, and that is this function's own bug to fix.
 ///
 /// The graph is deliberately untouched by all of this. [`super::Network::drop_walled`] asks whether
 /// the *ground* continues along a link and nothing asks it about walls, because a wall filter

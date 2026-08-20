@@ -3785,6 +3785,42 @@ rota saymak.
 
 `NFS_WALKLINE` varsayılan kapalı, `NFS_WALKWALLS` onunla birlikte açık.
 
+### İki halka iki farklı kurs: sayılar bunları sıralayamaz (2026-08-20)
+
+Yürünmüş halkanın 4001 ve 4121'de neden kaybettiği soruldu ve halkanın kendisi rota rota sayıldı.
+Cevap ikisini de kapsıyor ve karşılaştırmanın kendisini geçersiz kılıyor.
+
+| rota | uzunluk (kiriş → yürünmüş) | <80 km/h sınırı dayatan waypoint | katlanma | dönüş |
+|---|---|---|---|---|
+| 4001 | 6.038 → 7.159 m (+%19) | 10 → **26** | 0 → 4 | 1 → **9** |
+| 4002 | 5.368 → 6.581 m (+%23) | 12 → **43** | 0 → 1 | 1 → 9 |
+| 4021 | 2.347 → **5.128 m (+%118)** | 10 → **61** | 0 → 3 | 1 → **80** |
+| 4041 | 4.700 → 5.823 m (+%24) | 10 → **51** | 0 → 2 | 1 → 13 |
+| 4061 | 2.784 → 3.077 m (+%11) | 4 → **24** | 0 | 1 |
+| 4081 | 4.825 → 5.085 m (+%5) | 9 → **33** | 0 → 2 | 1 → 0 |
+| 4102 | 3.856 → 4.237 m (+%10) | 13 → **52** | 0 → 1 | 0 |
+| 4121 | 4.816 → 5.571 m (+%16) | 11 → **59** | 0 | 0 |
+
+**Her rotada yürünmüş halka daha uzun ve üç ilâ altı kat daha virajlı** — çünkü yolları takip
+ediyor, kiriş ise blokların üstünden kesiyor. Yani iki halka aynı kursun iki ölçümü değil, **iki
+farklı kurs**: biri şehrin gerçek yolları, öteki haritanın üstüne çizilmiş düz çizgiler.
+
+**Bunun sonucu, bugünkü kıyasların çoğunun geçersiz olması.** `furthest` (kat edilen metre) ve
+"geçilen waypoint" dürüst kursu cezalandırır: bloklar arasına çekilmiş düz çizgide giden araba,
+gerçek virajları süren arabadan daha çok metre yapar. Ayakta kalan tek kıyaslanabilir sayılar
+`away` (her kolda 64) ve `fallen` (4 → 3); "kursu hiç bırakmayan" bile etkileniyor, çünkü virajı
+olmayan bir kursta koridoru terk etmek için fiziksel olarak savrulmak gerekir.
+
+**Ve bir gerçek kusur çıktı:** 4021'in yürünmüş halkası **80 waypoint'te daha önce geçtiği yere
+dönüyor** ve uzunluk iki katından fazla artıyor — ardışık iki anahat köşesinin en kısa yolu bir
+öncekinin üstünden geri geçiyor. Bacakları birleştirirken geldiği yönü hesaba katmayan bir arama,
+sokağı iki kez sürüyor. Bu, halkanın kendi hatası ve düzeltilebilir.
+
+**Durum ve karar:** varsayılan kiriş olarak kalıyor — daha iyi olduğu için değil, **bugüne kadarki
+bütün ölçümlerin ona göre ayarlanmış olduğu için.** Yürünmüş halkaya geçmek, alanın tabanını ve
+pilot sabitlerinin (özellikle `GRIP`, çünkü bugün kurgusal virajlara karşı ayarlandı) yeniden
+ayarlanmasını gerektirir. Bu bir süpürme sonucu değil, bilerek verilecek bir proje kararı.
+
 ## Nerede kaldık (2026-08-14 sonu)
 
 **Alan (2026-08-20 sonu, motor pini `58dc2623`, `GRIP` ve `PASSED_NEAR` açıkken): 986 geçilen
