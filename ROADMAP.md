@@ -3646,6 +3646,33 @@ eklemek. ROADMAP'te çürütülmüş üç rotalama mekanizması (kara liste, yö
 *kurtarma* mekanizmalarıydı — araba çuvalladıktan sonra ne yapmalı. Bu ise seçimin kendisi, ve
 ölçüm ilk kez seçilmeyen doğru kolun **var olduğunu** gösteriyor. Sekiz rota yargılayacak.
 
+### Doğru kol vardı, ama onu almak çok daha kötü — dördüncü rotalama fikri de çürüdü (2026-08-20)
+
+Bir önceki ölçüm, 21 vakanın 21'inde yarış hattında kalan bir kolun **var olduğunu ve
+seçilmediğini** gösteriyordu. Bundan çıkan aday açıktı: kol seçimine "hatta yakın kal" terimi ekle.
+Kuruldu (`Network::mark_line`, düğüm başına bir kez, kurulum zamanında) ve iki biçimde denendi.
+
+**Sert biçim — kolları hattakilerle sınırla.** 4121'de alan boşalıyor: junctions **204 → 36**,
+waypoint **30 → 10**, furthest 730 → 215. Sebebi anlaşılır: geldiği kol hariç tek hat-üstü kolu olan
+bir kavşakta yürüyüşe alacak bir şey kalmıyor.
+
+**Yumuşak biçim — maliyete ceza ekle, eleme yok.** Aynı sonuç: 40 m cezada waypoint 30 → **11**
+(ve fence arabaları 96 kez tutuyor), 100 m'de 30 → **10**.
+
+Sekiz rotanın tamamında da kaybediyor: **waypoint 986 → 815, kursu hiç bırakmayan 32 → 24.** Rota
+rota 4041 −53, 4102 −38, **4121 −102**; tek kazanan 4081 (+24).
+
+Yani hattaki kolu tercih etmek, hangi biçimde olursa olsun, tam da tasarlandığı rotayı üç kat
+kötüleştiriyor. **Bulgu duruyor, çıkarım düşüyor:** arabalar gerçekten tek bir kavşakta hattan
+çıkarılıyor, ama grafın "yanlış" dediği kol pratikte sürülebilir olan; hattın kendi devamı
+sürülemiyor ya da arabanın o hızda yapamayacağı bir manevra istiyor.
+
+Bu, aynı yöne bakan **dördüncü** çürütme (kara liste, yönü şucu, listeyi eskitme, ve şimdi hatta
+kalma). Ortak dersi şu olabilir: **bu graf bir yol haritası değil**, ve `network.rs`'in kendi modül
+belgesi bunu zaten yazıyor — "önce grafı doğru yap, sonra rotayı en iyi yap". Sıradaki iş rotalama
+politikasını bir kez daha ayarlamak değil, hattın kendi devamının neden sürülemediğini görmek:
+düğüm 110'un hat-üstü kollarının nereye gittiğini ve orada ne olduğunu ölçmek.
+
 ## Nerede kaldık (2026-08-14 sonu)
 
 **Alan (2026-08-20 sonu, motor pini `58dc2623`, `GRIP` ve `PASSED_NEAR` açıkken): 986 geçilen
@@ -3690,7 +3717,9 @@ elenmeyen dörtte −70. Karar yalnız sekiz rotadan çıkar.
 - **4121'in "virajı" viraj değilmiş** (2026-08-20 sonu, yukarıya bak): sekiz arabanın sekizi de
   düğüm 110 → 111 adımıyla yarış hattından **50,9 m** uzağa sokuluyor, ve o kavşakta hatta kalan
   **iki kol** vardı. 4102'de aynı şey (58,6 m, bir kol). 21 vakanın 21'inde doğru kol mevcut ve
-  seçilmiyor. Sıradaki iş kol seçimine "hatta yakın kal" terimi eklemek.
+  seçilmiyor — **ama o kolu almak çürütüldü** (yukarıya bak): iki biçimde de alan düşüyor
+  (986 → 815 waypoint) ve 4121 üçe katlanarak kötüleşiyor. Grafın "yanlış" dediği kol pratikte
+  sürülebilen olan. Sıradaki iş düğüm 110'un hat-üstü kollarının nereye gittiğini görmek.
 - **Viraj cephesinin eski kaydı, artık bu ışıkta okunmalı:** Duran bir şey yok (en yakın duvar 225 m); iz,
   frenin eşiğin %8 altında kalarak hiç gelmediğini gösterdi ve nişan yayının eğriliğinden fren
   yapan terim (`GRIP = 8`) sekiz rotada **883 → 927 waypoint**, kursta kalan araba **9 → 14**

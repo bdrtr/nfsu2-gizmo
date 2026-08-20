@@ -44,6 +44,13 @@ pub struct Network {
     nodes: Vec<Junction>,
     /// Links dropped because the road does not continue along them — see [`Network::drop_walled`].
     walled: usize,
+    /// Which nodes are on the **race's own line**, if anybody has said where that is.
+    ///
+    /// Empty until [`Network::mark_line`] runs, and then one flag per node. The graph knows about
+    /// roads; it does not know which of them this race uses, and the difference is not academic —
+    /// Bayview's route files link parallel carriageways to each other, so a step that is perfectly
+    /// sensible as *road* can put a car 50 m from the race. See [`Network::step_avoiding`].
+    near_line: Vec<bool>,
 }
 
 impl Network {
@@ -114,7 +121,7 @@ impl Network {
                 edge(i, l as usize, &mut out);
             }
         }
-        let mut me = Self { nodes: out, walled: 0 };
+        let mut me = Self { nodes: out, walled: 0, near_line: Vec::new() };
         me.drop_walled(ground);
         me
     }
@@ -280,6 +287,41 @@ impl Network {
         self.step_avoiding(here, came_from, toward, &[])
     }
 
+    /// Say where the race's own line runs, so the walk can prefer to stay on it.
+    ///
+    /// **Measured, and this is why it exists.** With no such preference, on `Paths4121` all eight
+    /// cars take the step from node 110 to node 111 and node 111 is **50.9 m from the nearest
+    /// waypoint**; on `Paths4102` seven take node 11 → 10, 58.6 m off. In **21 of 21** such
+    /// departures an arm that stayed on the line existed and was not chosen, because
+    /// [`Self::step_avoiding`] picks by straight-line distance to the goal and a carriageway running
+    /// alongside the race is often nearer by that measure. The cars then drive a road the race does
+    /// not use until it bends away from them — which is the "corner" three pilot sweeps were tuned
+    /// against.
+    ///
+    /// One pass over nodes × waypoints at setup, and nothing per tick.
+    pub fn mark_line(&mut self, course: &[Vec3], within: f32) {
+        self.near_line = if course.is_empty() || within <= 0.0 {
+            Vec::new()
+        } else {
+            self.nodes
+                .iter()
+                .map(|n| {
+                    course.iter().any(|w| {
+                        let d = Vec3::new(w.x - n.at.x, 0.0, w.z - n.at.z);
+                        d.length() <= within
+                    })
+                })
+                .collect()
+        };
+    }
+
+    /// How many nodes are on the line, and how many there are — for a caller that wants to know
+    /// whether the mark says anything before trusting a result that depends on it.
+    #[must_use]
+    pub fn on_line(&self) -> (usize, usize) {
+        (self.near_line.iter().filter(|b| **b).count(), self.nodes.len())
+    }
+
     /// The same, skipping nodes a caller has already failed to reach.
     ///
     /// The list is a driver's own experience and not a property of the graph, which is why it is a
@@ -298,6 +340,21 @@ impl Network {
                 (j.at.x - toward.x).powi(2) + (j.at.z - toward.z).powi(2)
             })
         };
+        // **Preferring an arm that stays on the race's line is refuted, in both shapes.** The
+        // measurement behind it stands — see [`Self::mark_line`], 21 of 21 departures from the line
+        // had an arm that would have stayed — and the inference from it does not.
+        //
+        // Filtering the arms down to the on-line ones empties `Paths4121`: 204 junctions to **36**,
+        // 30 waypoints to 10, because a junction whose only on-line arm is the one the car came from
+        // leaves the walk nothing to take. Penalising the cost instead of filtering, so the old
+        // choice survives wherever it is clearly better and only near-ties change, does the same
+        // thing: 30 waypoints to **11** at 40 m of penalty and to 10 at 100 m. Over eight routes the
+        // penalty form takes the field from 986 waypoints to 815, and 32 cars that never lose the course to 24.
+        //
+        // So the arm the graph calls wrong is the one that can actually be driven, and the line's
+        // own continuation cannot — which is a fact about the course description, not about this
+        // choice. Whatever fixes it starts by asking where node 110's on-line arms go and what is
+        // there, not by weighting this `min_by` again.
         node.links
             .iter()
             .filter(|l| Some(**l) != came_from && !blocked.contains(l))

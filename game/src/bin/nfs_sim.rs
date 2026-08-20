@@ -311,7 +311,7 @@ async fn run() {
     let corridor =
         city::Corridor::of(&city::build_route(&nodes, &city::road_ground(&objects)), city::COURSE_HALF_WIDTH);
 
-    let net = city::Network::of(&nodes, &ground);
+    let mut net = city::Network::of(&nodes, &ground);
     let (edges, dead, steep, walled) = net.shape();
     println!(
         "network: {} nodes · {edges} links · {dead} with no way out · {steep} steeper than 1:1 · \
@@ -325,6 +325,18 @@ async fn run() {
     let step: f32 =
         std::env::var("NFS_WPSTEP").ok().and_then(|v| v.parse().ok()).unwrap_or(WAYPOINT_STEP);
     let waypoints = city::densify(&coarse, step);
+    // **Tell the graph which of its roads this race uses.** Without it the walk picks the neighbour
+    // nearest the goal in a straight line, and on Bayview that is regularly a parallel carriageway:
+    // measured, 21 of 21 departures from the racing line had an arm that would have stayed on it.
+    // `NFS_ONLINE=0` turns the preference off; the width is in metres and defaults to a waypoint's
+    // spacing, which is the scale at which "this node belongs to the race" stops being a question.
+    let online: f32 =
+        std::env::var("NFS_ONLINE").ok().and_then(|v| v.parse().ok()).unwrap_or(WAYPOINT_STEP);
+    net.mark_line(&waypoints, online);
+    {
+        let (on, all) = net.on_line();
+        println!("yarış hattındaki düğüm: {on} / {all} (genişlik {online} m)");
+    }
 
     // The grid, through the same choice the game makes.
     let dir = std::path::Path::new(&route).parent().expect("route has a directory");
