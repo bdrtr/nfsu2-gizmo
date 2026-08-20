@@ -5001,3 +5001,40 @@ olmadığı yerde alınır.
 **Geriye kalan gerçek soru bir ayar sorusu:** 0-100 için 13 saniye, NFSU2'nin kendi 240SX'i için
 fazla. Oyunun kendi verisiyle sürülen bir araba arcade hissi vermiyorsa bakılacak yer tork eğrisi
 ve `GLOBALB`'den okunan katsayılar — motor değil.
+
+### Kök: araba yavaş değil, **stok bir 240SX** — ve veri doğru okunuyor (2026-08-20)
+
+Zincirin sonuna gidildi. `nfs_top` artık arabanın kendi dokuz noktalı eğrisini ve oyunun kendi
+yükseltme verisini kullanıyor (`NFS_ENGINE`, `NFS_GEARBOX`), ve tutuşla torku ayrı ayrı oynatan
+iki düğmesi var (`NFS_GRIPD`, `NFS_TORQUE`).
+
+| kurulum | 0-100 | 0-150 | en yüksek |
+|---|---|---|---|
+| **stok** | **11 s** | 19 s | **231 km/h** |
+| motor 3 | 10 s | 16 s | 254 km/h |
+| şanzıman 3 | 11 s | 19 s | 232 km/h |
+| tam yükseltilmiş | 10 s | 16 s | 249 km/h |
+
+**Neyin bağladığı ölçüldü:** tutuş ×1,5 tek başına **hiçbir şey** değiştirmiyor (11 s), tork ×1,5
+orta menzili açıyor (0-150: 19 → 15 s), **ikisi birden 0-100'ü 8 saniyeye** indiriyor. Yani stokta
+ne tutuş ne tork tek başına bağlıyor; araba sadece güçlü değil.
+
+**Ve veri doğru okunuyor — birim hatası yok.** Eğri 5.450 devirde **155 hp** veriyor:
+
+```
+  3900 rpm · 200 Nm → 110 hp      5450 rpm · 203 Nm → 155 hp
+  4675 rpm · 216 Nm → 142 hp      6225 rpm · 170 Nm → 149 hp
+```
+
+Gerçek KA24DE: **155 hp / 210 Nm / ~1250 kg / 0-100 ~9 s**. NFSU2'nin stok 240SX'i de 155 hp.
+Eğri ft·lb olsaydı 216 ft·lb = 293 Nm = 193 hp çıkardı, ki stok bir 240SX için fazla — yani
+N·m okuması doğru.
+
+**Kök bu: kusur yok.** Araba yavaş, çünkü **stok bir 240SX yavaş**, ve fizik dürüst davranıyor
+(11 s'ye karşı gerçeğin ~9 s'si; aradaki fark aktarma kayıpları ve lastik modeliyle açıklanır).
+Şehirde 103 km/h'de tavan yapması da ayrı bir şey değil — o kursun virajları.
+
+**Geriye kalan bir tasarım kararı, hata değil:** NFSU2 bir simülatör değil ve kendi arabaları
+gerçekten olduğundan sert hızlanır. O his isteniyorsa gereken çarpan **ölçüldü**: tork ×1,5 **ve**
+tutuş ×1,5 → 0-100 **8 s**, son sürat 278 km/h. Bu, oyunun kendi verisini bozmadan bir "arcade
+katsayısı" olarak eklenebilir; ama veriye sadakatten vazgeçmek proje kararıdır, ölçüm sonucu değil.

@@ -25,6 +25,35 @@ const PEAK_NM: f32 = 216.0;
 /// `[reverse, neutral, 1st..5th]`, exactly as `tune_from_record` builds it.
 const RATIOS: [f32; 7] = [-3.657, 0.0, 3.321, 1.902, 1.308, 1.0, 0.9];
 
+/// The fully built gearbox: six forward gears on a 3.900 final drive.
+const BUILT_RATIOS: [f32; 8] = [-3.657, 0.0, 3.321, 1.902, 1.308, 1.09, 0.92, 0.77];
+
+/// The fully built engine's curve, same nine rpm points.
+const BUILT_CURVE: [(f32, f32); 9] = [
+    (800.0, 175.0),
+    (1575.0, 188.0),
+    (2350.0, 200.0),
+    (3125.0, 225.0),
+    (3900.0, 250.0),
+    (4675.0, 270.0),
+    (5450.0, 254.0),
+    (6225.0, 213.0),
+    (7000.0, 188.0),
+];
+
+/// The nine `(rpm, N·m)` points the sim prints for this car, straight off `GLOBALB`.
+const CURVE: [(f32, f32); 9] = [
+    (800.0, 140.0),
+    (1575.0, 150.0),
+    (2350.0, 160.0),
+    (3125.0, 180.0),
+    (3900.0, 200.0),
+    (4675.0, 216.0),
+    (5450.0, 203.0),
+    (6225.0, 170.0),
+    (7000.0, 150.0),
+];
+
 fn main() {
     let seconds: f32 = std::env::args().nth(1).and_then(|v| v.parse().ok()).unwrap_or(60.0);
     let veh = BodyHandle::from_id(2);
@@ -52,18 +81,55 @@ fn main() {
             ..Default::default()
         });
     }
-    vc.tuning.gear_ratios = RATIOS.to_vec();
-    vc.tuning.final_drive_ratio = FINAL_DRIVE;
-    vc.tuning.max_engine_torque = PEAK_NM;
+    // `NFS_ENGINE=3 NFS_GEARBOX=3` drives the car the game's own upgrade data builds: the sim's
+    // `handling` line reports 270 N·m and six gears on a 3.900 final drive for a fully built
+    // 240SX against the stock 216 and five on 4.083. Taken from that printout rather than re-read
+    // here, so this file cannot disagree with the sim about what the car is.
+    let built_engine = std::env::var("NFS_ENGINE").is_ok_and(|v| v.trim() == "3");
+    let built_box = std::env::var("NFS_GEARBOX").is_ok_and(|v| v.trim() == "3");
+    let ratios: Vec<f32> =
+        if built_box { BUILT_RATIOS.to_vec() } else { RATIOS.to_vec() };
+    vc.tuning.gear_ratios = ratios;
+    vc.tuning.final_drive_ratio = if built_box { 3.900 } else { FINAL_DRIVE };
+    vc.tuning.max_engine_torque = if built_engine { 270.0 } else { PEAK_NM };
+    // **The car's own nine-point curve, not the controller's parabola.** `engine_torque()` falls
+    // back to a bell curve peaking at 0.4 of the rev range only when `torque_curve` is empty, and
+    // that fallback is *more* generous down low than this car really is (216 N·m at 2,600 rpm
+    // against a measured 160). Leaving it empty measures the engine's default car, not a 240SX.
+    vc.tuning.torque_curve =
+        if built_engine { BUILT_CURVE.to_vec() } else { CURVE.to_vec() };
     vc.tuning.upshift_rpm = REDLINE;
+    // `NFS_GRIPD` scales the tyre's Pacejka peak factor and `NFS_TORQUE` the engine's curve.
+    // Two knobs because "the car is not quick enough" has two possible answers and they are
+    // distinguishable only by moving one at a time: if grip binds, torque does nothing.
+    let grip_d: f32 =
+        std::env::var("NFS_GRIPD").ok().and_then(|v| v.parse().ok()).unwrap_or(1.0);
+    let torque_mul: f32 =
+        std::env::var("NFS_TORQUE").ok().and_then(|v| v.parse().ok()).unwrap_or(1.0);
+    if (grip_d - 1.0).abs() > 1e-3 {
+        for w in &mut vc.wheels {
+            w.pacejka_long.d *= grip_d;
+            w.pacejka_lat.d *= grip_d;
+        }
+    }
+    if (torque_mul - 1.0).abs() > 1e-3 {
+        for p in &mut vc.tuning.torque_curve {
+            p.1 *= torque_mul;
+        }
+        vc.tuning.max_engine_torque *= torque_mul;
+    }
     vc.tuning.wheelbase = 2.6;
     vc.tuning.track_width = 1.6;
     vc.current_gear = 2;
     vc.auto_shift = true;
 
     println!(
-        "düz zemin, tam gaz, direksiyon sıfır · {MASS} kg · son sürüş {FINAL_DRIVE} · \
-         tepe {PEAK_NM} Nm · kırmızı çizgi {REDLINE:.0} · oranlar {RATIOS:?}"
+        "düz zemin, tam gaz, direksiyon sıfır · {MASS} kg · son sürüş {:.3} · tepe {:.0} Nm \
+         · kırmızı çizgi {REDLINE:.0} · {} vites{}",
+        vc.tuning.final_drive_ratio,
+        vc.tuning.max_engine_torque,
+        vc.tuning.gear_ratios.len() - 2,
+        if built_engine || built_box { " · YÜKSELTİLMİŞ" } else { " · stok" }
     );
     println!("      t   hız km/h   vites   rpm   itiş N   ivme m/s²");
 
@@ -88,7 +154,7 @@ fn main() {
         t.rotation = (t.rotation * Quat::from_scaled_axis(vel.angular * dt)).normalize();
         let v = Vec3::new(vel.linear.x, 0.0, vel.linear.z).length();
         if now >= next_report {
-            let torque = PEAK_NM
+            let torque = vc.engine_torque()
                 * vc.tuning.gear_ratios.get(vc.current_gear).copied().unwrap_or(0.0).abs()
                 * FINAL_DRIVE;
             println!(
