@@ -3220,6 +3220,51 @@ eksenine uzaklığı basılıyor — 138'in **57'si** 6 m'den uzakta ve 4001'in 
 uzaklığı plan görünümünde ölçülüyor, yani üst geçidin altındaki bir duvar da "eksende" görünebilir;
 `zemin N kat` sütunu o satırlar için uyarı işaretidir.
 
+### 4121'in virajı: fren geç kalmıyor, hiç gelmiyor — ve iz bunu tek koşuda söyledi (2026-08-20)
+
+Aynı gün engel taraması virajda duran bir şey olmadığını gösterdikten sonra (en yakın duvar 225 m),
+geriye kalan tek yer pilottu. Üç kol o virajda süpürülüp çürütülmüştü — fren eşiği, direksiyon
+hızı, nişan mesafesi — ve dördüncüyü körlemesine süpürmek yerine `NFS_LOST=1` yazıldı: her arabanın
+**kursu bıraktığı anın çevresindeki sekiz saniye**, 20 Hz'de, pilotun kendi terimleriyle.
+
+**Altı araba aynı noktada, aynı sayılarla çıkıyor.** `(-284, 1383)`, düğüm 276, **66 km/h**,
+nişan 30 m ileride **−48°**, direksiyon **0,45**, gaz 0,66 ve **fren 0,00**. Bu sayılar tesadüf
+değil, kuralın kendisi: `over = (hız / 9) · |direksiyon| = (18,3/9) · 0,45 = **0,92**`, eşik ise
+`1,0`. Yani 48°'lik bir viraja 66 km/h ile giriliyor ve **fren eşiğin %8 altında kalıyor**.
+
+**Ama asıl bulgu büyüklük değil, öncülük.** Aynı izden türetilen fiziksel büyüklük — saf takipte
+nişan yayının istediği yanal ivme, `2·v²·sin|açı| / L` — arabanın kursu bırakmasından çok önce
+lastiğin verebileceğinin üstüne çıkıyor:
+
+| t | koridora | hız | nişan | `over` | gereken yanal |
+|---|---|---|---|---|---|
+| 37,3 | 3,0 m | 64 km/h | 31 m, −28° | 0,51 | **9,6 m/s²** |
+| 37,8 | 0,7 m | 65 km/h | 24 m, −27° | 0,52 | **12,3 m/s²** |
+| 38,3 | 4,2 m | 66 km/h | 16 m, −31° | 0,61 | **21,6 m/s²** |
+| 39,8 | **12,1 m** | 66 km/h | 28 m, −45° | 0,86 | 17,0 m/s² |
+| 40,8 | 17,7 m | 63 km/h | 18 m, −68° | **1,24** | 31,6 m/s² |
+
+Gereken ivme **t=37,3'te** zaten 9,6 m/s² — bir yol arabasının tutamayacağı değer — ve fren ancak
+**t=40,8'de**, araba koridorun 17,7 m dışındayken geliyor. Arada **3,5 saniye** ve yaklaşık 60 m
+var. Mevcut kural arabanın *şu an* ne kadar döndüğüne bakıyor; virajın kendisi nişan noktasında,
+30 m ileride, saniyelerce önce görünüyor ve o bilgi atılıyor.
+
+Bu, `NFS_BRAKE` süpürmesinin sekiz rotada neden kaybettiğini de açıklıyor: eşiği düşürmek **her
+yerde** fren yapar, oysa eksik olan şey "daha sert" değil "daha erken".
+
+**İkinci ve ayrı bir arıza da izde görünüyor.** Araba 5 ve araba 2'de nişan noktası bir düğümde
+**180° dönüyor**: düğüme varılıyor (nişan 0 m), bir sonraki örnekte nişan **55 m, 177°** — yani
+arkada. Pilot anında tam kilit (−0,85) ve tam fren istiyor, tuttuğu düğüm 111'de çakılı kalıyor
+(mesafe 0 → 31 m büyürken düğüm değişmiyor) ve araba tam kilitle kursun dışına kayıyor. Bu,
+`pilot.rs`'in "arkadaki nişan noktası nişan noktası değildir" notunda tarif edilen arızanın ta
+kendisi; düzeltme "yürüyüş nişan arkadayken de devam etsin" idi ve burada yürüyüş 55 m devam edip
+yine arkayı gösteriyor — yani ağ yürüyüşü geriye gidiyor. Araba 0'ın izinde t=34,8'de aynı şey bir
+kez daha var (nişan 144 m, −160°), o seferinde toparlanıyor.
+
+**Durum:** viraj sorusu artık "arabalar neden açılıyor" değil, **"fren neden virajı görmeden
+bekliyor"**. Sıradaki iş bu iki arızayı ayrı ayrı ele almak; ikisi de ölçülebilir ve ikisi de
+sekiz-rota süpürmesiyle yargılanacak.
+
 ## Nerede kaldık (2026-08-14 sonu)
 
 **Alan: 865 geçilen waypoint, 1.354 ayrık düğüm, 64 arabanın 51'i kursu bırakıyor.** (Bugün 869
@@ -3258,8 +3303,11 @@ elenmeyen dörtte −70. Karar yalnız sekiz rotadan çıkar.
   (yukarıya bak): sekiz rotada 2.824 kenarın 138'inde yolun kendi kotunda, arabanın çarpacağı
   yükseklikte geometri duruyor, 81'i yol ekseninin 6 m'sinde. Kapanmayan kısım: bunların hangisine
   gerçekten çarpıldığı, ve 4001'in 57 duvarının 39'unun eksenden uzak olması (kiriş şüphesi).
-- **4121'in virajı hâlâ açıklanmamış.** Waypoint 6'daki dört metrelik noktada duran bir şey **yok**:
-  o rotanın en yakın duvarı 225 m ötede. Sebep dünyada değilse pilotta.
+- **4121'in virajı: sebep bulundu, düzeltme yok.** Duran bir şey yok (en yakın duvar 225 m), ve
+  `NFS_LOST=1` izine göre altı araba aynı noktada, `over` = 0,92 ile — yani **fren eşiğin %8
+  altında kalarak hiç gelmeden**. Gereken yanal ivme 3,5 saniye önce 9,6 m/s²'yi geçiyor. Ayrıca
+  ikinci bir arıza: nişan noktası bir düğümde 180° dönüp tam kilit istiyor (araba 5 ve 2).
+  İkisi de sekiz-rota süpürmesiyle yargılanacak.
 - **Motor pini `58dc2623`'te** (2026-08-20'de taşındı). `BASELINE-SEKIZ-ROTA.md` yükseltme öncesi
   tabloyu tutuyor; yükseltme sonrası süpürme onunla yan yana konmalı.
 
@@ -3269,6 +3317,8 @@ elenmeyen dörtte −70. Karar yalnız sekiz rotadan çıkar.
 engel taraması: kat değiştirmeleri eleyip kalan engeli bordür / arabanın üstünden geçen / duvar
 diye ayırır, her duvarın yol eksenine uzaklığını basar — ve artık arabaların takılıp takılmadığına
 bakmadan koşar, yani `NFS_SECONDS=1` ile saniyeler içinde alınır),
-`NFS_FLOOR`/`NFS_FLOORSTEER` (pilotu devreden çıkarıp gazı basılı tutmak — bir turu bu çözdü), ve
-her arabanın kursu **ilk kalıcı olarak bıraktığı** an/waypoint/konum.
+`NFS_FLOOR`/`NFS_FLOORSTEER` (pilotu devreden çıkarıp gazı basılı tutmak — bir turu bu çözdü),
+`NFS_LOST=1` (kursun bırakıldığı anın çevresindeki 8+2 saniye, 20 Hz: hız, koridora uzaklık,
+direksiyon/gaz/fren, nişan mesafesi ve açısı, tutulan düğüm — üç süpürmenin göremediğini tek
+koşuda söyledi), ve her arabanın kursu **ilk kalıcı olarak bıraktığı** an/waypoint/konum.
 

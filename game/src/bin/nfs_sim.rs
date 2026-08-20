@@ -37,6 +37,15 @@ use nfsu2::world as city;
 /// point under its own bumper.
 const WAYPOINT_STEP: f32 = 40.0;
 
+/// How much of a car's course loss `NFS_LOST=1` keeps, in 20 Hz samples.
+///
+/// Eight seconds before and two after. `lost` only calls a departure permanent once the car has
+/// been off the corridor for three continuous seconds, so the first three of those eight are spent
+/// getting back to the crossing itself and the remaining five are the approach — about 90 m at the
+/// 65 km/h the corner is taken at, which is two or three nodes of run-up.
+const LOST_BEFORE: usize = 160;
+const LOST_AFTER: usize = 40;
+
 /// How slow counts as standing still, in m/s, and how long the grid is left alone first.
 ///
 /// The same 0.7 m/s the pilot's own stall rule uses and the same three seconds it settles for, so
@@ -109,6 +118,36 @@ struct Fall {
     ever: bool,
     /// Unbroken seconds spent outside the course corridor, right now.
     off_for: f32,
+}
+
+/// One instant of a car losing the course, as the pilot saw it.
+///
+/// **Why a trace and not another sweep.** Three levers have now been swept at the one corner that
+/// takes six of eight cars on `Paths4121` — brake threshold, steering rate, aim distance — and all
+/// three were refuted, twice by a half-sweep that read as a win. A sweep answers "did this help";
+/// it cannot say *which term let go*, and after three refutations that is the question. Every field
+/// here is something the pilot either asked for or was looking at, so the failing one can be read
+/// off the seconds before the car went wide rather than guessed at from where it ended up.
+#[derive(Clone, Copy)]
+struct Moment {
+    /// Simulated seconds.
+    t: f32,
+    at: Vec3,
+    /// m/s, signed the way the pose reports it.
+    speed: f32,
+    /// Plan-view distance to the nearest path — the number that crossing
+    /// [`city::COURSE_HALF_WIDTH`] is what "left the course" means.
+    off: f32,
+    /// What the pilot asked for this step: steering input (−1..1), throttle, brake.
+    steer: f32,
+    throttle: f32,
+    brake: f32,
+    /// How far ahead the aim point was, and how far off the nose — the pure-pursuit pair. A corner
+    /// taken wide with a small angle is the lookahead reaching past the bend; a large angle with
+    /// the wheel not following is the smoothing.
+    aim: Option<(f32, f32)>,
+    /// The node the pilot was holding, and how far the car was from it.
+    node: Option<(u32, f32)>,
 }
 
 const DEFAULT_CAR: &str =
@@ -424,6 +463,16 @@ async fn run() {
     let mut was: Vec<Option<Vec3>> = vec![None; field.len()];
     let mut aim_seen = vec![0usize; field.len()];
     let mut aim_walled = vec![0usize; field.len()];
+    // NFS_LOST=1: keep the last few seconds before each car loses the course, and a couple after.
+    //
+    // A ring while nothing has happened, frozen and then extended once it has, because the moment
+    // worth seeing can only be recognised three seconds after it — that is how long off the
+    // corridor `lost` waits before calling a departure permanent, so a buffer that started at the
+    // announcement would begin well past the cause.
+    let losing = std::env::var("NFS_LOST").is_ok();
+    let mut ring: Vec<std::collections::VecDeque<Moment>> =
+        vec![std::collections::VecDeque::new(); field.len()];
+    let mut around: Vec<Option<Vec<Moment>>> = vec![None; field.len()];
     // **Why a car stopped, which the summary cannot say.** A field that stops is not one thing, and
     // the three that matter want completely different work: a car pinned by the fence, a car
     // grinding against geometry, and a car queued behind another car look identical in every number
@@ -725,6 +774,51 @@ async fn run() {
             // count a corner cut and short enough to still be near the cause.
             if lost[k].is_none() && f.off_for >= 3.0 {
                 lost[k] = Some((now, p.position, pilot.covered()));
+                // Freeze what led here. `LOST_BEFORE` is counted back from *this* instant, which is
+                // already three seconds after the car crossed the line, so the window has to be
+                // long enough to reach behind that or it shows only the aftermath.
+                if losing {
+                    around[k] = Some(ring[k].iter().copied().collect());
+                }
+            }
+            // Sampled at 20 Hz rather than every step: the terms below are smoothed and a 240 Hz
+            // dump of them is twelve identical lines per reading.
+            if losing && step % 12 == 0 {
+                let nose = p.rotation * Vec3::NEG_Z;
+                let fwd = Vec3::new(nose.x, 0.0, nose.z).normalize_or_zero();
+                let side = Vec3::new(-fwd.z, 0.0, fwd.x);
+                let m = Moment {
+                    t: now,
+                    at: p.position,
+                    speed: p.speed,
+                    off,
+                    steer: cmd[k].2,
+                    throttle: cmd[k].0,
+                    brake: cmd[k].1,
+                    aim: pilot.aim().map(|a| {
+                        let d = Vec3::new(a.x - p.position.x, 0.0, a.z - p.position.z);
+                        (d.length(), d.dot(side).atan2(d.dot(fwd)).to_degrees())
+                    }),
+                    node: pilot.node().and_then(|i| net.node(i)).map(|j| {
+                        (
+                            pilot.node().unwrap_or_default(),
+                            Vec3::new(j.at.x - p.position.x, 0.0, j.at.z - p.position.z).length(),
+                        )
+                    }),
+                };
+                match &mut around[k] {
+                    // Keep going for a moment past the departure: what the pilot does *while*
+                    // losing it is half the evidence — a wheel that finally comes round after the
+                    // car is already off says the steering was late, not absent.
+                    Some(v) if v.len() < LOST_BEFORE + LOST_AFTER => v.push(m),
+                    Some(_) => {}
+                    None => {
+                        if ring[k].len() >= LOST_BEFORE {
+                            ring[k].pop_front();
+                        }
+                        ring[k].push_back(m);
+                    }
+                }
             }
             if g.stood {
                 let moved = was[k].map_or(Vec3::ZERO, |b| p.position - b);
@@ -825,6 +919,35 @@ async fn run() {
             );
         } else {
             println!("            kursu hiç bırakmadı");
+        }
+        // The approach, in the pilot's own terms. Read down the `koridora` column for the moment it
+        // passes 12 and then look left: what the wheel was being asked for, whether the pedal ever
+        // came off, and where the aim point was while it happened.
+        if let Some(v) = &around[k] {
+            println!(
+                "            iz — koridor yarı genişliği {} m · 20 Hz",
+                city::COURSE_HALF_WIDTH
+            );
+            for m in v {
+                let aim = m.aim.map_or("          —".to_string(), |(d, a)| {
+                    format!("{d:>4.0} m {a:>5.0}°")
+                });
+                let node = m
+                    .node
+                    .map_or("     —".to_string(), |(i, d)| format!("{i:>4} {d:>4.0} m"));
+                println!(
+                    "              t={:>6.1} ({:>7.0},{:>7.0}) {:>4.0} km/h · koridora {:>5.1} m \
+                     · direksiyon {:>5.2} · gaz {:>4.2} fren {:>4.2} · nişan {aim} · düğüm {node}",
+                    m.t,
+                    m.at.x,
+                    m.at.z,
+                    m.speed * 3.6,
+                    m.off,
+                    m.steer,
+                    m.throttle,
+                    m.brake
+                );
+            }
         }
     }
     // **Why** they fell, which is not the same question as how many. Each fallen car is traced back
