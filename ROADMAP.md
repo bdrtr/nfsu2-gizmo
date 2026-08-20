@@ -4634,3 +4634,49 @@ yanında yazılı: bir hattı takip etmiyor, bir noktayı kovalıyor, ve fazla d
 kendisi. **Kalan kaldıraç direksiyon tepkisi değil.**
 
 Sabit `CAP_FAST = 1.0` olarak, kaydıyla birlikte duruyor (`NFS_CAPFAST` ile geri açılır).
+
+### 4102'nin yedi arabası: kusur pilotta değil, halkada — ve halkayı dürüstleştirmenin bedeli hep aynı (2026-08-20)
+
+Ayrılmaların en büyük öbeği (4102, yedi araba) izlendi. Ayrılmadan sekiz saniye önce araba
+**kusursuz sürüyor**:
+
+```
+t= 25.4 ( -42, -140)  88 km/h · koridora 3.4 m · direksiyon 0.06 · gaz 0.96 fren 0.00
+        · nişan 23 m -6° · hedef 10  19 m -90° · sonraki 50 m
+```
+
+Koridorun 3,4 m içinde, direksiyon neredeyse düz, nişan tam önünde. Ama **hedefi 19 m yanında
+duruyor** ve açısı −60° → −116° diye kayıyor: araba yanından geçiyor, "geçilmiş" sayılmıyor
+(`PASSED_NEAR`'ın kuralı kursun kendi yönünde geçmeyi istiyor), `sonraki` de hedeften uzak olduğu
+için ilerleme de olmuyor. Hedef orada kilitleniyor, sonra arkaya düşüyor, ve tam kilit + tam fren
+gelip arabayı dışarı atıyor.
+
+**Halkaya sorunca sebep göründü:** `NFS_CURVE=-45,-145` → waypoint 9'un **yarıçapı 25 m, yani
+41 km/h**. Araba oradan 89 km/h ile geçiyor çünkü **yol düz** — koridorun 3,4 m içinde. Halka
+dönüyor, yol dönmüyor. Ve tek köşe değil: o rotanın **104 waypoint'inin 58'i koridorun dışında**.
+
+**Yeni aday, kırpma (`NFS_TRIM=1`):** koridorun dışındaki waypoint'ler yarışın gitmediği yerler,
+atılsınlar. Halka 104 → 46, 159 → 95, 130 → 74 waypoint'e iniyor; en büyük boşluk 272-394 m.
+
+| | kursta süre | düşen | furthest | hiç bırakmayan |
+|---|---|---|---|---|
+| kırpılmamış | **%82,0** | 6 | 5.299 m | **30** |
+| koridora kırpılmış | %73,6 | **1** | **5.723 m** | 20 |
+
+**Düşen 6 → 1.** Bu, düşüşlerin bugün kurulan zincirinin bağımsız doğrulaması: halka blokların
+üstünden geçiyor → araba takip ediyor → zemin yok → düşüyor. Koridor dışı waypoint'leri atmak
+zincirin ilk halkasını kesiyor ve düşüşler neredeyse bitiyor. `furthest` de günün en iyisi.
+
+**Ama kursta geçen süre 8,4 puan düşüyor** (rota rota −34'e kadar; en büyük tek rota alan
+farkından küçük, yani sağlam). Sebebi de belli: hayatta kalan waypoint'ler arası 394 m'lik boşluğun
+düz çizgisi koridordan çıkıyor.
+
+**Ve buradaki asıl bulgu üçüncü kez aynı şey:** halkayı dürüstleştirmenin bedeli hep yaklaşık aynı.
+Ağda yürünmüş halka %75,2, koridora kırpılmış halka %73,6, kurgusal kiriş halkası **%82,0**.
+Kurgusal halka kursta kalmayı *daha iyi* sağlıyor — çünkü köşeleri kesiyor, yani **daha yumuşak**,
+ve koridor (bütün hatların birleşimi) cömert olduğu için o yumuşak çizgi çoğunlukla içeride
+kalıyor. Dürüst çizgilerin keskin dönüşlerini bu pilot süremiyor.
+
+Kırpma varsayılan yapılmadı; düşen sayısındaki 6 → 1 kazancı kaydıyla `NFS_TRIM=1` altında duruyor.
+Bir sonraki adayın şekli de buradan belli: **koridor içinde kalan ama yumuşak** bir halka — yani
+kırpılmış waypoint'ler arasını düz çizgiyle değil, ağı yürüyerek doldurmak.

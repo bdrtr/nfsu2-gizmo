@@ -539,6 +539,40 @@ async fn run() {
     } else {
         city::densify(&coarse, step)
     };
+    // `NFS_TRIM=1`: throw away the ring's waypoints that lie outside the race's own corridor.
+    //
+    // Measured on `Paths4102`, where seven of eight cars leave at one place: the car is **3.5 m
+    // from the corridor centre** at 89 km/h with the wheel almost straight — driving the road
+    // correctly — while its goal sits 20 m to the side and slides from −60° to −116° behind it.
+    // The ring has a **25 m radius hairpin** there (a 41 km/h corner) where the road runs straight,
+    // and the goal is the waypoint just past it. Nothing the pilot does is wrong; the course is.
+    // On that route **58 of 104 waypoints are outside the corridor**, so this is not one corner.
+    //
+    // A filter rather than a repair: a waypoint the race's own paths do not cover is not a place
+    // the race goes, and the pilot has no business steering at it. What is left is bridged by the
+    // gap between the survivors, which is why the largest one is printed.
+    let waypoints = if knob("NFS_TRIM").is_some_and(|v| v != "0") {
+        let kept: Vec<Vec3> = waypoints
+            .iter()
+            .copied()
+            .filter(|w| {
+                corridor.locate(*w).is_some_and(|f| f.distance <= city::COURSE_HALF_WIDTH)
+            })
+            .collect();
+        let gap = kept
+            .windows(2)
+            .map(|p| Vec3::new(p[1].x - p[0].x, 0.0, p[1].z - p[0].z).length())
+            .fold(0.0f32, f32::max);
+        println!(
+            "halka koridora kırpıldı: {} → {} waypoint · en büyük boşluk {gap:.0} m",
+            waypoints.len(),
+            kept.len()
+        );
+        if kept.len() >= 3 { kept } else { waypoints }
+    } else {
+        waypoints
+    };
+
     // **Tell the graph which of its roads this race uses.** Without it the walk picks the neighbour
     // nearest the goal in a straight line, and on Bayview that is regularly a parallel carriageway:
     // measured, 21 of 21 departures from the racing line had an arm that would have stayed on it.
