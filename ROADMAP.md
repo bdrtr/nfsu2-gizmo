@@ -4572,3 +4572,40 @@ daha iyi**.
 
 **Ve bu, günün dördüncü okuma tuzağı:** bir olayın *olup olmadığını* sayan ölçü, o olayın
 *sürdüğünü* varsayar. Kursu bırakma sürmüyor.
+
+### Ayrılmalar 34 araba değil, **12 yer** — ve ilk dördü %68'ini açıklıyor (2026-08-20)
+
+Ayrılma noktaları kümelenince mesele başka bir şeye dönüştü. 60 m'lik kümelerle:
+
+| rota | araba | yer | ne zaman |
+|---|---|---|---|
+| 4102 | **7** | (52, −26) | t=33-44 s |
+| 4061 | **6** | (−2431, 1748) | t=20-28 s |
+| 4121 | **6** | (−315, 1372) | t=37-49 s |
+| 4021 | **4** | (−268, 1395) | t=37-46 s |
+| … | 1-3 | 8 yer daha | |
+
+**34 ayrılma, 12 ayrı yer, ve ilk dördü 23 arabayı (%68) açıklıyor.** Dahası 4121'in ve 4021'in
+noktaları birbirine **52 m** — aynı kavşak, iki farklı rotada, on araba.
+
+Ve 4102'nin yedi arabası aynı yerde **bayt-birebir aynı durumda** çıkıyor: 63-66 km/h, tam kilit
++0,85, **tam fren 1,00**, nişan 37 m'de **−176°**, hedef 80 m'de −123°. Yani kusur arabanın değil
+**yerin** bir özelliği; sekiz farklı araba aynı yerde aynı şeyi yapıyor.
+
+O ortak kavşağa bakıldı (`NFS_HOLE=-290,1385`): 4121 için kavşak 276'nın iki kolu **2,8 m arayla**
+farklı hatlarda — `Network` başlığının uyardığı paralel şerit birleşimi. Koridor testi ikisini de
+"YARIŞ HATTI" sayıyor, yani koridora dayanan hiçbir kural bunları ayıramaz.
+
+**Ve hedefin 80 m'de olması, `PASSED_NEAR`'ın 60 m'lik bırakma yarıçapının dışında** demek: araba
+hedefini geçmiş olsa bile bırakamıyor, hedef arkada kilitli kalıyor.
+
+**Buradan çıkan kural yeniden yazılmadı, çünkü zaten çürütülmüş.** "Bir süredir waypoint
+kazanmayan pilot yerini yeniden bulsun" `pilot.rs`'de kayıtlı: 4, 8 ve 16 saniyelik aralıkların
+üçünde de kaybediyor (462 → 369 / 412 / 435 waypoint), ve `covered()` zaten o denemenin yirmi iki
+katlık sahte kazancını yakalamak için yazılmış. Kodu okumak deneyi yeniden yapmaktan kurtardı.
+
+**Denenmemiş olan tek aday, aynı yorumda kayıtlı:** *hıza göre değişen kilit sınırı* — dururken tam
+kilit (kaçış makinesi ona bağlı), 60 km/h'de az. Düz sınır çürütülmüştü çünkü **duran** arabadan da
+kilidi alıyor ve kenardan dönemeyen araba düşüyor (düşen üç katına çıkmıştı). Bugünkü sayım tam
+buraya işaret ediyor: 34 ayrılmanın **18'i tam kilitte**, 8'i 60 km/h üstünde. `NFS_CAPFAST`
+eklendi ve süpürülüyor.

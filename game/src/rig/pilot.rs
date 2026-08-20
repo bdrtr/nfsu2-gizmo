@@ -188,6 +188,17 @@ const BEHIND: f32 = 2.97;
 /// Steering lock the pilot will ask for, as a fraction of the controller's own.
 const STEER_LIMIT: f32 = 0.85;
 
+/// How much of the steering lock is left at [`CAP_SPEED`], as a fraction.
+///
+/// 1.0 is no cap, which is the shipped value until the sweep says otherwise. The flat cap this
+/// replaces was refuted because it takes the lock away from a *standing* car as well, and a car
+/// that cannot turn cannot turn away from an edge — falls tripled. Scaling it with speed keeps
+/// everything the flat cap broke.
+const CAP_FAST: f32 = 1.0;
+
+/// The speed, in m/s, at which [`CAP_FAST`] is reached. 16.7 m/s is 60 km/h.
+const CAP_SPEED: f32 = 16.7;
+
 /// The driven car's wheelbase, in metres — the length pure-pursuit geometry turns a curvature into
 /// a steering angle with.
 ///
@@ -1288,6 +1299,12 @@ impl Pilot {
         // lock at rest, where turning round is exactly right and the escape machinery depends on
         // it, and little at 60 km/h. What is measured here is the flat cap only.
         //
+        // **Tried on 2026-08-20**, because the departure census pointed straight at it: of the 34
+        // cars that leave the course, **18 are at full lock** the step they cross the edge and 8
+        // are above 60 km/h. `NFS_CAPFAST` is the lock left at [`CAP_SPEED`] and `NFS_CAPSPEED`
+        // that speed; the cap runs linearly from 1.0 at rest, so nothing about standing still,
+        // escaping or turning round changes.
+        //
         // **And the law itself, measured on 2026-08-20.** The ramp above is linear in the angle:
         // full lock at 90°, half at 45°. Pure pursuit's own geometry is not — the arc from the car
         // to an aim point `L` away at angle `α` has curvature `2·sin α / L`, so the steer angle is
@@ -1319,6 +1336,11 @@ impl Pilot {
         // an arc that reaches a point 49 m away at 66° is a gentle one — correct for a car that
         // means to arrive there, useless for a car that needs to be pointing at the road again in
         // the next second. The ramp's over-steering is the recovery.
+        let cap_fast: f32 =
+            std::env::var("NFS_CAPFAST").ok().and_then(|v| v.parse().ok()).unwrap_or(CAP_FAST);
+        let cap_speed: f32 =
+            std::env::var("NFS_CAPSPEED").ok().and_then(|v| v.parse().ok()).unwrap_or(CAP_SPEED);
+        let cap = 1.0 - (1.0 - cap_fast) * (speed.abs() / cap_speed.max(0.1)).clamp(0.0, 1.0);
         let geometry = std::env::var("NFS_PURSUIT").is_ok_and(|v| !v.is_empty() && v != "0");
         let want = if geometry {
             if angle.abs() >= std::f32::consts::FRAC_PI_2 || reach < 1.0 {
@@ -1331,6 +1353,7 @@ impl Pilot {
         } else {
             (angle * 2.0 / std::f32::consts::PI).clamp(-1.0, 1.0) * STEER_LIMIT
         };
+        let want = want * cap;
 
         // How fast the wheel catches up with what the pilot wants.
         //
