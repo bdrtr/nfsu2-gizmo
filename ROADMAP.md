@@ -3498,6 +3498,49 @@ kursta ve hızlı tuttuğu için kenara daha çok araba ulaşıyor olması makul
 `fallen` bir sonraki süpürmelerde izlenecek — bugün zaten `BASELINE-SEKIZ-ROTA.md`'de 4041 için
 açılmış bir izleme var.
 
+### Düzeltme tam da hedeflediği nüfusu aldı — ve kalanların nerede durduğu ölçüldü (2026-08-20)
+
+Alan sayısı iyileşti diye mekanizmanın doğrulandığı varsayılmaz. `NFS_LOST=1` sekiz rotaya
+düzeltmeden **önce ve sonra** koşuldu, ve kursu bırakan her arabanın koridoru geçtiği andan geriye
+iki saniyelik pencerede imzası sınıflandırıldı:
+
+| imza | önce (50 araba bıraktı) | sonra (40 araba) |
+|---|---|---|
+| **arka nişan** (\|θ\| > 120°) | **23** | **16** |
+| tam kilide yakın (\|dir\| > 0,8) | 10 | 7 |
+| zaten yavaş (< 25 km/h) | 8 | 8 |
+| hiçbiri — düz açılma | 9 | 9 |
+
+Kurtarılan 10 arabanın 7'si arka-nişan grubundan, 3'ü tam-kilit grubundan geldi; **diğer iki
+kategori sayıca birebir aynı kaldı**. Yani değişiklik yalnızca hedeflediği arızayı kaldırdı, alanı
+genel olarak yavaşlatıp "daha az araba çıksın" diye takas yapmadı — bugün üç kez çürütülen desen
+tam olarak buydu.
+
+**Kalan 16 arka-nişan vakası eşiğin hemen dışında duruyor.** Vakanın ilk anındaki hedef uzaklığı
+**medyan 66 m**, ve 16'nın yalnız 2'si 60 m'nin altında. Yedisi tek bir rotada (4102) ve tek bir
+waypoint'te: alan artık waypoint 11'i geçiyor (düzelen kısım) ama waypoint 12'de 65-66 m'de
+takılıyor, 88-91 km/h ile. Yani eşiğin kendisi, kalan arızanın tam sınırında.
+
+**Düşen araba artışı (2 → 4) da yerelleşti:** ikisi 4021'de, biri 4102'de, ve düşen arabaların
+tuttukları düğümden sapmaları 348-1009 m. Bunlar kursu çoktan bırakmış, uzağa gitmiş ve dünyanın
+kenarını bulmuş arabalar; yeni bir arıza değil, daha uzağa gidebilen bir alan.
+
+**Ve eşiği genişletmek onları kurtarmıyor.** Kalanların medyanı 66 m olduğu için sınırı 80 m'ye
+çekmek doğal görünüyordu; sekiz rotada 973 waypoint (60 m'de 986) ve asıl mesele, **o yedi vakanın
+bulunduğu 4102'de sayı 147'den 126'ya düşüyor**. 100 m'de de 126. Yani o arabaları tutan şey sınır
+değil: takıldıkları waypoint, bırakılması bir bedeli olan bir waypoint.
+
+| sınır | waypoint | kursu hiç bırakmayan | düşen |
+|---|---|---|---|
+| kapalı | 927 | 14 / 64 | 2 |
+| 30 m | 883 | 14 / 64 | 4 |
+| **60 m** | **986** | **24 / 64** | 4 |
+| 80 m | 973 | 23 / 64 | 3 |
+| 100 m | 956 | 24 / 64 | 4 |
+
+**Sıradaki turun soruları, artık tek bir baskın sebep olmadığı için üç tane:** kalan 16 arka nişan
+(sınır değilse ne?), 8 "zaten yavaş" araba (durma/kaçış makinesi), ve 9 "düz açılma" (viraj, hâlâ).
+
 ## Nerede kaldık (2026-08-14 sonu)
 
 **Alan (2026-08-20 sonu, motor pini `58dc2623`, `GRIP` ve `PASSED_NEAR` açıkken): 986 geçilen

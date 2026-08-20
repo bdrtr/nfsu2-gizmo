@@ -175,11 +175,19 @@ const REACHED: f32 = 18.0;
 /// | off | 927 | 14 / 64 | 2 |
 /// | 30 m | 883 | 14 / 64 | 4 |
 /// | **60 m** | **986** | **24 / 64** | 4 |
+/// | 80 m | 973 | 23 / 64 | 3 |
 /// | 100 m | 956 | 24 / 64 | 4 |
 ///
 /// Unimodal, with thirty *below* having no rule at all — it sits under the forty metres the failure
 /// actually needs, so it never fires where it would help and only ever fires close in, where
-/// [`REACHED`] already had it. The weak column is the last one: two more cars off the world at
+/// [`REACHED`] already had it.
+///
+/// **Widening past sixty was tried for a reason and it does not pay.** With the rule in, the cars
+/// that still lose the course to a backwards aim hold a goal a median 66 m away — just outside this
+/// bound — and seven of the sixteen are on `Paths4102` at one waypoint. Releasing at 80 m makes
+/// **that route worse**, 147 waypoints to 126, and 100 m is no better. Whatever is holding those
+/// cars, it is not the bound: the waypoint they are stuck on is one it costs something to let go
+/// of. The weak column is the last one: two more cars off the world at
 /// every setting that fires, plausibly because the field now carries speed on the course for
 /// longer, but that is a guess and `fallen` is on watch.
 ///
