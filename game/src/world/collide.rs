@@ -340,6 +340,124 @@ impl Ground {
     }
 }
 
+/// What [`Walls::across_hit`] found standing in the way, and enough of the walk to judge it.
+///
+/// [`Walls::across`] answers `bool`, and that answer could not be defended. The walk follows the
+/// ground, so where the city stacks it can step onto a deck and count the road *beneath* as an
+/// obstacle — and a finding was withdrawn over exactly that: 3-25 % of race-line edges read
+/// "blocked" and the reading had to be given up, because nothing came back but the verdict. See
+/// `ROADMAP.md`, 2026-08-14.
+///
+/// Deliberately raw. Nothing here is a judgement: no "wall or kerb", no "wrong deck". The triangle
+/// comes back whole and the walk's own belief about the floor comes back beside it, because which
+/// of those makes a hit real is a **policy** question with a different answer for the pilot than
+/// for a diagnostic — the same reason [`Surface`] is decided in [`surface_of`] rather than folded
+/// into the geometry (see this file's header).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Hit {
+    /// The triangle that stopped the segment, in world space, exactly as [`Walls`] stores it. Its
+    /// height range says whether this is a kerb, a rail or a building face; its normal and area are
+    /// one cross product away. [`Walls`] keeps no provenance, so its geometry is the whole of what
+    /// is known about it — no mesh name, no material, and no answer to "which barrier is this".
+    pub tri: [Vec3; 3],
+    /// Where the segment met it, at the height the walk was carrying — so `at.y` is a car's
+    /// bumper height above whichever floor that step was on, not a point on the ground.
+    pub at: Vec3,
+    /// Ground-plane distance from the walk's start to [`Self::at`]. **Not the distance to the
+    /// nearest blocker:** the search stops at the first triangle in cell order, which is what keeps
+    /// it cheap. A caller that wants to shorten a probe rather than discard a heading needs the
+    /// nearest hit, and that is a different search with a different cost.
+    pub along: f32,
+    /// The ground the walk believed it was on at this step — the surface chosen as nearest the
+    /// height the walk already had. This is the suspect quantity, reported rather than trusted.
+    ///
+    /// It is the floor at the step's **far** sample, and the hit can be anywhere along that step.
+    /// On a step that changes deck the two ends stand on different floors, so this is the wrong one
+    /// for a hit that happened next to [`Self::from_y`]'s end — which is why [`Self::over_floor`]
+    /// is only meaningful once [`Self::climb`] says the step did not change floors.
+    pub walk_y: f32,
+    /// The same, one step earlier, so `walk_y - from_y` is the floor change made at the very step
+    /// that produced the hit. At `step == 1` it is the caller's own `a.y`, which never went through
+    /// [`Ground::heights_at`] and is not a floor at all.
+    pub from_y: f32,
+    /// The floor the walk settled on at the first sample that **had** one — what [`Self::drift`]
+    /// is measured against, and deliberately not the caller's `a.y`, for the reason above. A walk
+    /// that never found ground at all has nothing to offer here and falls back to `a.y`;
+    /// [`Self::layers`] is what says which of the two happened.
+    pub start_y: f32,
+    /// The largest change of floor between two successive samples that **had** a floor, anywhere in
+    /// the walk up to the hit. The walk changing decks, measured rather than assumed.
+    ///
+    /// The first sample is excluded because its predecessor is not a floor, and a stretch with no
+    /// ground under it is spanned rather than counted: the interpolated height the walk carries
+    /// there is not a surface, and treating it as one turns every hole into a drop and a climb.
+    /// So a large `climb` over a gap means the floor really is that far from where it was, not that
+    /// there was a hole in between.
+    pub climb: f32,
+    /// How many drivable surfaces [`Ground::heights_at`] offered under this step, after its own
+    /// dedup. **Zero means there was no ground at all** and the interpolated height stood in; a
+    /// link with a genuine hole in it is [`Ground::gap_along`]'s finding, not this one's.
+    pub layers: usize,
+    /// Which step hit.
+    pub step: usize,
+    /// How many steps the walk was divided into. `step == steps` means the far end is `b` **in
+    /// plan**; its height is the floor found under `b`, which is what the walk uses and need not be
+    /// `b.y`.
+    pub steps: usize,
+    /// Index into this [`Walls`]'s own triangle list. Stable for the lifetime of this [`Walls`] and
+    /// meaningless outside it — enough to tell one triangle from another, and **not** enough to
+    /// count blockers. A rail is two triangles per quad baked into the road chunk, so probes a few
+    /// metres apart along one barrier come back with different indices. Barrier identity would mean
+    /// clustering by plane and adjacency, and [`Walls`] keeps no provenance to do it with.
+    pub index: u32,
+    /// Whether **anything** in the index is still hit when this step is carried **level**, at the
+    /// height its near end already had. `false` means nothing stands across the way at the height
+    /// the step came in at, and the walk reached [`Self::tri`] only by changing floors.
+    ///
+    /// It asks the whole index rather than re-testing [`Self::tri`], and the difference is not
+    /// academic: a barrier is many triangles and the walk returns the first one in cell order, so
+    /// re-testing that one answers `false` for a wall whose *other* triangle stands squarely across
+    /// the level step. A walk with no horizontal extent is level by construction and answers `true`.
+    ///
+    /// Not a verdict on its own, in either direction. A walk that changed decks three steps ago and
+    /// has been level since answers `true` and is still on the wrong deck; a barrier standing on a
+    /// road that genuinely falls away can be stepped over by the level test and answer `false`.
+    /// Read it with [`Self::drift`] and [`Self::climb`].
+    pub flat_too: bool,
+}
+
+impl Hit {
+    /// The triangle's own height range, lowest first.
+    #[must_use]
+    pub fn span(&self) -> (f32, f32) {
+        let (a, b, c) = (self.tri[0].y, self.tri[1].y, self.tri[2].y);
+        (a.min(b).min(c), a.max(b).max(c))
+    }
+
+    /// That range relative to the floor the walk believed it was on: metres over the road.
+    ///
+    /// Calibration, in the terms this can actually return. Every triangle a walk meets straddles
+    /// the height it was carrying, so at `lift = 0.5` a hit reads `lo <= 0.5 <= hi` **on a level
+    /// step**: a building face is `(≈0.0, tall)`, a low barrier `(≈0.0, 0.6)`. A positive base
+    /// belongs to a parapet or a deck's edge fascia — not to the soffit under a bridge, which is
+    /// horizontal, which makes it [`Surface::Drivable`], which keeps it out of [`Walls`] entirely.
+    /// A top below zero is geometry underneath the walk.
+    ///
+    /// On a step that changed floors this is measured against the wrong end (see [`Self::walk_y`]),
+    /// and the number means nothing until [`Self::climb`] says it did not.
+    #[must_use]
+    pub fn over_floor(&self) -> (f32, f32) {
+        let (lo, hi) = self.span();
+        (lo - self.walk_y, hi - self.walk_y)
+    }
+
+    /// How far the walk drifted from the floor it started on, signed.
+    #[must_use]
+    pub fn drift(&self) -> f32 {
+        self.walk_y - self.start_y
+    }
+}
+
 /// The triangles a car cannot drive through, indexed to answer one question: **is there something
 /// between these two points.**
 ///
@@ -405,8 +523,17 @@ impl Walls {
         Self { tris, runs }
     }
 
-    /// Whether anything stands across the way from `a` to `b`, asked **along the road's own
-    /// profile** rather than along the straight line between the two.
+    /// Whether anything stands across the way from `a` to `b`.
+    ///
+    /// The verdict alone, which is all the pilot ever wanted from it. [`Self::across_hit`] is the
+    /// same walk and names what it found.
+    #[must_use]
+    pub fn across(&self, ground: &Ground, a: Vec3, b: Vec3, lift: f32, step: f32) -> bool {
+        self.across_hit(ground, a, b, lift, step).is_some()
+    }
+
+    /// What stands across the way from `a` to `b`, asked **along the road's own profile** rather
+    /// than along the straight line between the two.
     ///
     /// `lift` is what makes this about cars rather than about normals: half a metre clears a kerb,
     /// and a guardrail, a central reservation or a building is taller than that. But the height has
@@ -420,34 +547,106 @@ impl Walls {
     /// So the walk follows the surface instead. At each step the local ground is taken **nearest
     /// the height the walk is already at** — not the highest, because [`Surface::Drivable`] admits
     /// a flat roof exactly as it admits a road — and the segment tested is the short one from the
-    /// previous sample to this one, both carried `lift` above their own ground.
+    /// previous sample to this one, each carried `lift` above its own ground. The very first
+    /// point is the exception: it is `lift` above the caller's own `a.y`, because no sample has
+    /// been taken yet and `a.y` is the only height on offer.
+    ///
+    /// **Following the ground is also this method's own defect, and the returned [`Hit`] is how it
+    /// is measured.** Where the city stacks, "nearest the height the walk is already at" can step
+    /// onto a bridge deck and then answer about the road underneath it. That is not hypothetical:
+    /// a race-line obstacle scan built on the boolean had to be withdrawn for it. Nothing here
+    /// filters that out — [`Hit::flat_too`], [`Hit::climb`] and [`Hit::drift`] carry the evidence
+    /// out so the caller can.
+    ///
+    /// **Rejecting a hit is not the same as clearing the way.** This returns at the *first* step
+    /// that meets anything and the rest of the walk never runs, so a caller that reads the evidence
+    /// and throws the hit away has learned that this blocker is not real — not that there is no
+    /// other one further along. To learn that, ask again from just past [`Hit::at`]; there is no
+    /// resumption to inherit, because the walk keeps no state a second call could not rebuild.
     #[must_use]
-    pub fn across(&self, ground: &Ground, a: Vec3, b: Vec3, lift: f32, step: f32) -> bool {
+    pub fn across_hit(
+        &self,
+        ground: &Ground,
+        a: Vec3,
+        b: Vec3,
+        lift: f32,
+        step: f32,
+    ) -> Option<Hit> {
         let run = Vec3::new(b.x - a.x, 0.0, b.z - a.z).length();
         let n = (run / step).ceil().max(1.0) as usize;
         let mut here = a.y;
         let mut prev = a + Vec3::Y * lift;
+        // The caller's own `a.y` is not a floor — the pilot asks from the chassis origin, which
+        // stands above the tarmac it is on — so the first *sampled* surface is what the rest of the
+        // walk is judged against, and arriving on it is not a climb. Neither is the interpolated
+        // height the walk carries where there is no ground: it is held out of both numbers rather
+        // than counted as a drop to it and a climb back out.
+        let mut floor: Option<f32> = None;
+        let mut start = a.y;
+        let mut climb = 0.0f32;
         for k in 1..=n {
             let p = a.lerp(b, k as f32 / n as f32);
             // Where the ground has nothing to say, the interpolated height stands in: a link with a
             // genuine hole in it is `drop_walled`'s finding, not this one's, and it has already run.
             let from = here;
-            here = ground
-                .heights_at(p.x, p.z)
+            // Bound before the choice so the count of surfaces can be read off it. The selection
+            // below is the same expression over the same `Vec` in the same order, and picks the
+            // same surface it always did.
+            let hs = ground.heights_at(p.x, p.z);
+            let layers = hs.len();
+            here = hs
                 .into_iter()
                 .min_by(|x, y| (x - from).abs().total_cmp(&(y - from).abs()))
                 .unwrap_or(p.y);
+            if layers > 0 {
+                match floor {
+                    None => start = here,
+                    Some(f) => climb = climb.max((here - f).abs()),
+                }
+                floor = Some(here);
+            }
             let cur = Vec3::new(p.x, here + lift, p.z);
-            if self.hits(prev, cur) {
-                return true;
+            if let Some((tri, index, t)) = self.hits(prev, cur) {
+                let at = prev + (cur - prev) * t;
+                // Would a level step have met anything at all? That question separates a wall
+                // standing across the road from the walk's own change of deck, and it costs one
+                // more pass over the same cells on a path that is returning anyway. It asks the
+                // index rather than re-testing `tri`, because `tri` is the first triangle in cell
+                // order and a barrier is more than one triangle.
+                let level = Vec3::new(cur.x, prev.y, cur.z);
+                // A walk with no horizontal extent was never carried anywhere, so it is level by
+                // construction; asking would hand `segment_hits` a zero-length segment, whose
+                // determinant guard answers "miss" and would read as "reached only by climbing".
+                let flat_too = run <= 0.0 || self.hits(prev, level).is_some();
+                return Some(Hit {
+                    tri,
+                    at,
+                    along: Vec3::new(at.x - a.x, 0.0, at.z - a.z).length(),
+                    walk_y: here,
+                    from_y: from,
+                    start_y: start,
+                    climb,
+                    layers,
+                    step: k,
+                    steps: n,
+                    index,
+                    flat_too,
+                });
             }
             prev = cur;
         }
-        false
+        None
     }
 
-    /// Whether the segment `p → q` — already at the height it is to be asked about — hits a wall.
-    fn hits(&self, p: Vec3, q: Vec3) -> bool {
+    /// Which wall triangle the segment `p → q` — already at the height it is to be asked about —
+    /// meets, with its index and how far along the segment it was met.
+    ///
+    /// The **first** crossed triangle in cell order, not the nearest one. The short circuit is what
+    /// keeps this cheap; asking for the nearest would mean visiting every candidate in every
+    /// overlapping cell, and [`Walls::of`] writes a straddling triangle into each cell it touches,
+    /// so it would need de-duplicating as well. Cell order is a loop over an integer range rather
+    /// than a hash iteration, so the triangle that comes back is the same one from run to run.
+    fn hits(&self, p: Vec3, q: Vec3) -> Option<([Vec3; 3], u32, f32)> {
         let key = |v: f32| (v / GROUND_CELL).floor() as i32;
         let (lo_x, hi_x) = (p.x.min(q.x), p.x.max(q.x));
         let (lo_z, hi_z) = (p.z.min(q.z), p.z.max(q.z));
@@ -456,14 +655,14 @@ impl Walls {
                 let Some(list) = self.runs.get(&(cx, cz)) else { continue };
                 for i in list {
                     if let Some(t) = self.tris.get(*i as usize) {
-                        if segment_hits(p, q, t) {
-                            return true;
+                        if let Some(at) = segment_hits(p, q, t) {
+                            return Some((*t, *i, at));
                         }
                     }
                 }
             }
         }
-        false
+        None
     }
 
     /// How many wall triangles were indexed.
@@ -478,28 +677,33 @@ impl Walls {
     }
 }
 
-/// Möller-Trumbore, bounded to the segment: whether `a → b` passes through the triangle.
-fn segment_hits(a: Vec3, b: Vec3, t: &[Vec3; 3]) -> bool {
+/// Möller-Trumbore, bounded to the segment: **where** `a → b` passes through the triangle, as a
+/// fraction of the segment, or `None` if it misses.
+///
+/// The fraction was always computed and always thrown away; returning it is what lets a caller say
+/// where the blocker is rather than only that there was one.
+fn segment_hits(a: Vec3, b: Vec3, t: &[Vec3; 3]) -> Option<f32> {
     let dir = b - a;
     let (e1, e2) = (t[1] - t[0], t[2] - t[0]);
     let p = dir.cross(e2);
     let det = e1.dot(p);
     if det.abs() < 1e-9 {
-        return false;
+        return None;
     }
     let inv = 1.0 / det;
     let s = a - t[0];
     let u = s.dot(p) * inv;
     if !(-1e-4..=1.000_1).contains(&u) {
-        return false;
+        return None;
     }
     let q = s.cross(e1);
     let v = dir.dot(q) * inv;
     if v < -1e-4 || u + v > 1.000_1 {
-        return false;
+        return None;
     }
+    // `dir` is not normalised, so this is already a fraction of the segment rather than a distance.
     let hit = e2.dot(q) * inv;
-    (0.0..=1.0).contains(&hit)
+    (0.0..=1.0).contains(&hit).then_some(hit)
 }
 
 /// Where a vertical line through `(x, z)` meets a triangle's plane, or `None` if it misses.
@@ -809,5 +1013,241 @@ mod tests {
         assert!(collision_cells(&[mesh(Vec::new(), Vec::new())]).is_empty());
         let bad = mesh(vec![[0.0, 0.0, 0.0]], vec![0, 1, 2]);
         assert!(collision_cells(&[bad]).is_empty(), "an index past the end drops its triangle");
+    }
+
+    /// A deck spanning Gizmo `x ∈ -40..0`, `z ∈ -to..-from` at height `y_off`. `remap` is
+    /// `(-y, z, -x)`, so a quad at a constant file z comes out flat.
+    fn deck_between(from: f32, to: f32, y_off: f32) -> WorldMesh {
+        mesh(
+            vec![[from, 0.0, y_off], [to, 0.0, y_off], [from, 40.0, y_off], [to, 40.0, y_off]],
+            vec![0, 1, 2, 1, 3, 2],
+        )
+    }
+
+    /// The same, starting at the origin.
+    fn deck(to: f32, y_off: f32) -> WorldMesh {
+        deck_between(0.0, to, y_off)
+    }
+
+    /// A vertical face standing across Gizmo `z = -at`, spanning `x ∈ -40..0` and `y ∈ lo..hi`.
+    /// A constant file **x** is a constant Gizmo z, and the file's z is Gizmo's height.
+    fn wall(at: f32, lo: f32, hi: f32) -> WorldMesh {
+        mesh(
+            vec![[at, 0.0, lo], [at, 40.0, lo], [at, 0.0, hi], [at, 40.0, hi]],
+            vec![0, 1, 2, 1, 3, 2],
+        )
+    }
+
+    /// The walk stops at a wall and now says which one, where, and what the floor was doing —
+    /// on a level road, where every one of those answers is knowable by hand.
+    #[test]
+    fn a_hit_names_the_triangle_it_met() {
+        let cells = collision_cells(&[deck(40.0, 0.0), wall(20.0, 0.0, 3.0)]);
+        let (ground, walls) = (Ground::of(&cells), Walls::of(&cells));
+        assert_eq!(walls.len(), 2, "the wall quad is two triangles");
+
+        let a = Vec3::new(-20.0, 0.0, -30.0);
+        let b = Vec3::new(-20.0, 0.0, -10.0);
+        let hit = walls.across_hit(&ground, a, b, 0.5, 3.0).expect("a wall stands across the road");
+
+        let (lo, hi) = hit.span();
+        assert!((lo - 0.0).abs() < 1e-3 && (hi - 3.0).abs() < 1e-3, "span {lo}..{hi}, want 0..3");
+        assert!((hit.at.z + 20.0).abs() < 1e-2, "met at z {}, want -20", hit.at.z);
+        assert!((hit.at.y - 0.5).abs() < 1e-2, "met at the lift height, got {}", hit.at.y);
+        assert!((hit.along - 10.0).abs() < 0.1, "10 m along, got {}", hit.along);
+        assert!(hit.walk_y.abs() < 1e-3 && hit.drift().abs() < 1e-3, "a level road does not drift");
+        assert!(hit.climb.abs() < 1e-3, "a level road has no climb");
+        assert_eq!(hit.layers, 1, "one deck under this step");
+        // 20 m of run at 3 m a step, and the wall is 10 m in.
+        assert_eq!((hit.step, hit.steps), (4, 7));
+        assert!(hit.index < walls.len() as u32);
+        // On a level road a real wall is still there when the step is carried flat. This is the
+        // signature the stacked case below does **not** have.
+        assert!(hit.flat_too, "a wall across a level road is hit level too");
+    }
+
+    /// **The regression test for a withdrawn finding.** An obstacle scan built on the boolean read
+    /// 3-25 % of race-line edges as blocked, and the reading had to be given up because the walk
+    /// follows the ground: leaving a deck it drops to the road beneath and answers about geometry
+    /// standing down there. The boolean cannot tell that from a wall; the hit can.
+    #[test]
+    fn the_road_below_a_deck_is_not_a_wall_across_it() {
+        // Lower road over z ∈ -40..0, upper deck over z ∈ -20..0 nine metres up, and a three-metre
+        // face standing on the **lower** road just past the upper deck's lip.
+        let cells = collision_cells(&[deck(40.0, 0.0), deck(20.0, 9.0), wall(21.0, 0.0, 3.0)]);
+        let (ground, walls) = (Ground::of(&cells), Walls::of(&cells));
+        assert_eq!(ground.heights_at(-20.0, -15.0).len(), 2, "the stack is where the test needs it");
+
+        // Driving along the upper deck, off its end.
+        let a = Vec3::new(-20.0, 9.0, -10.0);
+        let b = Vec3::new(-20.0, 9.0, -30.0);
+        assert!(walls.across(&ground, a, b, 0.5, 3.0), "the boolean says blocked — and is no use");
+        let hit = walls.across_hit(&ground, a, b, 0.5, 3.0).expect("same walk, same answer");
+
+        assert!((hit.start_y - 9.0).abs() < 1e-3, "the walk began on the upper deck");
+        assert!((hit.from_y - 9.0).abs() < 1e-3 && hit.walk_y.abs() < 1e-3, "and fell off it here");
+        assert!((hit.climb - 9.0).abs() < 1e-3, "a nine-metre change of floor, got {}", hit.climb);
+        assert!((hit.drift() + 9.0).abs() < 1e-3, "nine metres below where it started");
+        assert!(hit.span().1 <= hit.start_y, "the whole triangle is under the deck it set out on");
+        let (over_lo, over_hi) = hit.over_floor();
+        assert!(over_lo > -0.5 && over_hi > 2.0, "it stands on the lower road: {over_lo}..{over_hi}");
+        // The separation itself: carried level at the height the step came in at, this step meets
+        // nothing. Whatever stopped it, a car on the upper deck could not have driven into it.
+        assert!(!hit.flat_too, "the walk reached this only by changing floors");
+    }
+
+    /// The old question, asked through the new one. Four shapes, so a later refactor cannot let the
+    /// two answers drift apart.
+    #[test]
+    fn the_boolean_is_the_hit_asked_twice() {
+        // The verdict is written down as well as compared. While `across` delegates, agreement is
+        // a tautology and only catches a future re-implementation; the expected column is what
+        // catches this walk quietly changing its mind.
+        let cases = [
+            ("clear road", false, vec![deck(40.0, 0.0)]),
+            ("a wall across it", true, vec![deck(40.0, 0.0), wall(20.0, 0.0, 3.0)]),
+            ("a stack", true, vec![deck(40.0, 0.0), deck(20.0, 9.0), wall(21.0, 0.0, 3.0)]),
+            ("no ground at all", true, vec![wall(20.0, 0.0, 3.0)]),
+        ];
+        for (name, want, meshes) in cases {
+            let cells = collision_cells(&meshes);
+            let (ground, walls) = (Ground::of(&cells), Walls::of(&cells));
+            let (a, b) = (Vec3::new(-20.0, 0.0, -30.0), Vec3::new(-20.0, 0.0, -10.0));
+            assert_eq!(walls.across(&ground, a, b, 0.5, 3.0), want, "{name}");
+            assert_eq!(
+                walls.across(&ground, a, b, 0.5, 3.0),
+                walls.across_hit(&ground, a, b, 0.5, 3.0).is_some(),
+                "{name}"
+            );
+        }
+    }
+
+    /// Clear road, and the index knows it holds nothing.
+    #[test]
+    fn nothing_in_the_way_is_no_hit() {
+        let cells = collision_cells(&[deck(40.0, 0.0)]);
+        let (ground, walls) = (Ground::of(&cells), Walls::of(&cells));
+        assert!(walls.is_empty(), "a flat deck contributes no wall triangles");
+        let (a, b) = (Vec3::new(-20.0, 0.0, -30.0), Vec3::new(-20.0, 0.0, -10.0));
+        assert_eq!(walls.across_hit(&ground, a, b, 0.5, 3.0), None);
+        assert!(!walls.across(&ground, a, b, 0.5, 3.0));
+    }
+
+    /// Off the end of the road the walk carries the interpolated height instead of a floor, and
+    /// says so. "No ground here" and "the floor changed" are different findings and this is what
+    /// keeps them apart.
+    #[test]
+    fn a_step_with_no_ground_reports_no_layers() {
+        // The road stops at z = -40; the face stands ten metres past it, over nothing.
+        let cells = collision_cells(&[deck(40.0, 0.0), wall(50.0, 0.0, 3.0)]);
+        let (ground, walls) = (Ground::of(&cells), Walls::of(&cells));
+        let a = Vec3::new(-20.0, 0.0, -30.0);
+        let b = Vec3::new(-20.0, 0.0, -60.0);
+        let hit = walls.across_hit(&ground, a, b, 0.5, 3.0).expect("the face is still hit");
+        assert_eq!(hit.layers, 0, "there is no drivable surface under this step");
+        assert!((hit.at.z + 50.0).abs() < 1e-2, "met at z {}, want -50", hit.at.z);
+        // `heights_at` gave nothing, so the walk kept the interpolated height rather than inventing
+        // a floor — and that is not a change of deck.
+        assert!(hit.walk_y.abs() < 1e-3 && hit.climb.abs() < 1e-3);
+    }
+
+    /// The parameter the triangle test always computed and always threw away: it is a fraction of
+    /// the segment, not a distance, and the point it names lies in the triangle's plane.
+    #[test]
+    fn the_segment_parameter_lands_on_the_triangle() {
+        let t = [
+            Vec3::new(0.0, 0.0, -10.0),
+            Vec3::new(-10.0, 0.0, -10.0),
+            Vec3::new(0.0, 10.0, -10.0),
+        ];
+        let (a, b) = (Vec3::new(-2.0, 2.0, -12.0), Vec3::new(-2.0, 2.0, -8.0));
+        let f = segment_hits(a, b, &t).expect("straight through the middle of it");
+        assert!((f - 0.5).abs() < 1e-4, "halfway along, got {f}");
+        assert!(((a + (b - a) * f).z + 10.0).abs() < 1e-4, "and in the triangle's own plane");
+        // Past the far end is a miss, which is what "bounded to the segment" means.
+        assert_eq!(segment_hits(a, Vec3::new(-2.0, 2.0, -11.0), &t), None);
+    }
+
+    /// **A crossed triangle, not the nearest one.** The search short-circuits on the first hit in
+    /// cell order, and that is deliberate — asking for the nearest ends the short circuit. Written
+    /// down as a test so nobody builds a distance on top of it by accident.
+    #[test]
+    fn the_hit_is_a_crossed_triangle_not_the_nearest_one() {
+        // Both faces sit in the same 64 m cell and one step crosses both: the walk runs 20 m in
+        // seven steps, so step 4 spans z -21.4 → -18.6. Walking from z = -30 the **nearer** face is
+        // the one at -21; the one at -20 is indexed first because its mesh is listed first, and
+        // that is the one that comes back.
+        let cells = collision_cells(&[deck(40.0, 0.0), wall(20.0, 0.0, 3.0), wall(21.0, 0.0, 3.0)]);
+        let (ground, walls) = (Ground::of(&cells), Walls::of(&cells));
+        let a = Vec3::new(-20.0, 0.0, -30.0);
+        let hit = walls
+            .across_hit(&ground, a, Vec3::new(-20.0, 0.0, -10.0), 0.5, 3.0)
+            .expect("two faces, one step crosses both");
+        assert!(
+            (hit.at.z + 20.0).abs() < 1e-2,
+            "met at z {}, want the farther face at -20 — index order, not distance",
+            hit.at.z
+        );
+        // Swapping the two meshes swaps the answer, which is the whole point: this is an order, not
+        // a distance. If it ever becomes a distance, this is the assertion that says so.
+        let swapped =
+            collision_cells(&[deck(40.0, 0.0), wall(21.0, 0.0, 3.0), wall(20.0, 0.0, 3.0)]);
+        let (g2, w2) = (Ground::of(&swapped), Walls::of(&swapped));
+        let other = w2
+            .across_hit(&g2, a, Vec3::new(-20.0, 0.0, -10.0), 0.5, 3.0)
+            .expect("same two faces");
+        assert!((other.at.z + 21.0).abs() < 1e-2, "met at z {}, want -21", other.at.z);
+    }
+
+    /// **A wall on the deck the car is actually on.** The walk leaves the upper deck and drops to
+    /// the road below in one step, and there is a face at that spot on *both* levels. The first
+    /// triangle in cell order is the one on the lower road — so re-testing that one level would
+    /// answer "reached only by changing floors" and the caller would throw away a barrier standing
+    /// squarely across the deck it set out on. Asking the index instead is what keeps it.
+    #[test]
+    fn a_wall_on_the_deck_is_not_dismissed_with_the_road_below() {
+        let cells = collision_cells(&[
+            deck(40.0, 0.0),
+            deck(20.0, 9.0),
+            wall(21.0, 0.0, 3.0),
+            wall(21.0, 9.0, 12.0),
+        ]);
+        let (ground, walls) = (Ground::of(&cells), Walls::of(&cells));
+        let a = Vec3::new(-20.0, 9.0, -10.0);
+        let b = Vec3::new(-20.0, 9.0, -30.0);
+        let hit = walls.across_hit(&ground, a, b, 0.5, 3.0).expect("something is in the way");
+
+        // The triangle returned is the lower one — it was indexed first — and on its own it reads
+        // exactly like the withdrawn finding's false positive.
+        assert!(hit.span().1 <= 3.0 + 1e-3, "the lower face came back first, as it must");
+        assert!((hit.climb - 9.0).abs() < 1e-3, "and the walk did change deck, got {}", hit.climb);
+        // But something *does* stand across the way at the height the step came in at.
+        assert!(hit.flat_too, "the face on the upper deck is still there when the step is level");
+    }
+
+    /// **A hole in the road is not a change of floor.** Where `heights_at` has nothing to say the
+    /// walk carries the caller's own interpolated height, which is not a surface — counting it
+    /// would make every gap read as a drop onto another deck and back out of it.
+    #[test]
+    fn a_stretch_with_no_ground_is_not_a_climb() {
+        // Road from z = 0 to -12, nothing until -28, road again to -40, and a face at -34. The
+        // query is aimed eight metres up, so over the gap the interpolated height climbs away from
+        // the road on both sides of it — the shape that used to be counted as a change of deck.
+        let cells = collision_cells(&[
+            deck_between(0.0, 12.0, 0.0),
+            deck_between(28.0, 40.0, 0.0),
+            wall(34.0, 0.0, 3.0),
+        ]);
+        let (ground, walls) = (Ground::of(&cells), Walls::of(&cells));
+        assert!(ground.heights_at(-20.0, -20.0).is_empty(), "the gap is where the test needs it");
+        let a = Vec3::new(-20.0, 0.0, -5.0);
+        let b = Vec3::new(-20.0, 8.0, -38.0);
+        let hit = walls.across_hit(&ground, a, b, 0.5, 3.0).expect("the face is met");
+
+        assert!((hit.at.z + 34.0).abs() < 1e-2, "met at z {}, want -34", hit.at.z);
+        assert_eq!(hit.layers, 1, "back on the road by then");
+        assert!(hit.walk_y.abs() < 1e-3 && hit.start_y.abs() < 1e-3, "one road, one height");
+        assert!(hit.climb.abs() < 1e-3, "level road on both sides of the gap, got {}", hit.climb);
+        assert!(hit.drift().abs() < 1e-3, "and the walk ends where it started");
     }
 }
