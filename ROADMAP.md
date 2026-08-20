@@ -3306,6 +3306,115 @@ direksiyonda: −54°'de pilot kilidin yalnız 0,50'sini istiyor, çünkü açı
 kendi geometrisi değil düz bir rampa (`(açı·2/π)·STEER_LIMIT`). Saf takibin kendi formülü
 `δ = atan(2·L_dingil·sin θ / L)`; sıradaki aday o, ve o da sekiz rotayla yargılanacak.
 
+### Alanın en büyük tek kaybı viraj değilmiş: arkasındaki bir noktaya direksiyon kırmak (2026-08-20)
+
+`NFS_LOST=1` sekiz rotanın hepsine koşuldu. Kursu bırakan **50 arabanın 28'i (%56)**, bırakmadan
+önceki saniyelerde yarım saniyeden uzun süre **arkasındaki** bir noktaya direksiyon kırıyor: nişan
+açısı |θ| > 120°. Neredeyse hepsi *yol ekseninin üstünde* başlıyor — koridora 0,4-1,0 m, 43-88 km/h
+— ve direksiyon tam kilide yakın çakılıyken 20-50 m dışarıda bitiyor. `Paths4102`'de bunu **altı
+arabanın altısı** bir saniye içinde yapıyor.
+
+**Anatomi, 4102 araba 0.** Sayılar izin kendisinden:
+
+| t | konum | hız | koridora | direksiyon | nişan | hedef waypoint |
+|---|---|---|---|---|---|---|
+| 27,0 | (−39, −138) | 79 | 1,1 m | 0,02 | 67 m, −2° | 11 @ 46 m, **−61°** |
+| 28,6 | (−19, −107) | 86 | 0,6 m | 0,01 | 30 m, −1° | 11 @ 42 m, **−108°** |
+| 29,8 | (−2, −83) | 88 | 0,1 m | 0,04 | **1 m**, −5° | 11 @ 58 m, −136° |
+| 30,2 | (3, −75) | 83 | 1,5 m | **0,85** | 9 m, **−179°** | 11 @ 65 m, −140° |
+| 32,6 | (31, −42) | 50 | **22,6 m** | 0,85 | 52 m, −173° | 12 @ 89 m, −127° |
+| 35,0 | (55, −23) | 45 | **49,1 m** | 0,82 | 190 m, −87° | 13 @ 99 m, −112° |
+
+Araba hattın tam üstünde, saatte 88 km ile ve dümdüz gidiyor. Hedef waypoint 11 ise yolun
+**40 m yanından** geçiyor ve arkaya süpürülüyor (−61° → −136°) — ilerlemiyor, çünkü ilerletme kuralı
+"bir sonraki daha yakın mı" diye soruyor ve araba ikisine de yaklaşmıyor. Sonra tutulan düğüm
+207'ye atlıyor, nişan **9 m, −179°** oluyor ve pilot tam kilit + tam fren istiyor. Fren zaten
+sonuna kadar basılı (eski `over` kuralı hızda tam kilidi görüp her şeyi istiyor); arabayı kurstan
+çıkaran şey **fren değil kilit** — 88'den 45 km/h'ye inerken koridoru 1,5 m'den 49 m'ye yana
+sürterek geçiyor.
+
+**Kök sebep ağ yürüyüşünde:** greedy adım (`step_avoiding`) hedefe *düz mesafede* en yakın komşuyu
+seçiyor; hedef yana ve arkaya düştüğünde bu, arabayı geldiği yöne çeviren kolu seçmek demek. Nişan
+yürüyüşü de sadık biçimde geriye yürüyor. Yani kusur pilotun cevabında değil, cevabın **fiziksel
+olarak imkânsız** olmasında: 88 km/h'deki bir araba dönemez.
+
+**Arabanın gerçek yanal kapasitesi ölçüldü** — ve bu, dünkü `GRIP = 8`'in ne olduğunu da söylüyor.
+İzdeki konumlar tam hassasiyetle saklandığı için `v·dψ/dt` doğrudan hesaplanabiliyor: 4121'de
+>28 km/h'deki 1.347 adımda **%50: 3,0 · %90: 5,2 · %95: 5,6 m/s²**. Yani `GRIP = 8` arabanın **hiç
+ulaşmadığı** bir tavan; fren ancak talep zaten ulaşılamaz olduğunda, yani araba açılmaya başladıktan
+sonra devreye giriyor. `grip = 6`'nın 64 arabanın 22'sini kursta tutması da bu yüzden şaşırtıcı
+değil — gerçek sınıra yakın tek değer oydu.
+
+**Düzeltme: dünkü "sıradaki aday" yanlıştı.** Commit'te sıradaki iş olarak saf takibin kendi
+direksiyon yasasını (`δ = atan(2·L_dingil·sin θ / L)`) yazmıştım. Aritmetiği yapınca ters çıkıyor:
+o viraj 21 m yarıçap istiyor ve doğru geometri bunun için kilidin ancak dörtte birini ister —
+yani viraj bir **direksiyon** değil **hız** problemi, ve doğru yasa oraya kilit *eklemez*. Aday
+geri çekildi.
+
+**Ve bir olumsuz sonuç daha: yolun kendi eğriliği, kirişten daha kötü.** Fren şu an nişan noktasına
+çekilen kirişin eğriliğine bakıyor (`2·sin θ / L`) ve o açı iki şeyi birden taşıyor: yolun virajı
+**ve** arabanın kendi yönelme hatası. Daha "saf" olanı denendi — yürüyüşün düğüm çoklu-doğrusundan
+okunan, arabadan tamamen bağımsız yol eğriliği — ve sekiz rotada kaybediyor:
+
+| kol | waypoint | kursta kalan |
+|---|---|---|
+| kiriş, GRIP 8 (mevcut) | **927** | 14 |
+| yol eğriliği, 5 | 909 | 12 |
+| yol eğriliği, 6.5 | 848 | 17 |
+
+Okuma: hatayı da içine katan sayı daha iyi çalışıyor, çünkü zaten hattan açılmış bir arabayı
+yavaşlatmak istediğimiz şeydir — "kendi hatan için fren yapma" kulağa doğru gelen ama alanın
+reddettiği bir arıtma. Silindi; kayıt `GRIP`'in yanında duruyor.
+
+**Bunun bir yan sonucu var ve `GRIP = 8`'i açıklıyor.** Araba gerçekte 5,2 m/s² tutuyorsa, "fiziksel
+olarak doğru" tavan 5-6 olmalıydı — ama ölçümde `grip = 6` kolların en kötüsü. Çelişki değil:
+kiriş açısı yolun virajını **abartıyor** (arabanın yönelme hatasını da içerdiği için), dolayısıyla
+8 sabiti lastiğin kapasitesi değil, **kapasite bölü abartma katsayısı**. Sabiti arabanın gerçek
+sınırına çekmek, ancak eğrilik tahmini de düzeltilirse anlamlı olur — ve o düzeltme (yukarıdaki yol
+eğriliği) alanda kaybediyor. İkisi birlikte ayarlanmadıkça 8 kalır.
+
+**Denenmemiş varyant, kayıt için:** yukarıdaki sınır her hızda uygulanıyor, oysa arkadaki noktaya
+dönmek *duran* bir araba için doğru manevra — ve pilotun kaçış/geri vites makinesi tam da onu
+yapar. Hıza bağlı bir tavan (durmuşken tam kilit, 60 km/h'de neredeyse sıfır) aynı fikrin daha
+doğru biçimidir ve ölçülmedi.
+
+**Ve arka nişanın kendi düzeltmesi de çürüdü.** Açık olan şey deneniyordu: 88 km/h'deki araba
+dönemeyeceğine göre, hedef arkadayken kilidi sınırla — araba hızını atarken yolda kalsın, dönüşü
+sonra yapsın. Sekiz rota:
+
+| kol | waypoint | kursta kalan | dünyadan düşen |
+|---|---|---|---|
+| sınır yok (mevcut) | **927** | 14 | **2** |
+| 0,35 | 728 | 19 | 5 |
+| 0,15 | 739 | 16 | 6 |
+
+Gerçekten daha çok arabayı kursta tutuyor, ve bunun bedeli alanın ilerlemesinin beşte biri. Ama
+kapatan sütun sonuncusu: **dönemeyen araba kenardan da dönemez**, ve dünyadan düşen araba üçe
+katlanıyor. Kısıtlanan manevra, arabayı sınırda kurtaran manevranın ta kendisi.
+
+### Bir örüntü çıktı: "daha az yap" kollarının hepsi aynı takası yapıyor
+
+Bugün üç ayrı kol denendi ve üçü de aynı sınırda duruyor — kursta kalan arabayı artırıyor, waypoint
+kaybediyor:
+
+| kol | waypoint | kursta kalan |
+|---|---|---|
+| kural yok | 883 | 9 |
+| **GRIP 8** | **927** | **14** |
+| GRIP 6 | 602 | 22 |
+| arka kilit 0,35 | 728 | 19 |
+| arka kilit 0,15 | 739 | 16 |
+
+`GRIP = 8` bu sınırın **dışında** kalan tek nokta: ikisini birden aldı. Geri kalan her "daha az
+yap" hamlesi (daha çok fren, daha az kilit) ilerlemeyi güvenlikle takas ediyor, ve takas oranı
+kötü.
+
+**Okuma, ve sıradaki turun yönü:** arka nişan arızası pilotun *cevabında* değil, **rotalamada**
+doğuyor. Araba hattın üstünde, düz, 88 km/h giderken hedef waypoint yolun 40 m yanından geçiyor —
+yani ağ yürüyüşü arabayı kursun gitmediği bir yola sokmuş durumda, ve nişanın geriye dönmesi bunun
+*sonucu*. Cevabı yumuşatmak (fren, kilit) semptomu tedavi ediyor ve alan bunu her seferinde
+reddediyor. Kazanç, yanlış yola hiç girmemekte.
+
 ## Nerede kaldık (2026-08-14 sonu)
 
 **Alan (2026-08-20, motor pini `58dc2623` ve `GRIP` açıkken): 927 geçilen waypoint, 1.280 ayrık
@@ -3351,9 +3460,15 @@ elenmeyen dörtte −70. Karar yalnız sekiz rotadan çıkar.
   yapan terim (`GRIP = 8`) sekiz rotada **883 → 927 waypoint**, kursta kalan araba **9 → 14**
   getirdi. 4121 hâlâ çözülmedi: yedi araba virajın 19 m ilerisinde, 50 km/h ile çıkıyor. Kalan
   eksik direksiyonda — açı→kilit haritası düz bir rampa, saf takibin kendi formülü değil.
-- **İkinci ve ayrı arıza: nişan noktası bir düğümde 180° dönüyor** ve pilot tam kilit + tam fren
-  istiyor (araba 5 ve 2, `NFS_LOST=1` izinde). Tutulan düğüm değişmiyor, mesafe 0 → 31 m
-  büyüyor. Henüz teşhis edilmedi; ize kaçış durumu ve hedef waypoint eklenmeli.
+- **Alanın en büyük tek kaybı: arkadaki bir noktaya direksiyon kırmak.** Kursu bırakan 50 arabanın
+  **28'i** bunu yapıyor (yukarıya bak). Kaçış ya da vazgeçme değil: hedef waypoint yolun yanından
+  geçip arkaya düşüyor, ağ yürüyüşü ona doğru geriye yürüyor. Cevabı yumuşatan iki kol da
+  (arka kilit 0,15 / 0,35) çürütüldü — dönemeyen araba kenardan da dönemiyor, düşen araba 2'den
+  5-6'ya çıkıyor. **Kazanç rotalamada:** araba hattın üstünde düz giderken hedefin 40 m yanda
+  kalması, ağ yürüyüşünün onu kursun gitmediği yola sokmuş olması demek.
+- **Arabanın ölçülmüş yanal kapasitesi 5,2 m/s²** (%90; %95'te 5,6). `GRIP = 8` bunun üstünde ve
+  bu bilerek: kiriş açısı virajı abarttığı için sabit, kapasite değil *kapasite bölü abartma*.
+  İkisi birlikte düzeltilmedikçe 8 kalır — yol eğriliğine geçme denemesi çürütüldü.
 - **Motor pini `58dc2623`'te** (2026-08-20'de taşındı). `BASELINE-SEKIZ-ROTA.md` yükseltme öncesi
   tabloyu tutuyor; yükseltme sonrası süpürme onunla yan yana konmalı.
 

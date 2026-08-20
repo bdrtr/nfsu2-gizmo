@@ -225,9 +225,17 @@ const BRAKE_GAIN: f32 = 1.5;
 /// of junctions to distinct nodes is unmoved, 1.069 → 1.054.
 ///
 /// It does **not** fix 4121: seven of eight still leave at waypoint 6, now 19 m further round the
-/// bend and at 50 km/h instead of 66. What is left there is the steering, which asks for 0.50 of
-/// lock at −54° because the angle-to-lock map is a straight ramp rather than the arc's own
-/// geometry.
+/// bend and at 50 km/h instead of 66.
+///
+/// **What was written here as the next candidate is withdrawn.** It said the remainder was the
+/// steering, because the pilot asks for only 0.50 of its lock at −54° and the angle-to-lock map is
+/// a straight ramp rather than pure pursuit's own geometry. The arithmetic says the opposite: that
+/// corner is a 21 m radius, which the correct geometry would take at about a *quarter* lock, so
+/// the honest law asks for **less** steering there, not more. The corner is a speed problem and
+/// this constant is the lever for it; what is left is that 8 is above anything the car can
+/// actually do — measured at 5.2 m/s² at the 90th percentile of the field's own cornering
+/// (`ROADMAP.md`, 2026-08-20) — which is why the brake only arrives once the car is already
+/// running wide.
 const GRIP: f32 = 8.0;
 
 /// How much steering costs throttle.
@@ -505,6 +513,17 @@ impl Pilot {
     #[must_use]
     pub fn aim(&self) -> Option<Vec3> {
         self.aim
+    }
+
+    /// Where an escape manoeuvre is driving it, if one is running.
+    ///
+    /// An escape **overrides the graph's aim** for its duration, so a diagnostic that reads
+    /// [`Self::aim`] alone cannot tell a pilot following the road from one reversing out of a
+    /// corner — and the two look identical in a trace right up to the point where one of them is
+    /// pointing backwards. This is the bit that separates them.
+    #[must_use]
+    pub fn escaping(&self) -> Option<Vec3> {
+        self.escape.map(|(to, _)| to)
     }
 
     /// Which waypoint it is heading for.
@@ -1013,7 +1032,33 @@ impl Pilot {
         // routes it is not an improvement but a trade: 4041 went 2/8 to 6/8 and 4102 went **8/8 to
         // 5/8**, 275 junctions down to 111. So it is gone rather than kept at a value that reads
         // as tuned.
+        // **Steering at a point behind the car is the field's largest single loss of course, and
+        // capping the lock for it is refuted.** Traced over eight routes with `NFS_LOST=1`, **28 of
+        // the 50 cars that lost the course** spent half a second or more aiming at something behind
+        // them — almost all starting *on* the line, 0.5 m from it at 45-88 km/h, and ending 20-50 m
+        // outside it with the wheel pinned near full lock. On `Paths4102` it is the whole field,
+        // six cars within a second of each other.
+        //
+        // So the obvious fix was to stop asking for the impossible: a car at 88 km/h cannot turn
+        // round, and clamping the lock while the target is behind should let it hold the road while
+        // it sheds speed. Swept, and it fails on both counts that matter:
+        //
+        // | cap | waypoints | never lost the course | fell off the world |
+        // |---|---|---|---|
+        // | none | **927** | 14 | **2** |
+        // | 0.35 | 728 | 19 | 5 |
+        // | 0.15 | 739 | 16 | 6 |
+        //
+        // It does keep more cars on the course, and it costs a fifth of the field's progress to do
+        // it — but the number that closes it is the last column: **a car that cannot turn cannot
+        // turn away from an edge either**, and three times as many drove off the world. The
+        // manoeuvre being clamped is the same one that saves a car at the boundary.
+        //
+        // Not tried, and the better shape of the same idea: a cap that varies with speed — full
+        // lock at rest, where turning round is exactly right and the escape machinery depends on
+        // it, and little at 60 km/h. What is measured here is the flat cap only.
         let want = (angle * 2.0 / std::f32::consts::PI).clamp(-1.0, 1.0) * STEER_LIMIT;
+
         // How fast the wheel catches up with what the pilot wants.
         //
         // **Swept and refuted, and the way it failed is the point.** Six of eight cars on 4121
@@ -1051,6 +1096,14 @@ impl Pilot {
         // deliberate. It is a separate failure with a separate fix, and this term must not paper
         // over it by braking for it.
         let grip: f32 = std::env::var("NFS_GRIP").ok().and_then(|v| v.parse().ok()).unwrap_or(GRIP);
+        // **Braking on the road's own bend instead of on the chord is refuted.** `θ` here carries
+        // two things at once — the road's bend *and* this car's heading error — and the purer
+        // quantity was tried: the tightest curvature of the walk's own node polyline, with nothing
+        // about the car in it. Over eight routes it loses at both settings, 909 waypoints at
+        // 5 m/s² and 848 at 6.5 against **927** for the chord, so the code is gone rather than kept
+        // at a value that reads as tuned. The reading is worth keeping: slowing a car that has
+        // *already* drifted off line is not a bug in the measurement, it is half of what the brake
+        // is for, and "do not brake for your own mistake" is a refinement the field rejects.
         if grip > 0.0 {
             let reach = flat(aim - at).length().max(1.0);
             let need = 2.0 * speed * speed * angle.abs().sin() / reach;

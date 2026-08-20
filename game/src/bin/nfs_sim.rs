@@ -148,6 +148,23 @@ struct Moment {
     aim: Option<(f32, f32)>,
     /// The node the pilot was holding, and how far the car was from it.
     node: Option<(u32, f32)>,
+    /// Where that waypoint actually was — distance and bearing off the nose, like [`Self::aim`].
+    ///
+    /// The aim walk steers the graph *toward this point*, so an aim that comes back behind the car
+    /// has two possible causes and they need opposite fixes: the goal itself is behind (the
+    /// waypoint counter is stuck) or the goal is ahead and the graph walk to it starts by going
+    /// backwards. Nothing else in the trace separates them.
+    goal_at: Option<(f32, f32)>,
+    /// The waypoint it was heading for, and how many nodes it had given up on by then.
+    ///
+    /// A goal that stops advancing and a blacklist that keeps growing are the two ways the pilot
+    /// can be steering at something the road does not lead to, and neither is visible in the
+    /// steering itself.
+    goal: usize,
+    given_up: usize,
+    /// Whether an escape manoeuvre was overriding the aim. Without this the trace cannot tell the
+    /// road's own aim from a reverse-out, and the two are opposite findings.
+    escaping: bool,
 }
 
 const DEFAULT_CAR: &str =
@@ -799,6 +816,13 @@ async fn run() {
                         let d = Vec3::new(a.x - p.position.x, 0.0, a.z - p.position.z);
                         (d.length(), d.dot(side).atan2(d.dot(fwd)).to_degrees())
                     }),
+                    goal_at: waypoints.get(pilot.goal()).map(|w| {
+                        let d = Vec3::new(w.x - p.position.x, 0.0, w.z - p.position.z);
+                        (d.length(), d.dot(side).atan2(d.dot(fwd)).to_degrees())
+                    }),
+                    goal: pilot.goal(),
+                    given_up: pilot.given_up().len(),
+                    escaping: pilot.escaping().is_some(),
                     node: pilot.node().and_then(|i| net.node(i)).map(|j| {
                         (
                             pilot.node().unwrap_or_default(),
@@ -928,16 +952,37 @@ async fn run() {
                 "            iz — koridor yarı genişliği {} m · 20 Hz",
                 city::COURSE_HALF_WIDTH
             );
-            for m in v {
+            // **What the car actually held**, as opposed to what the pilot asked of it. Worked out
+            // here rather than carried in the sample, because the positions are stored at full
+            // precision and only *printed* rounded — and the printed metres are far too coarse to
+            // differentiate a heading over 50 ms. Lateral acceleration is `v · dψ/dt` from three
+            // consecutive samples; it is the number `GRIP` is guessing at, and a pilot that asks
+            // for more than the car ever demonstrates is asking to leave the road.
+            let lat = |i: usize| -> Option<f32> {
+                let (a, b, c) = (v.get(i.checked_sub(1)?)?, v.get(i)?, v.get(i + 1)?);
+                let d1 = Vec3::new(b.at.x - a.at.x, 0.0, b.at.z - a.at.z);
+                let d2 = Vec3::new(c.at.x - b.at.x, 0.0, c.at.z - b.at.z);
+                let dt = c.t - b.t;
+                if d1.length() < 0.2 || d2.length() < 0.2 || dt <= 0.0 {
+                    return None;
+                }
+                let turn = d1.normalize().cross(d2.normalize()).y.asin();
+                Some((b.speed.abs() * turn / dt).abs())
+            };
+            for (i, m) in v.iter().enumerate() {
                 let aim = m.aim.map_or("          —".to_string(), |(d, a)| {
                     format!("{d:>4.0} m {a:>5.0}°")
                 });
                 let node = m
                     .node
                     .map_or("     —".to_string(), |(i, d)| format!("{i:>4} {d:>4.0} m"));
+                let gw = m.goal_at.map_or("          —".to_string(), |(d, a)| {
+                    format!("{d:>4.0} m {a:>5.0}°")
+                });
                 println!(
                     "              t={:>6.1} ({:>7.0},{:>7.0}) {:>4.0} km/h · koridora {:>5.1} m \
-                     · direksiyon {:>5.2} · gaz {:>4.2} fren {:>4.2} · nişan {aim} · düğüm {node}",
+                     · direksiyon {:>5.2} · gaz {:>4.2} fren {:>4.2} · nişan {aim} · düğüm {node} \
+                     · hedef {:>4} {gw} · yanal {} · vazgeçti {:>2}{}",
                     m.t,
                     m.at.x,
                     m.at.z,
@@ -945,7 +990,11 @@ async fn run() {
                     m.off,
                     m.steer,
                     m.throttle,
-                    m.brake
+                    m.brake,
+                    m.goal,
+                    lat(i).map_or("   —".to_string(), |a| format!("{a:>4.1}")),
+                    m.given_up,
+                    if m.escaping { " · KAÇIŞ" } else { "" }
                 );
             }
         }
