@@ -1461,6 +1461,12 @@ impl Pilot {
         let lift =
             if self.escape.is_some() && speed.abs() < esc_full { 0.0 } else { CORNER_LIFT };
         let mut throttle = (1.0 - self.steer.abs() * lift).max(0.15);
+        // `NFS_FLATOUT=1`: pedal to the floor, no brake, steering untouched. **An instrument, not
+        // a driving mode.** "The car is not fast enough" is a claim about the drivetrain, and the
+        // field's top speed on a city course cannot answer it — the pilot lifts for the wheel and
+        // brakes for curvature, so what is measured is the course. With both taken away, what is
+        // left is what the gearbox and the torque curve can do.
+        let flat_out = std::env::var("NFS_FLATOUT").is_ok_and(|v| !v.is_empty() && v != "0");
 
         // **Brake.** Lifting the throttle was the whole speed policy and it is not enough: with no
         // brake a car carries 90 km/h into a corner, runs wide and leaves the road — measured, 20
@@ -1472,6 +1478,16 @@ impl Pilot {
             std::env::var("NFS_BRAKE").ok().and_then(|v| v.parse().ok()).unwrap_or(BRAKE_SPEED);
         let over = (speed / bs) * self.steer.abs();
         let mut brake = ((over - 1.0) * BRAKE_GAIN).clamp(0.0, 1.0);
+        if flat_out {
+            throttle = 1.0;
+            brake = 0.0;
+        }
+        // `NFS_FLATOUT=2` also nails the wheel straight, which is the only way to ask the
+        // drivetrain a question with no course in it: the car leaves the road within seconds, and
+        // what it reached before it did is the acceleration the gearbox and the curve give.
+        if std::env::var("NFS_FLATOUT").as_deref() == Ok("2") {
+            self.steer = 0.0;
+        }
 
         // **And the corner the car has not reached yet**, which the rule above cannot see: it
         // watches how hard the wheel *is* turned, and the wheel only turns once the corner is here.

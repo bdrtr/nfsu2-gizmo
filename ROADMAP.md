@@ -4880,3 +4880,48 @@ doğru ve ağaçlar levha; 235'te ağaçlar doğru ve meydan gri; aradaki her de
 büyük kısmı), `NFS_CUT=1` takasın öbür yüzünü gösteriyor. Şehrin motordan istediği tek şey belli
 ve dar: **`baked_lit` materyalinde bir alfa kesim eşiği.** Motor bilerek pinli olduğu için burada
 değiştirilmedi; bu, karşı tarafa geçirilecek bir istek.
+
+### "Araba hızı tatmin etmiyor": tavan 103 km/h, ve sebebi vitesler değil (2026-08-20)
+
+Oyun sürüldü ve hız şikâyeti geldi. Ölçüldü — `nfs_sim` artık her arabanın **en yüksek hızını**,
+o andaki vitesini, devrini ve tekerlek hızını basıyor; `NFS_FLATOUT=1` gazı kökleyip freni
+kapatıyor, `=2` direksiyonu da sıfırlıyor.
+
+**Alan 95-105 km/h'de tavan yapıyor** ve `Paths4001`'de sekiz arabanın sekizi de tam **102 km/h**.
+Aynı sayıda buluşan sekiz araba yol değil, tavan demektir.
+
+| ölçü | değer |
+|---|---|
+| tepe hızda vites | **4** (dizide 0=geri, 1=boş, 2=1.) → yani **3. vites** |
+| tepe hızda devir | 4.768 / 6.500 |
+| tepe hızda tekerlek torku | 1.142 Nm |
+| yarış boyunca en yüksek vites | **4** — 5. ve 6. hiç kullanılmıyor |
+| viteslerde geçen süre | 1.:%27 · 2.:%57 · 3.:%16 |
+| tekerlek jant hızı / yol hızı | 104 / 103 km/h → **kayma %0** |
+
+**Vitesler suçsuz.** Oranlar `[-3,657 · 0 · 3,321 · 1,902 · 1,308 · 1,000 · 0,900]`, son sürat
+her viteste kırmızı çizgide: 2.'de 98, 3.'de **142**, 4.'de 186, 5.'de **207 km/h**. Araba 3.'de
+4.800 devirde takıldığı için 6.500'e ulaşamıyor ve **4. vitese hiç geçmiyor** — yani "vites
+atmıyor" bir sonuç, sebep değil.
+
+**Pilot da suçsuz.** `NFS_FLATOUT=1` (gaz kökte, fren yok) tavanı 103 km/h'de bırakıyor;
+`=2` (direksiyon da sıfır) daha da düşürüyor, çünkü araba yoldan çıkıyor.
+
+**Ve fizik tarafında dört şüpheli tek tek eleniyor:**
+
+* **Sürükleme değil.** `Cd 0,32 · alan 2,2 m²` → 103 km/h'de **353 N**. İtiş 1.142 Nm / 0,31 m =
+  **3.684 N**. Aradaki 3.331 N, 1.220 kg'da 2,7 m/s² eder; araba 50 saniye boyunca 3. vitede ve
+  hızlanmıyor.
+* **Patinaj değil.** Tepe hızda kayma **%0** (jant 104, yol 103 km/h).
+* **Çekiş kontrolü kelepçesi değil.** `TC_TARGET_SLIP = 0,2` ile üst sınır `(v+0,2v)/r` = 110 rad/s;
+  tekerlek 93'te, yani kelepçeye değmiyor.
+* **Fren değil.** `NFS_FLATOUT` freni tamamen kapatıyor ve tavan değişmiyor.
+
+**Geriye kalan tek yer, sürüş torkunun lastiğe bindiği yol.** 3.684 N'luk itiş, 353 N'luk
+sürüklemeye karşı, %0 kaymada dengeye oturuyor — oysa kuvvet üretmek kayma ister ve motorun kendi
+testi *"sıfır kaymada boyuna kuvvet sıfırdır"* diyor. Denge orada kurulamaz. Bu, `gizmo-physics-
+dynamics`'in tekerlek-lastik eşlemesine ait bir soru; motor **bilerek pinli** olduğu için burada
+değiştirilmedi, ölçüyle birlikte karşı tarafa geçirilecek.
+
+Ölçüm aletleri kaldı: `NFS_FLATOUT`, ve her koşuda basılan en yüksek hız / vites / devir / kayma
+satırları.

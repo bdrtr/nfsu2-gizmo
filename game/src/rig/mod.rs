@@ -466,13 +466,15 @@ impl CarRig {
             return;
         };
         println!(
-            "handling: {:.0} kg · {} gears · final drive {:.3} · {:.0} N·m peak · {:?} · red line {:.0}",
+            "handling: {:.0} kg · {} gears · final drive {:.3} · {:.0} N·m peak · {:?} · red line {:.0} \
+             · oranlar {:?}",
             t.mass_kg,
             t.gears,
             t.tuning.final_drive_ratio,
             t.tuning.max_engine_torque,
             t.drivetrain,
             t.tuning.upshift_rpm,
+            t.tuning.gear_ratios,
         );
         // The curve, not just its peak — the shape is the thing that distinguishes two cars with
         // the same peak. Nine points is short enough to read.

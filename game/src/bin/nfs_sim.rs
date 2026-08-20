@@ -842,6 +842,15 @@ async fn run() {
     let mut returned = vec![0.0f32; field.len()];
     let mut on_course = vec![0.0f32; field.len()];
     let mut raced = vec![0.0f32; field.len()];
+    let mut top = vec![0.0f32; field.len()];
+    let mut top_gear = vec![0usize; field.len()];
+    let mut top_rpm = vec![0.0f32; field.len()];
+    let mut top_torque = vec![0.0f32; field.len()];
+    let mut max_gear = vec![0usize; field.len()];
+    let mut max_rpm = vec![0.0f32; field.len()];
+    let mut rpm_gear = vec![0usize; field.len()];
+    let mut top_spin = vec![0.0f32; field.len()];
+    let mut in_gear = vec![[0.0f32; 8]; field.len()];
     // The aim-angle census: how often the lookahead point sits well off the nose.
     let (mut aim_steps, mut aim_sum, mut aim_wide, mut aim_hard) = (0usize, 0.0f32, 0usize, 0usize);
     let mut aim_off = 0usize;
@@ -1226,6 +1235,41 @@ async fn run() {
                 on_course[k] += FIXED_DT;
             }
             raced[k] += FIXED_DT;
+            // **How fast does this car actually get?** A complaint that the speed does not satisfy
+            // is a measurement, not a feeling: the field's best is what the car managed on this
+            // city's roads with this pilot, and the gearing says what it could manage on a
+            // straight. Both are wanted before touching either.
+            if p.speed.abs() > top[k] {
+                top[k] = p.speed.abs();
+                // And what the drivetrain was doing there. Eight cars stopping at the same speed
+                // is a ceiling, and a ceiling is either the gearbox running out of ratio, the
+                // shift logic never reaching the top one, or the torque curve meeting drag.
+                let (gear, rpm, torque, spin) = rig.drivetrain(&world);
+                top_gear[k] = gear;
+                top_rpm[k] = rpm;
+                top_torque[k] = torque;
+                // Wheel rim speed against road speed. Equal means the tyre is gripping; a rim
+                // running away from the road is the drive force going into smoke instead of the
+                // car, which is where 3,684 N of tractive effort can vanish while 353 N of drag
+                // is all that opposes it.
+                top_spin[k] = spin;
+            }
+            {
+                // The highest gear and revs of the whole race, which is a different question from
+                // the state at top speed: a car can peak in third because it never got a straight,
+                // or because the shift never comes.
+                let (gear, rpm, _, _) = rig.drivetrain(&world);
+                max_gear[k] = max_gear[k].max(gear);
+                if rpm > max_rpm[k] {
+                    max_rpm[k] = rpm;
+                    rpm_gear[k] = gear;
+                }
+                // How long each gear is held, so "never leaves third" can be told from "third is
+                // where the straights are".
+                if gear < in_gear[k].len() {
+                    in_gear[k][gear] += FIXED_DT;
+                }
+            }
             if off > city::COURSE_HALF_WIDTH {
                 // **The moment of the crossing, not the moment it is admitted.** A departure is
                 // only *recorded* after three continuous seconds off the corridor, and by then the
@@ -2526,6 +2570,61 @@ async fn run() {
             "kursta geçen süre: %{:.1} · araba araba %{}",
             100.0 * on / all.max(1e-3),
             each.join(" %")
+        );
+    }
+    {
+        let best = top.iter().copied().fold(0.0f32, f32::max);
+        let mean = top.iter().sum::<f32>() / top.len().max(1) as f32;
+        println!(
+            "en yüksek hız: alanın en iyisi {:.0} km/h · araba başına ortalama {:.0} km/h · \
+             araba araba {}",
+            best * 3.6,
+            mean * 3.6,
+            top.iter().map(|v| format!("{:.0}", v * 3.6)).collect::<Vec<_>>().join(" ")
+        );
+        let k = top
+            .iter()
+            .enumerate()
+            .max_by(|a, b| a.1.total_cmp(b.1))
+            .map_or(0, |(i, _)| i);
+        println!(
+            "   en hızlı arabanın o andaki hâli: vites {} · {:.0} rpm (kırmızı çizgi 6500) \
+             · {:.0} Nm",
+            top_gear[k], top_rpm[k], top_torque[k]
+        );
+        println!(
+            "   tekerlek {:.0} rad/s · jant hızı {:.0} km/h · yol hızı {:.0} km/h · kayma {:+.0}%",
+            top_spin[k],
+            top_spin[k] * 0.31 * 3.6,
+            top[k] * 3.6,
+            100.0 * (top_spin[k] * 0.31 - top[k]) / top[k].max(0.1)
+        );
+        println!(
+            "   yarış boyunca en yüksek: vites {} · {:.0} rpm (dizide 0=geri, 1=boş, 2=1. vites)",
+            max_gear.iter().max().copied().unwrap_or(0),
+            max_rpm.iter().copied().fold(0.0f32, f32::max)
+        );
+        let fastest = max_rpm
+            .iter()
+            .enumerate()
+            .max_by(|a, b| a.1.total_cmp(b.1))
+            .map_or(0, |(i, _)| i);
+        let mut held = [0.0f32; 8];
+        for car in &in_gear {
+            for (i, t) in car.iter().enumerate() {
+                held[i] += t;
+            }
+        }
+        let all: f32 = held.iter().sum::<f32>().max(1e-3);
+        println!(
+            "   o devre {}. viteste vurulmuş · viteslerde geçen süre {}",
+            rpm_gear[fastest],
+            held.iter()
+                .enumerate()
+                .filter(|(_, t)| **t > 0.0)
+                .map(|(i, t)| format!("{i}:%{:.0}", 100.0 * t / all))
+                .collect::<Vec<_>>()
+                .join(" ")
         );
     }
     if aim_steps > 0 {
