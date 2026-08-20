@@ -146,6 +146,49 @@ const STALL_BACK: f32 = 0.5;
 /// world. Eighteen is just inside that. **It is tied to the spacing, not absolute**: change
 /// `NFS_WPSTEP` and this wants moving with it.
 const REACHED: f32 = 18.0;
+/// How near the held waypoint has to be before "I have driven past it" is allowed to release it.
+///
+/// **The third way to be done with a waypoint, and the one the other two cannot see.** Measured on
+/// `Paths4102` with `NFS_LOST=1`: the whole field drives *on the line* at 88 km/h past waypoint 11,
+/// forty metres to the side of it, and the counter sticks — the held one bottoms out at 40 m, well
+/// outside [`REACHED`]'s eighteen, and the next one is 81 m away and stays further for the whole
+/// pass, so "is the next nearer" never fires either. The waypoint ring and the carriageway the car
+/// is on are different paths of the same route; the corridor merges them and says "on course", the
+/// counter does not. The goal then sweeps from −61° to −140°, the aim walk follows it backwards,
+/// and the pilot asks for full lock at 88 km/h — which the trace says is the field's single largest
+/// loss of course, 28 of the 50 cars that lose it.
+///
+/// **Past it along the road, not merely behind the nose**, and that distinction is the rule. The
+/// first cut asked whether the waypoint had fallen behind the *car*, which cannot tell "I drove by
+/// on the next carriageway" from "I swung wide at a corner and it went behind my shoulder": it
+/// gains 127 waypoints over five routes and loses **120 on `Paths4121` alone**, where the cars are
+/// handed a goal across the corner they were already failing at and stop dead against it, six
+/// waypoints each against twenty-six.
+///
+/// **And near it**, which is this constant: a car far from the waypoint it holds is a lost car, and
+/// the one thing this arm must never do is walk the ring for one — the failure that refuted
+/// "advance while the held one is behind" (92 laps and 5,999 waypoints for a single car). Swept
+/// over eight routes:
+///
+/// | bound | waypoints | never lost the course | fell off the world |
+/// |---|---|---|---|
+/// | off | 927 | 14 / 64 | 2 |
+/// | 30 m | 883 | 14 / 64 | 4 |
+/// | **60 m** | **986** | **24 / 64** | 4 |
+/// | 100 m | 956 | 24 / 64 | 4 |
+///
+/// Unimodal, with thirty *below* having no rule at all — it sits under the forty metres the failure
+/// actually needs, so it never fires where it would help and only ever fires close in, where
+/// [`REACHED`] already had it. The weak column is the last one: two more cars off the world at
+/// every setting that fires, plausibly because the field now carries speed on the course for
+/// longer, but that is a guess and `fallen` is on watch.
+///
+/// Set `NFS_PASSED=0` to turn the arm off. **Known edge:** `w[i+1]` wraps to the first waypoint at
+/// the end of a sprint, so the last waypoint's forward direction points back down the course. No
+/// car has reached the end of a route in ninety seconds — the best is 25 of 130 — so it is recorded
+/// rather than special-cased.
+const PASSED_NEAR: f32 = 60.0;
+
 /// How near a waypoint counts as having driven past it, for [`Pilot::covered`].
 ///
 /// The waypoints are 40 m apart after `route::densify`, so this is one step: near enough that a car
@@ -683,15 +726,46 @@ impl Pilot {
             // "advance while the held one is behind" did.
             let reached: f32 =
                 std::env::var("NFS_REACHED").ok().and_then(|v| v.parse().ok()).unwrap_or(REACHED);
+            // **Passed to the side, which neither arm above can see.** Measured on `Paths4102`
+            // with `NFS_LOST=1`: the whole field drives *on the line* at 88 km/h past waypoint 11,
+            // forty metres to the side of it, and the counter sticks — the held one bottoms out at
+            // 40 m, well outside [`REACHED`]'s eighteen, and the next one is 81 m away and stays
+            // further for the rest of the pass, so "is the next nearer" never fires either. The
+            // waypoint ring and the carriageway the car is on are different paths of the same
+            // route; the corridor merges them, the counter does not. The goal then swings from
+            // −61° to −140°, the aim walk follows it backwards, and the pilot asks for full lock at
+            // 88 km/h. That is the field's largest single loss of course.
+            //
+            // **This is not the refuted "advance while the one it holds is behind".** That one
+            // could not terminate on a cycle: a car pointed away from a closed ring has an arc of
+            // it behind, and the counter walked the arc and wrapped — 92 laps and 5,999 waypoints
+            // for one car. The guard here is that the step must land on a waypoint that is
+            // **ahead**, so the arm disarms itself the moment it fires: next tick the held one is
+            // in front, `behind` is false, and nothing more happens until the car passes it too. A
+            // run of waypoints behind the car can never be walked, whatever it is pointing at.
+            let passed: f32 = std::env::var("NFS_PASSED")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(PASSED_NEAR);
+            // Past it in the course's own direction — see [`PASSED_NEAR`] for why that and not
+            // "behind the nose", and for the sweep.
+            let past = |i: usize| {
+                let (a, b) = (course[i % course.len()], course[(i + 1) % course.len()]);
+                flat(at - a).dot(flat(b - a).normalize_or_zero()) > 0.0
+            };
             for _ in 0..3 {
                 let next = (self.goal + 1) % course.len();
-                if d(next) >= d(self.goal) && d(self.goal) > reached {
+                let overtaken = passed > 0.0 && d(self.goal) < passed && past(self.goal);
+                if !overtaken && d(next) >= d(self.goal) && d(self.goal) > reached {
                     break;
                 }
                 if next == self.line {
                     self.laps += 1;
                 }
                 self.goal = next;
+                if overtaken {
+                    break;
+                }
             }
         }
         // **Re-finding the course when the counter stops is refuted too.** The lock is real and the

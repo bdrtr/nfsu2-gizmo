@@ -155,6 +155,13 @@ struct Moment {
     /// waypoint counter is stuck) or the goal is ahead and the graph walk to it starts by going
     /// backwards. Nothing else in the trace separates them.
     goal_at: Option<(f32, f32)>,
+    /// How far the **next** waypoint was, in plan.
+    ///
+    /// The counter advances when this is smaller than the distance to the one being held, so the
+    /// two numbers side by side are the whole of why a goal does or does not move on. On a bend
+    /// tight enough, the next waypoint is *further away* than the one just driven past, and then
+    /// the rule has no reason to fire however far behind the held one gets.
+    next_at: Option<f32>,
     /// The waypoint it was heading for, and how many nodes it had given up on by then.
     ///
     /// A goal that stops advancing and a blacklist that keeps growing are the two ways the pilot
@@ -508,6 +515,28 @@ async fn run() {
     let mut back_ticks = vec![0usize; field.len()];
     let mut back_move = vec![0.0f32; field.len()];
     let mut prev_pos: Vec<Option<Vec3>> = vec![None; field.len()];
+    // NFS_WRONGWAY=1: every step of the graph walk that leaves the course, and whether it had
+    // anywhere else to go.
+    //
+    // **The question this exists to settle.** The trace says 28 of the 50 cars that lose the course
+    // do it steering at a point behind them, and that the aim points backwards because the *goal*
+    // is behind — the car having been walked onto a road the course does not take. Softening the
+    // response has now been refuted three times, so the question moved upstream: when the walk
+    // steps off the course, was there an arm at that junction that would have stayed on it? Those
+    // are opposite findings. One is a choice a rule can make better; the other is a graph that does
+    // not contain the road, and no steering rule fixes that.
+    //
+    // **It answered neither: the walk never leaves the course at all.** On `Paths4102` and
+    // `Paths4121`, over ninety seconds and eight cars each, the count of steps from a node inside
+    // the corridor to one outside it is **zero**. The held nodes stay on the course the whole way,
+    // and the car that ends up steering backwards was never routed off it. What is behind is the
+    // *waypoint*, not the road — see the counter's own arm below. Kept because the question is the
+    // first one anybody will ask again, and a measured zero is worth more than the assumption it
+    // replaced.
+    let wrongway = std::env::var("NFS_WRONGWAY").is_ok();
+    let mut held_node: Vec<Option<u32>> = vec![None; field.len()];
+    // (t, car, from, to, how far `to` is off the course, how many arms stayed on it)
+    let mut strayed_at: Vec<(f32, usize, u32, u32, f32, usize)> = Vec::new();
     let mut silent = vec![0usize; field.len()];
     let mut asked = vec![(0.0f32, 0.0f32); field.len()];
     let mut footed = vec![0usize; field.len()];
@@ -724,6 +753,32 @@ async fn run() {
                 let d = Vec3::new(j.at.x - p.position.x, 0.0, j.at.z - p.position.z).length();
                 strayed[k] = strayed[k].max(d);
             }
+            if wrongway {
+                let now_node = pilot.node();
+                if now_node != held_node[k] {
+                    let off = |i: u32| {
+                        net.node(i).map_or(f32::INFINITY, |n| {
+                            corridor.locate(n.at).map_or(f32::INFINITY, |x| x.distance)
+                        })
+                    };
+                    if let (Some(a), Some(b)) = (held_node[k], now_node) {
+                        // Only the step that crosses out matters: from a node on the course to one
+                        // off it. A walk already outside has nothing left to choose wrongly.
+                        if off(a) <= city::COURSE_HALF_WIDTH && off(b) > city::COURSE_HALF_WIDTH {
+                            // How many of the arms out of `a` — other than the one it came from —
+                            // would have stayed on the course. This is the whole of the finding.
+                            let kept = net.node(a).map_or(0, |n| {
+                                n.links
+                                    .iter()
+                                    .filter(|l| off(**l) <= city::COURSE_HALF_WIDTH)
+                                    .count()
+                            });
+                            strayed_at.push((now, k, a, b, off(b), kept));
+                        }
+                    }
+                    held_node[k] = now_node;
+                }
+            }
             // **Whether the rivals get the net the player has always had.** `keep_in_world` is
             // called for `state.rig` in all three windowed binaries and for nobody else, so a
             // rival that falls stays fallen and a rival that rolls stays rolled — in the game as
@@ -820,6 +875,9 @@ async fn run() {
                         let d = Vec3::new(w.x - p.position.x, 0.0, w.z - p.position.z);
                         (d.length(), d.dot(side).atan2(d.dot(fwd)).to_degrees())
                     }),
+                    next_at: waypoints
+                        .get((pilot.goal() + 1) % waypoints.len().max(1))
+                        .map(|w| Vec3::new(w.x - p.position.x, 0.0, w.z - p.position.z).length()),
                     goal: pilot.goal(),
                     given_up: pilot.given_up().len(),
                     escaping: pilot.escaping().is_some(),
@@ -979,10 +1037,11 @@ async fn run() {
                 let gw = m.goal_at.map_or("          —".to_string(), |(d, a)| {
                     format!("{d:>4.0} m {a:>5.0}°")
                 });
+                let nw = m.next_at.map_or("   —".to_string(), |d| format!("{d:>4.0}"));
                 println!(
                     "              t={:>6.1} ({:>7.0},{:>7.0}) {:>4.0} km/h · koridora {:>5.1} m \
                      · direksiyon {:>5.2} · gaz {:>4.2} fren {:>4.2} · nişan {aim} · düğüm {node} \
-                     · hedef {:>4} {gw} · yanal {} · vazgeçti {:>2}{}",
+                     · hedef {:>4} {gw} · sonraki {nw} m · yanal {} · vazgeçti {:>2}{}",
                     m.t,
                     m.at.x,
                     m.at.z,
@@ -1360,6 +1419,27 @@ async fn run() {
                     }
                 }
             }
+        }
+        if wrongway {
+            println!("\nyürüyüş kurstan nerede çıktı, ve başka kolu var mıydı:");
+            let (mut had, mut none) = (0usize, 0usize);
+            for (t, k, a, b, off, kept) in &strayed_at {
+                if *kept > 0 {
+                    had += 1;
+                } else {
+                    none += 1;
+                }
+                if had + none <= 12 {
+                    println!(
+                        "   t={t:>6.1} · araba {k} · düğüm {a} → {b} · yeni düğüm koridordan \
+                         {off:>5.1} m · kursta kalan kol: {kept}"
+                    );
+                }
+            }
+            println!(
+                "   toplam {} çıkış · {had} tanesinde kursta kalan bir kol VARDI · {none} tanesinde yoktu",
+                strayed_at.len()
+            );
         }
         println!("\nwhat the stuck cars have around them:");
         for &k in &early {

@@ -3415,10 +3415,94 @@ yani ağ yürüyüşü arabayı kursun gitmediği bir yola sokmuş durumda, ve n
 *sonucu*. Cevabı yumuşatmak (fren, kilit) semptomu tedavi ediyor ve alan bunu her seferinde
 reddediyor. Kazanç, yanlış yola hiç girmemekte.
 
+### Düzeltme: arka nişanın sebebi rotalama değilmiş — sayaç, arabanın *yanından geçtiği* waypoint'i bırakamıyor (2026-08-20)
+
+Bir önceki bölümde "kazanç yanlış yola hiç girmemekte" yazmıştım: yani ağ yürüyüşünün arabayı kursun
+gitmediği bir yola soktuğunu. **Ölçüldü ve yanlış.** `NFS_WRONGWAY=1` her düğüm geçişini izliyor ve
+koridorun içindeki bir düğümden dışındaki bir düğüme atılan adımı sayıyor; 4102 ve 4121'de bu sayı
+**sıfır**. Yürüyüş kurstan hiç çıkmıyor.
+
+**Gerçek mekanizma, aynı izin bir sütunu daha eklenince görüldü.** İze "bir sonraki waypoint ne
+kadar uzakta" konunca 4102 araba 0 şunu diyor:
+
+| t | koridora | hız | tutulan hedef | sonraki |
+|---|---|---|---|---|
+| 27,0 | 1,1 m | 79 km/h | 11 @ **46 m**, −61° | **81 m** |
+| 28,2 | 0,7 m | 84 km/h | 11 @ **40 m**, −95° | **67 m** |
+| 29,4 | 0,3 m | 88 km/h | 11 @ 51 m, −128° | 63 m |
+| 30,2 | 1,5 m | 83 km/h | 11 @ 65 m, −140° | 67 m | ← tam kilit burada
+
+Araba hattın tam üstünde ve waypoint 11'in **kırk metre yanından** geçiyor. İlerletme kuralının iki
+kolu da ölü: tutulan waypoint'e en yakın mesafe **40 m** (eşik [`REACHED`] = 18 m) ve bir sonraki
+**hep daha uzak** (81 → 67 → 63 m), yani "sonraki daha yakın mı" hiç doğru olmuyor. Sayaç takılıyor,
+hedef −61°'den −140°'ye süpürülüyor, nişan yürüyüşü sadık biçimde onu takip ediyor ve pilot 88
+km/h'de tam kilit istiyor.
+
+**Neden kırk metre yanından:** waypoint halkası ile arabanın sürdüğü şerit, aynı rota dosyasının
+**farklı hatları**. Koridor bunları birleştiriyor (yarı genişlik 12 m, arabaya "kurstasın" diyor);
+waypoint sayacı birleştirmiyor. 4102'de bunu altı arabanın altısı aynı yerde yapıyor, çünkü bu
+arabanın değil rotanın geometrisi.
+
+**Denenen kural, ve neden çürütülmüş olanla aynı şey değil.** Yeni kol: tutulan waypoint **arkadaysa**
+ve bir sonraki **öndeyse** ilerlet. Eskiden çürütülen "arkadayken ilerlet" bir halkada duramıyordu —
+halkadan uzağa bakan araba için arkada koca bir yay kalır, sayaç yayı yürür, sarar, tur sayar (bir
+araba için 92 tur ve 5.999 waypoint). Buradaki koruma yapısal: adım **önde** olan bir waypoint'e
+inmek zorunda, yani kol ateşlediği anda kendini siliyor — bir sonraki tikte tutulan waypoint önde
+olur, `behind` yanlıştır ve araba onu da geçene kadar hiçbir şey olmaz. Arkadaki bir waypoint dizisi
+asla yürünemez.
+
+**İlk hâli çürüdü, ve nasıl çürüdüğü kuralın kendisini düzeltti.** "Tutulan waypoint burnun
+arkasına düştüyse bırak" sürümü sekiz rotada:
+
+| rota | GRIP 8 | + burnun arkasında | fark |
+|---|---|---|---|
+| 4001 | 297 | 309 | +12 |
+| 4002 | 36 | 36 | 0 |
+| 4021 | 76 | 71 | −5 |
+| 4041 | 108 | **171** | +63 |
+| 4061 | 41 | **76** | +35 |
+| 4081 | 80 | 97 | +17 |
+| 4102 | 121 | 103 | −18 |
+| **4121** | 168 | **48** | **−120** |
+| toplam | **927** | 911 | −16 |
+
+Beş rotada kazanıp birinde yıkılıyor — ve yıkılma sebebi öğretici: 4121'de arabalar virajda
+**duruyor** (araba başına 6 waypoint, 28 yerine 10 kavşak, 0 km/h). Viraj dışına savrulan bir
+arabanın hedefi burnunun arkasına düşer ama araba onu *geçmemiştir*; kural bırakır, yeni hedef
+virajın karşısına düşer, araba oraya sürüp takılır. Bu, `REACHED`'in belgesinde zaten yazılı olan
+"bırakma değil atlama" hatasının aynısı.
+
+Ayrım kuralın içine yazıldı: waypoint'i **yolun kendi yönünde** geçmiş olmak gerekiyor
+(`(araba − w[i]) · (w[i+1] − w[i]) > 0`), burna göre değil — ve yalnızca ona yakınken, çünkü
+tuttuğu waypoint'ten uzaktaki araba kaybolmuş arabadır ve bu kolun asla onun için halkayı
+yürümemesi gerekir. Turlar kontrol edildi: her iki sürümde de sıfır, yani halka yürüme geri
+gelmedi.
+
+**Ve düzeltilmiş hâli alanı geçiyor — bugünün ikinci kalıcı değişikliği.** Sekiz rota:
+
+| kol | waypoint | kursu hiç bırakmayan | düşen | away |
+|---|---|---|---|---|
+| kural yok | 883 | 9 / 64 | 3 | 64 |
+| GRIP 8 | 927 | 14 / 64 | 2 | 64 |
+| burnun arkasında | 911 | 16 / 64 | 3 | 64 |
+| yolun yönünde, <30 m | 883 | 14 / 64 | 4 | 64 |
+| **yolun yönünde, <60 m** | **986** | **24 / 64** | 4 | 64 |
+| yolun yönünde, <100 m | 956 | 24 / 64 | 4 | 64 |
+
+Rota rota: dördünde kazanıyor (4001 +25, 4061 +33, 4102 +26, 4021 +1), üçünde kaybediyor
+(4041 −1, 4081 −9, 4121 −16), birinde aynı. Net +59 ve tek rotanın sırtında değil — üç ayrı rotaya
+yayılmış. `away` 64'te sabit, tur sayısı sıfır (halka yürüme yok).
+
+**Zayıf yeri, açıkça:** dünyadan düşen araba 2 → 4. İki araba, 64'te. Sayaç arabayı daha uzun süre
+kursta ve hızlı tuttuğu için kenara daha çok araba ulaşıyor olması makul, ama bu bir tahmin;
+`fallen` bir sonraki süpürmelerde izlenecek — bugün zaten `BASELINE-SEKIZ-ROTA.md`'de 4041 için
+açılmış bir izleme var.
+
 ## Nerede kaldık (2026-08-14 sonu)
 
-**Alan (2026-08-20, motor pini `58dc2623` ve `GRIP` açıkken): 927 geçilen waypoint, 1.280 ayrık
-düğüm, 64 arabanın 50'si kursu bırakıyor.** Bir önceki hâli, aşağıdaki paragrafın ölçüldüğü gün:
+**Alan (2026-08-20 sonu, motor pini `58dc2623`, `GRIP` ve `PASSED_NEAR` açıkken): 986 geçilen
+waypoint, 64 arabanın 40'ı kursu bırakıyor (24'ü hiç bırakmıyor).** Günün ortasında, yalnız `GRIP`
+varken: 927 waypoint, 50 araba bırakıyordu. Bir önceki hâli, aşağıdaki paragrafın ölçüldüğü gün:
 865 waypoint, 1.354 düğüm, 51 araba. (Bugün 869
 diye geçen sayı, pilot saati 4× hızlıyken ölçülmüştü; düzeltilince 865 oldu — yani saat platonun
 sebebi değildi.) En iyi araba 144'ün **29'unda**, ve 600 saniye vermek onu 26'dan 29'a taşıyor:
@@ -3460,12 +3544,11 @@ elenmeyen dörtte −70. Karar yalnız sekiz rotadan çıkar.
   yapan terim (`GRIP = 8`) sekiz rotada **883 → 927 waypoint**, kursta kalan araba **9 → 14**
   getirdi. 4121 hâlâ çözülmedi: yedi araba virajın 19 m ilerisinde, 50 km/h ile çıkıyor. Kalan
   eksik direksiyonda — açı→kilit haritası düz bir rampa, saf takibin kendi formülü değil.
-- **Alanın en büyük tek kaybı: arkadaki bir noktaya direksiyon kırmak.** Kursu bırakan 50 arabanın
-  **28'i** bunu yapıyor (yukarıya bak). Kaçış ya da vazgeçme değil: hedef waypoint yolun yanından
-  geçip arkaya düşüyor, ağ yürüyüşü ona doğru geriye yürüyor. Cevabı yumuşatan iki kol da
-  (arka kilit 0,15 / 0,35) çürütüldü — dönemeyen araba kenardan da dönemiyor, düşen araba 2'den
-  5-6'ya çıkıyor. **Kazanç rotalamada:** araba hattın üstünde düz giderken hedefin 40 m yanda
-  kalması, ağ yürüyüşünün onu kursun gitmediği yola sokmuş olması demek.
+- **Alanın en büyük tek kaybı — arkadaki bir noktaya direksiyon kırmak — sebebinden düzeltildi.**
+  Rotalama değilmiş (`NFS_WRONGWAY=1`: yürüyüş kurstan hiç çıkmıyor, ölçülen sıfır); waypoint
+  sayacı arabanın *yanından geçtiği* hedefi bırakamıyormuş. `PASSED_NEAR = 60` ile alan
+  **927 → 986 waypoint**, kursu hiç bırakmayan **14 → 24/64**. Cevabı yumuşatan kollar (arka kilit)
+  çürütüldü ve öyle kaldı.
 - **Arabanın ölçülmüş yanal kapasitesi 5,2 m/s²** (%90; %95'te 5,6). `GRIP = 8` bunun üstünde ve
   bu bilerek: kiriş açısı virajı abarttığı için sabit, kapasite değil *kapasite bölü abartma*.
   İkisi birlikte düzeltilmedikçe 8 kalır — yol eğriliğine geçme denemesi çürütüldü.
