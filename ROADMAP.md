@@ -4256,3 +4256,50 @@ genişliği boyunca beş örnek (−10, −5, 0, +5, +10 m). Sekiz rota:
 **Sıradaki somut iş bu kalıntıda:** `Paths4041`'in üç deliğinin altında hangi collider'ın olması
 gerektiği. Halkanın kurgusu artık ölçülmüş ve çaresi de belli (`NFS_WALKLINE`); dünyanın kendi
 eksiği ölçülmemiş bir şey ve düşüşlerin geri kalanını o taşıyor.
+
+### Deliğin altında ne var: yükleyici değil, filtre değil, sınıflandırma değil — ve "bütün şehri yükle" bir tuzak (2026-08-20)
+
+Bir önceki bölüm yürünmüş halkada bile gerçek yolun üstünde %1,6 zemin eksiği bıraktı ve
+`Paths4041`'i (%4,3) işaret etti. Dört şüpheli tek tek elendi.
+
+**1. LOD filtresi değil.** `NFS_COLLIDE=all` 2.100 kaba parçayı geri koyuyor; aynı halkada yoldaki
+28 deliğin **hiçbiri** kapanmıyor (kiriş dolgusunda yalnız 4 hücre). Filtre suçsuz.
+
+**2. Sınıflandırma değil.** `NFS_HOLE` artık üç sembol basıyor: zemin, *geometri var ama duvar
+sayılmış*, ve *hiçbir şey yok* (`Ground::of_everything`, yalnız teşhis için — duvarları da
+indeksliyor). Sekiz rota, yürünmüş halka: yolun üstündeki **84 boş hücrenin 82'sinde hiçbir
+üçgen yok**, ikisinde duvar. `surface_of` suçsuz.
+
+**3. `dedup` değil.** `NFS_DEDUP=off` 10.735 parçanın hepsini tutuyor; delik bayt-birebir aynı
+kalıyor.
+
+**4. Ve "bütün TRACKS'i yükle" delikleri kapatıyor — ama bu bir düzeltme değil, kirlenme.**
+`NFS_BUNDLE=all` ile sayılar çarpıcı: yürünmüş halkada zemin yok olan hücreler sekiz rotada
+**198 → 12**, ve 4041'in kavşağının yanındaki 30 m'lik kare tamamen doluyor. Bunu bir kazanç diye
+yazmak üzereydim. `NFS_BUNDLE=<bölge>` eklenip **tek tek soruldu**:
+
+| bölge | ne | `(1984, −121)` satırı |
+|---|---|---|
+| **L4RA** | şehir (4041 bu bölgenin rotası) | `###...#######` |
+| **L4RD** | aynı şehrin başka paketlemesi, 400 obje fazla | `###...#######` |
+| **L4RB** | **arena** — ayrı bir mekân | `#############` |
+| L4RC · L4RF · L4RG · L4RH · L4RR | arena / test pisti | `.............` |
+
+Deliği dolduran şey şehir değil, **L4RB — orijini paylaşan bağımsız bir arena**. `REGIONS`
+belgesinin zaten söylediği şey bu: sekiz bölge tek haritanın parçaları değil, aynı orijini
+paylaşan ayrı yerler. `all` deliği doldurmuyor, **üstünü örtüyor**.
+
+**Kalan cevap, veri.** Şehrin iki bağımsız paketlemesi — L4RA ve L4RD — bütün kurs boyunca
+**rakam rakam aynı**: yolun üstünde 745 örnekten 32'sinde zemin yok, ikisinde de. İki ayrı
+paketlemenin aynı yerde aynı boşluğu göstermesi, kaynak veriye bu ölçüyle varılabilecek en yakın
+şey: orada gerçekten zemin yok.
+
+**Ve bu, düşüşlerin sorusunu değiştiriyor.** Oyunun kendi dünyasında oyuncunun gidemeyeceği
+yerlerde zemin olmaması normaldir; oyuncuyu orada tutan şey **bariyerdir**. Düşen arabaların
+raporu ise baştan beri *"dünyada hiç bariyer yok"* diyor. Yani eksik olan zemin değil, zemini
+gereksiz kılan şey. Sıradaki iş `Paths4041`'in kavşağının çevresinde bariyer geometrisinin
+bundle'da olup olmadığı — `Walls`'ın gördüğü ama `across_hit`'in elediği bir şey mi, yoksa hiç
+yok mu.
+
+**Ve bir okuma kuralı daha:** bir düğme ölçüyü büyük ölçüde iyileştiriyorsa, önce **neyin**
+iyileştirdiği sorulur. `NFS_BUNDLE=all`'ın %94'lük kazancı, bir arenanın zeminiydi.

@@ -170,13 +170,27 @@ impl Ground {
     /// along every boundary.
     #[must_use]
     pub fn of(colliders: &[CityCollider]) -> Self {
+        Self::filtered(colliders, true)
+    }
+
+    /// The same index built from **every** triangle, walls included.
+    ///
+    /// Only a diagnostic: it answers "is there anything here at all", which is the question that
+    /// separates a city with no data at a place from a city whose surface there was classified as
+    /// a wall. Never drive against it — a building's face would read as floor.
+    #[must_use]
+    pub fn of_everything(colliders: &[CityCollider]) -> Self {
+        Self::filtered(colliders, false)
+    }
+
+    fn filtered(colliders: &[CityCollider], drivable_only: bool) -> Self {
         let key = |v: f32| (v / GROUND_CELL).floor() as i32;
         let mut by_cell: std::collections::HashMap<(i32, i32), Vec<[Vec3; 3]>> =
             std::collections::HashMap::new();
 
         for c in colliders {
             for (t, tri) in c.indices.chunks_exact(3).enumerate() {
-                if c.surfaces.get(t) != Some(&Surface::Drivable) {
+                if drivable_only && c.surfaces.get(t) != Some(&Surface::Drivable) {
                     continue;
                 }
                 let Some(p) = tri

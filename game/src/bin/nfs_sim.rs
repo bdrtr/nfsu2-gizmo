@@ -228,13 +228,39 @@ async fn run() {
         std::env::var("NFS_SECONDS").ok().and_then(|v| v.parse().ok()).unwrap_or(120.0);
 
     let route = std::env::var("NFS_ROUTE").expect("NFS_SIM needs NFS_ROUTE: a race to drive");
+    // NFS_BUNDLE=all: load the whole tracks directory instead of the one region bundle the route
+    // belongs to. The holes measured along the race line are absent geometry rather than filtered
+    // or misclassified geometry (`ROADMAP.md`), which leaves two places the absence could come
+    // from — the bundle boundary, and `dedup`. This asks the first.
+    // `NFS_BUNDLE=L4RD` names one region instead — which is the question `all` cannot answer,
+    // because the eight regions are separate places sharing an origin (`world::load::REGIONS`) and
+    // loading them together stacks `L4RD` on `L4RA` with four arenas through the middle. A hole
+    // that closes under `all` has been *covered by another world*, not filled in.
+    let pick = std::env::var("NFS_BUNDLE").ok().filter(|v| !v.is_empty());
+    let whole = pick.as_deref() == Some("all");
     let region = city::bundle_for_route(std::path::Path::new(&route));
-    let source = region.map_or_else(|| tracks.clone(), |b| b.display().to_string());
+    let source = match (&pick, &region) {
+        (Some(name), _) if name != "all" => {
+            format!("{tracks}/STREAM{}.BUN", name.to_uppercase())
+        }
+        (_, Some(b)) if !whole => b.display().to_string(),
+        _ => tracks.clone(),
+    };
     let city::Bundles { meshes, .. } = city::load(&source);
 
     // The same preparation the game does, and in the same order: the drivers must be given the
     // world the player would have been given, or the answer is about a different city.
-    let meshes = city::dedup(meshes);
+    //
+    // NFS_DEDUP=off asks the second: whether the duplicate filter is deleting a placement that is
+    // not in fact a duplicate.
+    let loaded = meshes.len();
+    let meshes =
+        if std::env::var("NFS_DEDUP").is_ok_and(|v| v == "off") { meshes } else { city::dedup(meshes) };
+    println!(
+        "bundle: {} · {loaded} meshes loaded, {} after dedup",
+        source.rsplit('/').next().unwrap_or(&source),
+        meshes.len()
+    );
     // NFS_COLLIDE=all: build the collision from **everything** the bundle ships except the backdrop
     // — distant-LOD proxies kept, coarse tiers kept, nothing dropped.
     //
@@ -248,6 +274,16 @@ async fn run() {
     // coarse tiers put back, and over the eight routes the result is identical: the same ten cars
     // fall off the same three places. The ground the cars need is not in the bundle under any
     // filter. Kept as a knob because that is a claim worth being able to re-check in one run.
+    //
+    // **And it is not in the city either — which took one more experiment to be sure of.** Loading
+    // the whole tracks directory does close the holes, spectacularly: cells with no ground under
+    // the walked ring fall from 198 to 12 over the eight routes and the 30 m square beside
+    // `Paths4041`'s junction fills in completely. That reading is wrong. Asked region by region
+    // (`NFS_BUNDLE=<name>`), the floor that appears there belongs to **`L4RB`, an arena** — a
+    // separate venue that shares the coordinate origin, not a part of Bayview. `L4RA` has the
+    // hole and so does `L4RD`, which is the same city packed for other races with 400 more
+    // objects. Two independent packings agreeing is as close to the source data as this can get:
+    // the ground really is absent there, and `all` does not fill it in, it covers it over.
     let collide_all = std::env::var("NFS_COLLIDE").is_ok_and(|v| v == "all");
     // What each filter costs, printed rather than assumed. A knob whose effect is invisible is a
     // knob that can be swept all day against a set it never changed.
@@ -278,6 +314,12 @@ async fn run() {
     );
     let colliders = city::collision_cells(&objects);
     let ground = city::Ground::of(&colliders);
+    // Only for `NFS_HOLE`: everything, walls included. A place with no drivable surface and no
+    // geometry at all is missing data; one with geometry that `surface_of` called a wall is a
+    // classification question instead, and the two want different work.
+    let anything = std::env::var("NFS_HOLE")
+        .is_ok()
+        .then(|| city::Ground::of_everything(&colliders));
     // **A measurement, not a mechanism.** Both ways of acting on a barrier through the *graph* were
     // swept and refuted (`ROADMAP.md`), and what is left to try is the pilot's aim — so the first
     // question is whether a pilot is in fact steering at points with something standing in the way,
@@ -1742,6 +1784,8 @@ async fn run() {
         let mut empty = 0usize;
         let mut on_road = 0usize;
         let mut on_road_empty = 0usize;
+        let mut walled = 0usize;
+        let mut on_road_walled = 0usize;
         let mut worst: Vec<(usize, usize, Vec3)> = Vec::new();
         for (i, w) in waypoints.iter().enumerate() {
             // Across the course, not across the world: the corridor's direction here comes from
@@ -1764,6 +1808,10 @@ async fn run() {
                     empty += 1;
                     on_road_empty += road as usize;
                     gone += 1;
+                    if anything.as_ref().is_some_and(|a| !a.heights_at(at.x, at.z).is_empty()) {
+                        walled += 1;
+                        on_road_walled += road as usize;
+                    }
                 }
             }
             if gone > 0 {
@@ -1783,6 +1831,10 @@ async fn run() {
             empty - on_road_empty,
             cells - on_road,
             100.0 * (empty - on_road_empty) as f32 / (cells - on_road).max(1) as f32
+        );
+        println!(
+            "   boş hücrelerin {walled}'inde aslında geometri var ama duvar sayılmış (yolun \
+             üstündekilerin {on_road_walled}/{on_road_empty}'i) — gerisinde hiçbir şey yok"
         );
         worst.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
         for &(gone, i, at) in worst.iter().take(12) {
@@ -1814,13 +1866,19 @@ async fn run() {
                         let x = cx + ix as f32 * 8.0;
                         match ground.heights_at(x, z).into_iter().next() {
                             Some(_) => '#',
-                            None => '.',
+                            None => match anything.as_ref().map(|a| a.heights_at(x, z)) {
+                                Some(v) if !v.is_empty() => 'w',
+                                _ => '.',
+                            },
                         }
                     })
                     .collect();
                 println!("   z={z:>7.0}  {row}");
             }
-            println!("   ('#' = zemin var, '.' = yok · orta sütun/satır sorulan nokta)");
+            println!(
+                "   ('#' = zemin var, 'w' = geometri var ama duvar sayılmış, '.' = hiçbir şey \
+                 yok · orta sütun/satır sorulan nokta)"
+            );
             // How far is the racing line from here? A hole beside the course and a hole in it
             // are different findings: the first blames whatever pushed the car off the line,
             // the second blames the world.
