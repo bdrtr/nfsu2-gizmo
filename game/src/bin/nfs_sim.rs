@@ -31,6 +31,11 @@ use nfsu2::rig::{spawn_car, CarRig, Controls, Pilot, Placement, FIXED_DT};
 use nfsu2::scene;
 use nfsu2::world as city;
 
+/// The driven car's mass and wheel radius, for solving resistance out of the motion. Both are
+/// printed by the sim's own `car ready` and `handling` lines for the 240SX every sweep runs.
+const MASS_KG: f32 = 1220.0;
+const WHEEL_R: f32 = 0.31;
+
 /// Where an off-corridor waypoint is pulled to, as a fraction of the corridor's half-width: 0 is
 /// its centre, 1 its edge. Measured; see the block that uses it.
 const PULL_TO: f32 = 0.0;
@@ -850,6 +855,10 @@ async fn run() {
     let mut max_rpm = vec![0.0f32; field.len()];
     let mut rpm_gear = vec![0usize; field.len()];
     let mut top_spin = vec![0.0f32; field.len()];
+    let mut bucket = vec![0.0f32; 40];
+    let mut probe: Vec<(f32, f32, f32)> = Vec::new();
+    let mut probe_next = 0.0f32;
+    let mut probe_load: Vec<f32> = Vec::new();
     let mut in_gear = vec![[0.0f32; 8]; field.len()];
     // The aim-angle census: how often the lookahead point sits well off the nose.
     let (mut aim_steps, mut aim_sum, mut aim_wide, mut aim_hard) = (0usize, 0.0f32, 0usize, 0usize);
@@ -1235,6 +1244,28 @@ async fn run() {
                 on_course[k] += FIXED_DT;
             }
             raced[k] += FIXED_DT;
+            // **Resistance solved from the motion, for one car, once a second.** Everything else
+            // here is a guess at what opposes the drive force; this measures it. `m·a` is what
+            // reached the car, the drivetrain says what was offered, and the difference is what
+            // the model is taking out — as a function of speed, so a v² drag and a constant
+            // rolling loss can be told apart.
+            if k == 0 && now >= probe_next {
+                let (_, _, torque, _) = rig.drivetrain(&world);
+                // And what the suspension is carrying, as a share of the car's own weight. The
+                // friction circle caps the tyre at `μ·Fz`, so a wheel carrying a fraction of its
+                // load caps the drive force at a fraction of what the drivetrain offers — which
+                // would look exactly like the constant loss measured here.
+                probe_load.push(rig.wheel_load(&world));
+                probe.push((now, p.speed.abs(), torque));
+                probe_next = now + 1.0;
+            }
+            // The shape of the ceiling. A force balance approaches its limit smoothly and an
+            // asymptote is visible in the seconds before it; a clamp arrives flat. Five-second
+            // buckets of the field's best speed say which without a trace.
+            {
+                let b = ((now / 5.0) as usize).min(bucket.len() - 1);
+                bucket[b] = bucket[b].max(p.speed.abs());
+            }
             // **How fast does this car actually get?** A complaint that the speed does not satisfy
             // is a measurement, not a feeling: the field's best is what the car managed on this
             // city's roads with this pilot, and the gearing says what it could manage on a
@@ -2626,6 +2657,33 @@ async fn run() {
                 .collect::<Vec<_>>()
                 .join(" ")
         );
+    }
+    {
+        let used: Vec<String> = bucket
+            .iter()
+            .take((seconds / 5.0).ceil() as usize)
+            .map(|v| format!("{:.0}", v * 3.6))
+            .collect();
+        println!("alanın en iyisi 5 sn'lik dilimlerde: {}", used.join(" "));
+    }
+    if std::env::var("NFS_RESIST").is_ok() {
+        println!(
+            "araba 0'ın direnç çözümü — kütle {MASS_KG} kg, tekerlek yarıçapı {WHEEL_R} m:"
+        );
+        println!("      t   hız km/h   ivme m/s²   itiş N   ulaşan N   kayıp N   yük/ağırlık");
+        for (i, w) in probe.windows(2).enumerate() {
+            let (t0, v0, tq) = w[0];
+            let (t1, v1, _) = w[1];
+            let a = (v1 - v0) / (t1 - t0).max(1e-3);
+            let push = tq / WHEEL_R;
+            println!(
+                "   {t0:>4.0}   {:>8.0}   {a:>9.2}   {push:>7.0}   {:>8.0}   {:>7.0}   {:>10.2}",
+                v0 * 3.6,
+                MASS_KG * a,
+                push - MASS_KG * a,
+                probe_load.get(i).copied().unwrap_or(0.0)
+            );
+        }
     }
     if aim_steps > 0 {
         println!(

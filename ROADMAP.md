@@ -4925,3 +4925,44 @@ değiştirilmedi, ölçüyle birlikte karşı tarafa geçirilecek.
 
 Ölçüm aletleri kaldı: `NFS_FLATOUT`, ve her koşuda basılan en yüksek hız / vites / devir / kayma
 satırları.
+
+### Ve hız tavanının sayısı çıktı: aktarma 4.700-8.900 N sunuyor, arabaya 800-3.200 N ulaşıyor (2026-08-20)
+
+Bir önceki bölüm tavanı bulmuştu; şimdi **kaç newton** olduğu da ölçüldü. `NFS_RESIST=1` araba 0'ın
+hareketinden direnci çözüyor: saniyede bir hız, ivme ve aktarmanın sunduğu tork alınıyor, `m·a` ile
+karşılaştırılıyor.
+
+**Önce kendi okumamı düzelttim.** İlk tabloda `itiş − m·a` sütununa "direnç" demiştim; o direnç
+değil, **sunulan itişle arabaya ulaşan kuvvetin farkı**. Sürükleme onun onda biri.
+
+| t (s) | hız km/h | itiş N | ulaşan N | kayıp N | tekerlek yükü |
+|---|---|---|---|---|---|
+| 10 | 32 | 7.243 | 3.227 | 4.016 | 0,89 |
+| 12 | 51 | 7.160 | 2.202 | 4.958 | 1,01 |
+| 14 | 63 | 5.247 | 1.746 | 3.501 | 1,06 |
+| 16 | 73 | 5.244 | 1.304 | 3.941 | 1,06 |
+| 18 | 80 | 4.992 | 887 | 4.105 | 1,35 |
+| 19 | 83 | 4.760 | 821 | 3.939 | 1,07 |
+
+**Kayıp hızdan bağımsız ve sabit: ~3.800 N.** Bir v² sürüklemesi değil (o 83 km/h'de 230 N eder),
+yuvarlanma direnci de değil (bu Crr ≈ 0,32 demek olurdu, normalin yirmi katı).
+
+Ve tavan tam buradan çıkıyor: 3. viteste 4.800 devirde itiş **3.684 N**, kayıp **~3.800 N** — itiş
+kaybın altına düştüğü anda ivme biter. Araba 103 km/h'de durur, 6.500 devre ulaşamaz, 4. vitese
+geçemez.
+
+**Dört şüpheli daha elendi:**
+
+* **Sürtünme çemberi değil:** süspansiyon yükü boyunca **1,0 × ağırlık** (tabloda 0,89–1,35), yani
+  `μ·Fz` tavanı aç değil.
+* **Fren değil:** `brake_torque = brake_input · max · bias` ve `NFS_FLATOUT` girdiyi sıfırlıyor.
+* **Aero değil:** `q = ½ρv²` doğru yazılmış, 103 km/h'de 353 N.
+* **Tekerlek sönümü değil:** viskoz sönüm yalnız *havadaki* tekerleğe uygulanıyor (motorun kendi
+  yorumu bu hatanın bir zamanlar var olduğunu ve düzeltildiğini yazıyor).
+
+**Geriye kalan:** tekerleğin tork dengesi ile şasiye uygulanan boyuna kuvvet birbirini tutmuyor.
+Tekerlek `drive_torque = reaction_torque` noktasına oturuyor — orada tepki torkunun ima ettiği
+kuvvet 3.684 N — ama arabaya ulaşan 821 N. Bu `gizmo-physics-dynamics`'in tekerlek→şasi
+eşlemesine ait ve motor bilerek pinli; ölçüsüyle birlikte karşı tarafa geçirilecek.
+
+Alet repoda: `NFS_RESIST=1`.
