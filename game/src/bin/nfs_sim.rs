@@ -612,6 +612,30 @@ async fn run() {
     // | pulled to the edge | 1292 | 20 | 22.6 | 5030 m | 4 | 72.2 % |
     // | trimmed instead | — | 20 | 23.6 | 5723 m | **1** | 73.6 % |
     //
+    // **And the pull has a side effect, found on 2026-08-20 by tracing a car.** Moving points one
+    // at a time **stretches** the ring: with a 40 m step the widest gap becomes 106 m on
+    // `Paths4102`, 97 on `Paths4081` and **228** on `Paths4121`, because a waypoint dragged up to
+    // 102 m sideways leaves a hole its neighbours never had. That matters because the pilot's goal
+    // *is* a waypoint: traced on `Paths4102`, a car at 92 km/h and 2 m from the corridor's centre
+    // releases waypoint 11 and takes waypoint 12 — **103 m away and 39° off the nose** — then
+    // brakes fully and is 34 m out sixteen seconds later. The stranded-goal failure the pull was
+    // written to fix, reappearing as the pull's own side effect.
+    //
+    // Putting the spacing back is `NFS_REDENSIFY=1`: re-sample at `step`, pull the new points in,
+    // repeat until no gap is more than half a step over (four to six rounds; 106 → 50 m, 228 →
+    // 101, 97 → 61). **It fixes the route it was traced from and loses two others:**
+    //
+    // | | time on corridor | on their side | furthest | lost the line | never lost |
+    // |---|---|---|---|---|---|
+    // | **stretched** (kept) | 73.8 % | **0.8 %** | **5951 m** | 40 | 15 |
+    // | re-densified | **78.4 %** | 1.3 % | 5496 m | **33** | **19** |
+    //
+    // `Paths4081` goes **51.0 % → 90.3 %** of race time on the corridor — the whole of the +4.6
+    // field average and more, so by the route-spread rule the gain is carried. The loss is carried
+    // too, by `Paths4061` (−214 m) and `Paths4121` (−200 m) of `furthest`. Two columns pointing
+    // opposite ways and both decided by one route each: no change. Waypoints driven past cannot
+    // arbitrate here — re-sampling changes how many waypoints there are.
+    //
     // **The caveat, stated because it is real:** waypoints driven past is measured by proximity, so
     // moving the ring towards where the cars already drive can only help it — that column is
     // partly the experiment marking its own work. What is not is `furthest` (+512 m, ahead on six
@@ -669,12 +693,71 @@ async fn run() {
                 }
             })
             .collect();
+        // **And what the pull did to the spacing.** Moving points one at a time can stretch the
+        // ring: a waypoint dragged 48 m sideways leaves a gap its neighbours never had. That
+        // matters because the pilot's goal is a waypoint — a 100 m gap is a goal a hundred metres
+        // away and forty degrees off the nose, which is the stranded-goal failure the pull was
+        // written to fix, reappearing as its own side effect.
+        let gap = pulled
+            .windows(2)
+            .map(|p| Vec3::new(p[1].x - p[0].x, 0.0, p[1].z - p[0].z).length())
+            .fold(0.0f32, f32::max);
+        let wide = pulled
+            .windows(2)
+            .filter(|p| Vec3::new(p[1].x - p[0].x, 0.0, p[1].z - p[0].z).length() > step * 1.5)
+            .count();
         println!(
             "halka koridora çekildi (yarı genişliğin {to}'i): {moved} / {} waypoint taşındı · \
-             en uzağı {worst:.0} m'deydi",
-            waypoints.len()
+             en uzağı {worst:.0} m'deydi · en büyük aralık {gap:.0} m ({wide} aralık {:.0} m'den \
+             geniş, adım {step:.0} m)",
+            waypoints.len(),
+            step * 1.5
         );
-        pulled
+        // **And put the spacing back.** `NFS_REDENSIFY=0` leaves the stretch in, which is how the
+        // before-and-after was taken. Re-sampling at `step` inserts points along the straight
+        // segments the pull opened up; those can land outside the corridor, so the same pull runs
+        // once more over the result — one pass, not a loop, because the inserted points lie
+        // between two points that are already inside and cannot be far out.
+        // **`NFS_REDENSIFY=1`: measured, and it does not win.** See the table under `PULL_TO`.
+        if knob("NFS_REDENSIFY").is_some_and(|v| v != "0") {
+            // **Iterated, because the two operations fight.** Re-sampling closes a gap by putting
+            // points along the straight chord the pull opened; some of those land outside the
+            // corridor and the pull moves them, which opens a gap again. Alternating converges —
+            // each round the chords are shorter, so the points it inserts are less far out — and
+            // the loop stops when no gap is more than half a step over or after `ROUNDS` tries.
+            const ROUNDS: usize = 6;
+            let mut w = pulled;
+            let mut rounds = 0;
+            let widest = |v: &[Vec3]| {
+                v.windows(2)
+                    .map(|p| Vec3::new(p[1].x - p[0].x, 0.0, p[1].z - p[0].z).length())
+                    .fold(0.0f32, f32::max)
+            };
+            while rounds < ROUNDS && widest(&w) > step * 1.5 {
+                w = city::densify(&w, step)
+                    .iter()
+                    .map(|p| match corridor.locate(*p) {
+                        Some(f) if f.distance > city::COURSE_HALF_WIDTH => {
+                            let back = f.distance - city::COURSE_HALF_WIDTH * to;
+                            let dir =
+                                Vec3::new(f.at.x - p.x, 0.0, f.at.z - p.z).normalize_or_zero();
+                            *p + dir * back
+                        }
+                        _ => *p,
+                    })
+                    .collect();
+                rounds += 1;
+            }
+            println!(
+                "   yeniden sıklaştırıldı: {rounds} turda {} waypoint · en büyük aralık \
+                 {gap:.0} → {:.0} m",
+                w.len(),
+                widest(&w)
+            );
+            w
+        } else {
+            pulled
+        }
     } else if knob("NFS_TRIM").is_some_and(|v| v != "0") {
         let kept: Vec<Vec3> = waypoints
             .iter()

@@ -5287,3 +5287,44 @@ tam `look` metrede duruyor: araba yaklaştıkça geri çekiliyor, yani araba **h
 Bu pilot bir hattı takip etmiyor, bir noktayı **kovalıyor** — direksiyon yasasının kendi belgesi
 bunu yazıyor — ve yakalanamayan bir nokta hedef değildir. Virajdaki ışınlanma, kesikli nokta
 kovalamanın bedeli, ve alternatifinden **on kat** ucuz.
+
+### 4102'nin izi: çekmenin kendi yan etkisi, düzeltmek istediği kusuru geri getiriyor (2026-08-20)
+
+İkinci iz `Paths4102`'den, hattı **93 km/h**'de bırakan gruptan:
+
+```
+t= 25.1 ( -38,-134) 91 km/h · koridora 2.7 m · direksiyon 0.02 · hedef 11   20 m   -6°
+t= 25.7 ( -29,-121) 92 km/h · koridora 2.0 m · direksiyon 0.01 · hedef 12  103 m  -39°   ← hedef atladı
+t= 27.5 (  -2, -84) 93 km/h · koridora 0.8 m · direksiyon 0.34 · hedef 12   71 m  -52°   ← fren 1.00
+t= 30.5 (  44, -43) 54 km/h · koridora 25.9 m · direksiyon 0.85 · hedef 12  55 m  -97°
+```
+
+Araba **kusursuz sürüyor** (koridorun 2 m içinde, direksiyon 0,02) ve waypoint 11'i geçince hedefi
+waypoint 12 oluyor — **103 m ötede, 39° yanda**. Adım 40 m olduğu için bu bir aralık değil,
+bir **boşluk**.
+
+**Sebep bugünün en büyük kazancının kendi yan etkisi.** Çekme noktaları tek tek taşıyor, yani
+halkayı **esnetiyor**: 40 m'lik adımla en geniş aralık 4102'de **106 m**, 4081'de 97, 4121'de
+**228 m**, çünkü 102 m'ye kadar yana çekilen bir waypoint komşusunda olmayan bir delik bırakıyor.
+Ve pilotun hedefi bir waypoint olduğu için, bu tam olarak çekmenin düzeltmek için yazıldığı
+"hedef yanda kalıyor" kusurunun geri dönmesi.
+
+**Aralığı geri koymak yazıldı** (`NFS_REDENSIFY=1`): `step`'te yeniden örnekle, yeni noktaları
+koridora çek, aralık yarım adımdan fazla kalmayana kadar tekrarla (4-6 tur; 106 → 50 m, 228 → 101,
+97 → 61). İki işlem birbiriyle çekişiyor ama yakınsıyor.
+
+**İzi sürülen rotayı düzeltiyor, iki rotayı bozuyor:**
+
+| | kursta süre | yan yatarak | furthest | hattı bırakan | hiç bırakmayan |
+|---|---|---|---|---|---|
+| **esnek** (kalan) | %73,8 | **%0,8** | **5.951 m** | 40 | 15 |
+| yeniden sıklaştırılmış | **%78,4** | %1,3 | 5.496 m | **33** | **19** |
+
+`Paths4081` kursta geçen süreyi **%51,0 → %90,3** yapıyor — alan ortalamasındaki +4,6 puanın
+tamamı ve fazlası, yani kurala göre kazanç **taşınıyor**. Kayıp da taşınıyor: `furthest`'ın
+−455 m'si `Paths4061` (−214) ve `Paths4121`'den (−200). İki sütun ters yöne bakıyor ve ikisini de
+birer rota belirliyor — değişiklik yok. Geçilen waypoint burada hakem olamaz, çünkü yeniden
+örnekleme waypoint **sayısını** değiştiriyor.
+
+**Kayda değer olan:** çekmenin esnetmesi gerçek, ölçülmüş ve yeri belli. Bir sonraki deneyen
+kişinin elinde hem sebep hem tur sayısı hem de hangi rotaların ne yönde tepki verdiği var.
