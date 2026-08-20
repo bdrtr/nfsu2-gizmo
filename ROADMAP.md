@@ -4101,3 +4101,58 @@ bakmadan koşar, yani `NFS_SECONDS=1` ile saniyeler içinde alınır),
 direksiyon/gaz/fren, nişan mesafesi ve açısı, tutulan düğüm — üç süpürmenin göremediğini tek
 koşuda söyledi), ve her arabanın kursu **ilk kalıcı olarak bıraktığı** an/waypoint/konum.
 
+
+### `GRIP` dürüst halkada yeniden süpürüldü: fiziksel doğru değer yine kaybetti (2026-08-20)
+
+Bir önceki bölümün kapanışı bir iddia taşıyordu: *"bir pilot sabitinin hangi kursa karşı
+oturtulduğu, sabitin kendisi kadar önemli."* Bunun en keskin örneği `GRIP`'ti. Belgesinde
+yazdığım gibi 8, arabanın ölçülmüş 5,2 m/s²'lik yanal ivme tavanının üstünde duruyor ve orada
+durmasının gerekçesi kirişin açısının yolun eğriliğini **abartması**: `GRIP` aslında "kapasite"
+değil, "kapasite bölü o abartı". Öyleyse abartının olmadığı — ağ üzerinde yürünmüş — halkada
+fiziksel değer kazanmalıydı.
+
+**Kazanmadı.** Sekiz rota, `NFS_WALKLINE=1`, 8 araba, 90 s:
+
+| `GRIP` | geçilen waypoint | halkanın oranı | kursu hiç bırakmayan | düşen |
+|---|---|---|---|---|
+| **8 (bugünkü)** | **1.662** | %15,3 | 15 / 64 | 3 |
+| 6,5 | 1.610 | %14,8 | 18 / 64 | 3 |
+| 5 (fiziksel) | 1.570 | %14,4 | 18 / 64 | **6** |
+
+Karar ölçüsünde sıralama tek yönlü: 8 > 6,5 > 5. Daha sert fren **kursta kalmayı** artırıyor
+(15 → 18) ama ilerlemeyi azaltıyor — bu, süpürmelerin baştan beri gösterdiği aynı takas.
+
+**Ve düşenlerin ikiye katlanması bir kusur değil, halkanın kendi kusurunun ölçüsü.** Sekiz rotanın
+altı düşüşünün beşi *"yol 3–9 m ileride bitiyor"* diyor; altıncısı 15 km/h'de **yüzeyin içinden**
+geçmiş (bu ayrı bir çarpışma kusuru, kayda geçti). Halkayı ne kadar sadık takip eden araba varsa,
+yolun bittiği yeri bulan araba o kadar çok oluyor. `GRIP` 5'in 6 düşüşü, 18 arabayı kursta
+tutmasının bedeli.
+
+**Alan toplamı asıl şekli gizliyor.** Rota rota:
+
+| rota | 8 | 6,5 | 5 | 6,5 − 8 |
+|---|---|---|---|---|
+| 4001 | 362 | 371 | 365 | **+9** |
+| 4002 | 75 | 75 | 73 | 0 |
+| 4021 | 193 | 205 | 188 | **+12** |
+| 4041 | 272 | 279 | 247 | **+7** |
+| 4061 | 303 | 237 | 238 | **−66** |
+| 4081 | 79 | 82 | 99 | **+3** |
+| 4102 | 235 | 219 | 222 | −16 |
+| 4121 | 143 | 142 | 138 | −1 |
+| **toplam** | **1.662** | 1.610 | 1.570 | **−52** |
+
+6,5 sekiz rotanın **beşinde 8'i yeniyor**, altıncısında berabere; toplamı tek bir rotada,
+`Paths4061`'de kaybediyor — ve oradaki fark (−66) bütün alan farkından (−52) büyük. Bir arabanın
+bankacılığı da değil: 4061'in sekiz arabasının altısı birden düşüyor (42→30, 43→32, 45→33,
+40→15, 42→33).
+
+**Okuma — ve bir önceki bölümün iddiasının düzeltilmiş hâli.** Mesele "8, kirişin abartısı yüzünden
+doğru" değilmiş; dürüst halkada da 8 kazanıyor. Mesele daha kötüsü: **tek bir doğru `GRIP` yok.**
+Rotalar farklı değerler istiyor ve alan sayısı bir uzlaşma. 8 yerinde kalıyor — karar ölçüsünü
+kazandığı ve zaten yürürlükte olduğu için, süpürme onu doğru bulduğu için değil. Aynı şüphe
+diğer üç sabit (`PASSED_NEAR`, `BEHIND`, `ESCAPE_FULL`) için de açık duruyor: alan ortalaması,
+rota başına dağılımdan küçükse, o ortalama bir sonuç değil bir tesadüf olabilir.
+
+**Süpürme okumasına yeni kural:** bir kolun alan farkı, o farkın rotalar arası yayılımından
+küçükse, sonuç "kazandı" diye yazılmaz. Rota tablosu da yazılır.

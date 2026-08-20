@@ -360,6 +360,21 @@ const BRAKE_GAIN: f32 = 1.5;
 /// actually do — measured at 5.2 m/s² at the 90th percentile of the field's own cornering
 /// (`ROADMAP.md`, 2026-08-20) — which is why the brake only arrives once the car is already
 /// running wide.
+///
+/// **Re-swept on the honest ring, and the physical value still loses.** That last sentence carried
+/// an implication worth testing: if 8 only wins because the chord's angle overstates the road's
+/// curvature, then on a ring walked along the network — where there is no overstatement — the
+/// measured 5.2 should be the one that works. It is not. Over the eight routes under
+/// `NFS_WALKLINE=1`, waypoints driven past run **1662 at 8, 1610 at 6.5, 1570 at 5**, and the
+/// falls double at 5 (3 → 6) — the cars that brake harder do stay on the ring longer (15 → 18
+/// never losing it) and the ring is what runs off the road.
+///
+/// The field total hides the shape, though. Route by route, 6.5 **beats** 8 on five of the eight
+/// and ties a sixth; it loses the total on one, `Paths4061`, by −66 — more than the whole field
+/// margin of −52, and spread over six of that route's eight cars rather than banked by one. So
+/// this is not one value being right. It is one value being a compromise between routes that want
+/// different ones, and 8 stays because it wins the deciding measure and is already in, not
+/// because the sweep found it correct.
 const GRIP: f32 = 8.0;
 
 /// How much steering costs throttle.
