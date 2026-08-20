@@ -170,7 +170,7 @@ impl Ground {
     /// along every boundary.
     #[must_use]
     pub fn of(colliders: &[CityCollider]) -> Self {
-        Self::filtered(colliders, true)
+        Self::filtered(colliders, Some(Surface::Drivable))
     }
 
     /// The same index built from **every** triangle, walls included.
@@ -180,17 +180,28 @@ impl Ground {
     /// a wall. Never drive against it — a building's face would read as floor.
     #[must_use]
     pub fn of_everything(colliders: &[CityCollider]) -> Self {
-        Self::filtered(colliders, false)
+        Self::filtered(colliders, None)
     }
 
-    fn filtered(colliders: &[CityCollider], drivable_only: bool) -> Self {
+    /// The same index built from the **walls** — guardrails, kerbs, building faces.
+    ///
+    /// Also a diagnostic, and it answers the question a hole in the ground raises: a place a car
+    /// cannot stand is only a defect if the car can get there, and what keeps it out is a barrier.
+    /// Asking where the walls are is not the same as asking whether one blocks a given step, which
+    /// is [`Walls::across_hit`]'s job and involves heights, decks and the road's own kerb.
+    #[must_use]
+    pub fn of_walls(colliders: &[CityCollider]) -> Self {
+        Self::filtered(colliders, Some(Surface::Wall))
+    }
+
+    fn filtered(colliders: &[CityCollider], keep: Option<Surface>) -> Self {
         let key = |v: f32| (v / GROUND_CELL).floor() as i32;
         let mut by_cell: std::collections::HashMap<(i32, i32), Vec<[Vec3; 3]>> =
             std::collections::HashMap::new();
 
         for c in colliders {
             for (t, tri) in c.indices.chunks_exact(3).enumerate() {
-                if drivable_only && c.surfaces.get(t) != Some(&Surface::Drivable) {
+                if keep.is_some_and(|k| c.surfaces.get(t) != Some(&k)) {
                     continue;
                 }
                 let Some(p) = tri

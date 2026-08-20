@@ -4303,3 +4303,41 @@ yok mu.
 
 **Ve bir okuma kuralı daha:** bir düğme ölçüyü büyük ölçüde iyileştiriyorsa, önce **neyin**
 iyileştirdiği sorulur. `NFS_BUNDLE=all`'ın %94'lük kazancı, bir arenanın zeminiydi.
+
+### Zemin haritası şehrin planını değil, yollarını kaplıyor — ve koridora giren boşluklar sayıldı (2026-08-20)
+
+Delik veriymiş; sıradaki soru "bu normal mi" idi. `NFS_HOLE=city` yazıldı: bölgenin zemini 8 m'lik
+ızgarayla örneklenip **boşluklar taşırma ile bileşenlere ayrılıyor**, kutunun kenarına değenler
+(dünyanın bitişi) atılıyor, kalan her boşluğun yarış hattına uzaklığı ölçülüyor.
+
+İlk sürümü yanlıştı ve kendi sorusunu göremiyordu: hücrenin ±16 m'deki komşularına bakıyordu, yani
+16 m'lik deliği buluyor 30 m'liği ıskalıyordu — 4041'in kavşağındaki, bütün soruyu doğuran delik
+tam da 30 m'lik olan. Taşırmaya çevrildi.
+
+| rota | ayrı boşluk | toplam alan | koridora (12 m) girenler |
+|---|---|---|---|
+| 4001 | 183 | 623.616 m² | 6 |
+| 4002 | 161 | 453.056 m² | 7 |
+| 4021 | 90 | 136.064 m² | 2 |
+| 4041 | 85 | **576.320 m²** | **8** |
+| 4061 | 33 | 34.368 m² | 1 |
+| 4081 | 148 | 586.304 m² | 4 |
+| 4102 | 111 | 514.176 m² | 2 |
+| 4121 | 107 | 253.312 m² | **10** |
+
+**Boyutlar cevabı veriyor.** 4041'in en yakın altı boşluğu 12.032 ile 86.400 m² arasında — 300 m
+kenarlı bir kare bina ayak izi değildir. Yani `Ground` "şehrin zemini" değil, **sürülebilir
+yüzeyin haritası**: yollar ve kaldırımlar modellenmiş, blokların içi hiç modellenmemiş. Bir
+yarışta düşmek de bu yüzden bir kenardan uçmak değil, **bloğun içine girmek**.
+
+**Karşı kanıt da kaydedilsin:** eğer boşluklar blok içiyse kenarlarında bina cepheleri, yani duvar
+üçgenleri olmalı. `(1984, −121)`'in çevresindeki **104 × 104 m'lik karede tek bir duvar üçgeni
+yok** — üstelik şehrin bütünü %42,7 duvar (333.846 sürülebilir, 248.458 duvar üçgeni). O boşluk
+en azından cephesiz; ya boş bir arsa ya da eksik bir obje. Izgara ayrıca tek katman gösteriyor
+(`NFS_HOLE` artık '#' yerine **katman sayısı** basıyor), yani üst geçit altı da değil.
+
+**Düşüşlerin bütün zinciri artık yazılabiliyor:** halka bloğun üstünden geçiyor (kirişte %18,4'ünün
+altında hiçbir şey yok) → araba halkayı takip edip bloğun içine giriyor → orada zemin yok ve onu
+durduracak cephe de yok → düşüyor. Zincirin ilk halkası `NFS_WALKLINE` ile zaten kırılıyor
+(%18,4 → %7,1); ikincisi için yarış koridoruna giren 1–10 boşluk rota başına **sayılı ve yerli**,
+yani teker teker bakılabilir.

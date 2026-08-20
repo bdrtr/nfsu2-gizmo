@@ -320,6 +320,9 @@ async fn run() {
     let anything = std::env::var("NFS_HOLE")
         .is_ok()
         .then(|| city::Ground::of_everything(&colliders));
+    // And where the barriers are. A place with no ground is only a defect if a car can reach it.
+    let barriers =
+        std::env::var("NFS_HOLE").is_ok().then(|| city::Ground::of_walls(&colliders));
     // **A measurement, not a mechanism.** Both ways of acting on a barrier through the *graph* were
     // swept and refuted (`ROADMAP.md`), and what is left to try is the pilot's aim — so the first
     // question is whether a pilot is in fact steering at points with something standing in the way,
@@ -332,6 +335,20 @@ async fn run() {
     let aim_lift: f32 =
         std::env::var("NFS_AIMWALL").ok().and_then(|v| v.parse().ok()).unwrap_or(0.0);
     let walls = city::Walls::of(&colliders);
+    // What the city is made of, once. A world whose walls are 3 % of it and whose race line has
+    // none within 50 m is a different problem from a world with no walls at all, and the two were
+    // being guessed at from the fall reports rather than counted.
+    {
+        let (mut drive, mut wall) = (0usize, 0usize);
+        for c in &colliders {
+            drive += c.drivable();
+            wall += c.triangles() - c.drivable();
+        }
+        println!(
+            "surfaces: {drive} drivable, {wall} wall ({:.1}%)",
+            100.0 * wall as f32 / (drive + wall).max(1) as f32
+        );
+    }
     // Which cells have anything to drive on at all. A fall inside the mapped city and a fall past
     // its edge are different findings, and only this can tell them apart.
     let bounds = city::Bounds::of(&colliders);
@@ -1767,6 +1784,111 @@ async fn run() {
         );
     }
 
+    // NFS_HOLE=city: how many punctures the region has, how big they are, and how close the race
+    // passes to them.
+    //
+    // One hole beside one junction says nothing about whether holes are normal. Ground cut away
+    // under a building's footprint is ordinary map-making — the mesh stops where the wall starts —
+    // and a city full of such footprints is not a defect at all. What would be a defect is the
+    // race line running within a car's width of one.
+    //
+    // Flood-filled rather than tested cell by cell. The first version of this asked whether a
+    // cell's neighbours two steps away all had ground, which finds a 16 m puncture and is blind to
+    // a 30 m one — and the 30 m one beside `Paths4041`'s junction is the whole reason the question
+    // was asked. A blob that reaches the edge of the sampled box is the world running out, not a
+    // hole in it, so those are dropped.
+    if std::env::var("NFS_HOLE").is_ok_and(|v| v == "city") {
+        const STEP: f32 = 8.0;
+        let (lo, hi) = waypoints.iter().fold(
+            (Vec3::splat(f32::MAX), Vec3::splat(f32::MIN)),
+            |(a, b), w| {
+                (
+                    Vec3::new(a.x.min(w.x), 0.0, a.z.min(w.z)),
+                    Vec3::new(b.x.max(w.x), 0.0, b.z.max(w.z)),
+                )
+            },
+        );
+        let (lo, hi) = (lo - Vec3::splat(300.0), hi + Vec3::splat(300.0));
+        let (nx, nz) = (
+            ((hi.x - lo.x) / STEP).ceil() as usize + 1,
+            ((hi.z - lo.z) / STEP).ceil() as usize + 1,
+        );
+        let at = |ix: usize, iz: usize| {
+            Vec3::new(lo.x + ix as f32 * STEP, 0.0, lo.z + iz as f32 * STEP)
+        };
+        let mut empty = vec![false; nx * nz];
+        for ix in 0..nx {
+            for iz in 0..nz {
+                let p = at(ix, iz);
+                empty[ix * nz + iz] = ground.heights_at(p.x, p.z).is_empty();
+            }
+        }
+        let mut seen = vec![false; nx * nz];
+        let mut blobs: Vec<(usize, f32, Vec3)> = Vec::new();
+        for ix in 0..nx {
+            for iz in 0..nz {
+                if !empty[ix * nz + iz] || seen[ix * nz + iz] {
+                    continue;
+                }
+                let mut stack = vec![(ix, iz)];
+                let mut cells = Vec::new();
+                let mut touches_edge = false;
+                seen[ix * nz + iz] = true;
+                while let Some((cx, cz)) = stack.pop() {
+                    cells.push((cx, cz));
+                    if cx == 0 || cz == 0 || cx + 1 == nx || cz + 1 == nz {
+                        touches_edge = true;
+                    }
+                    for (dx, dz) in [(1i64, 0i64), (-1, 0), (0, 1), (0, -1)] {
+                        let (ux, uz) = (cx as i64 + dx, cz as i64 + dz);
+                        if ux < 0 || uz < 0 || ux >= nx as i64 || uz >= nz as i64 {
+                            continue;
+                        }
+                        let k = ux as usize * nz + uz as usize;
+                        if empty[k] && !seen[k] {
+                            seen[k] = true;
+                            stack.push((ux as usize, uz as usize));
+                        }
+                    }
+                }
+                if touches_edge {
+                    continue;
+                }
+                let mut near = f32::INFINITY;
+                let mut near_at = Vec3::ZERO;
+                for &(cx, cz) in &cells {
+                    let here = at(cx, cz);
+                    let d = waypoints
+                        .iter()
+                        .map(|w| (Vec3::new(w.x, 0.0, w.z) - here).length())
+                        .fold(f32::INFINITY, f32::min);
+                    if d < near {
+                        near = d;
+                        near_at = here;
+                    }
+                }
+                blobs.push((cells.len(), near, near_at));
+            }
+        }
+        blobs.sort_by(|a, b| a.1.total_cmp(&b.1));
+        let close = blobs.iter().filter(|b| b.1 <= city::COURSE_HALF_WIDTH).count();
+        println!(
+            "\nbölgenin delikleri ({STEP:.0} m ızgara, yarışın kutusu + 300 m): {} ayrı delik, \
+             toplam {} m² · {close} tanesi yarış hattının koridoruna ({} m) giriyor",
+            blobs.len(),
+            blobs.iter().map(|b| b.0).sum::<usize>() * (STEP * STEP) as usize,
+            city::COURSE_HALF_WIDTH
+        );
+        for &(cells, near, near_at) in blobs.iter().take(6) {
+            println!(
+                "   {:>5} m² · yarış hattına {near:>5.0} m · en yakın noktası ({:>7.0},{:>7.0})",
+                cells * (STEP * STEP) as usize,
+                near_at.x,
+                near_at.z
+            );
+        }
+    }
+
     // NFS_HOLE=course: the same question asked of the whole race line at once. One hole beside
     // one junction is a story about one junction; the fall bucket only becomes actionable if we
     // know whether the world is missing ground *along the course*, and where. Every waypoint is
@@ -1864,21 +1986,40 @@ async fn run() {
                 let row: String = (-6..=6)
                     .map(|ix| {
                         let x = cx + ix as f32 * 8.0;
-                        match ground.heights_at(x, z).into_iter().next() {
-                            Some(_) => '#',
-                            None => match anything.as_ref().map(|a| a.heights_at(x, z)) {
+                        // The digit is how many drivable layers are stacked here, because a
+                        // hole beside a two-layer cell is a gap in a deck and a hole beside a
+                        // one-layer cell is the edge of the world — and they want different work.
+                        match ground.heights_at(x, z).len() {
+                            0 => match anything.as_ref().map(|a| a.heights_at(x, z)) {
                                 Some(v) if !v.is_empty() => 'w',
                                 _ => '.',
                             },
+                            n => char::from_digit(n.min(9) as u32, 10).unwrap_or('#'),
                         }
                     })
                     .collect();
                 println!("   z={z:>7.0}  {row}");
             }
             println!(
-                "   ('#' = zemin var, 'w' = geometri var ama duvar sayılmış, '.' = hiçbir şey \
-                 yok · orta sütun/satır sorulan nokta)"
+                "   (rakam = üst üste kaç sürülebilir katman var, 'w' = geometri var ama duvar \
+                 sayılmış, '.' = hiçbir şey yok · orta sütun/satır sorulan nokta)"
             );
+            // The second grid, the one a hole actually raises: what would stop a car getting here.
+            println!("duvar geometrisi aynı ızgarada:");
+            for iz in -6..=6 {
+                let z = cz + iz as f32 * 8.0;
+                let row: String = (-6..=6)
+                    .map(|ix| {
+                        let x = cx + ix as f32 * 8.0;
+                        match barriers.as_ref().map(|b| b.heights_at(x, z)) {
+                            Some(v) if !v.is_empty() => 'W',
+                            _ => '.',
+                        }
+                    })
+                    .collect();
+                println!("   z={z:>7.0}  {row}");
+            }
+            println!("   ('W' = duvar üçgeni var · boş = yok)");
             // How far is the racing line from here? A hole beside the course and a hole in it
             // are different findings: the first blames whatever pushed the car off the line,
             // the second blames the world.
