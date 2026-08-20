@@ -379,6 +379,28 @@ const TICK: f32 = 1.0 / 60.0;
 /// and 2,404 m; 20 m/s gives 41, 18 and 2,418; 14 gives 41, 17 and 2,354; **9 gives 44, 13 and
 /// 2,594**; 6 gives 41, 14 and 2,242. Nine wins on every column, which is rarer than it sounds and
 /// is why it is the default.
+/// **Re-swept 2026-08-20 on the pulled ring, and 9 stays — but the reason is the roll, not the
+/// waypoints.** The departure census had pointed straight here: of the 49 cars that leave the
+/// course, **49 % are braking hard** and 41 % are above 60 km/h when they cross the edge, which is
+/// this constant's own subject.
+///
+/// | at 60 km/h the limit is | waypoints | on the corridor | on their side | furthest |
+/// |---|---|---|---|---|
+/// | 6 (brake early) | −83 | 69.4 % | 1.3 % | 5727 m |
+/// | 7.5 | −14 | 73.6 % | **0.7 %** | 5790 m |
+/// | **9** (kept) | — | 73.8 % | 0.8 % | 5951 m |
+/// | 10.5 | +44 | 74.6 % | 1.8 % | 6251 m |
+/// | 12 (brake late) | +70 | **74.5 %** | 1.6 % | **6217 m** |
+///
+/// Braking later really does gain: +44 and +70 waypoints, and 300 m of `furthest`. Two things
+/// stop it. The gains are **carried** — 10.5's biggest single route is −55 against a +44 margin
+/// and 12's is +76 against +70 — and the cost is uniform and large in the one column today's
+/// rollover work created: **time spent lying on their side doubles**, 0.8 % → 1.8 %. A car that
+/// brakes later carries more speed into the corner it was going to run wide of, and goes over.
+///
+/// 6 is solidly worse on every column at once, so the useful range is narrow and 9 sits in it.
+/// This is the first lever measured today that buys progress by doing *less*, and it is refused
+/// on a measure that did not exist this morning.
 const BRAKE_SPEED: f32 = 9.0;
 /// How hard the brake comes on past that.
 const BRAKE_GAIN: f32 = 1.5;

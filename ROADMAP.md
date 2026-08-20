@@ -5068,3 +5068,31 @@ oynamıyor. Ağ, bedava koridor süresini gerçekten süren arabalarla değişti
 **Açıldı, iki tarafta birden:** `nfs_sim`'de varsayılan (`NFS_RESCUE=0` geri alır) ve `nfs_cruise`'da
 rakipler artık oyuncunun aldığı `keep_in_world`'ü alıyor. Sekiz-rota tablosu: **1.476 waypoint ·
 yan yatarak %0,8 · kursta %73,8 · düşen 0 · furthest 5.951 m.**
+
+### Direksiyon freni yeni halkada süpürüldü: 9 kalıyor, ve sebebi devrilme (2026-08-20)
+
+İki davranış değişikliğinden (halkayı çekme, rakiplere ağ) sonra ayrılma sayımı yeniden alındı ve
+imza sabit kaldı: **49 ayrılmanın %49'u frende, %41'i 60 km/h üstünde.** Yer dağılımı da aynı —
+13 yer, ilk beşi 34 arabayı (%69) açıklıyor.
+
+Bu doğrudan `BRAKE_SPEED`'in alanı ve o sabit yeni halkada hiç süpürülmemişti.
+
+| 60 km/h'de sınır | waypoint | kursta süre | yan yatarak | furthest |
+|---|---|---|---|---|
+| 6 (erken fren) | −83 | %69,4 | %1,3 | 5.727 m |
+| 7,5 | −14 | %73,6 | **%0,7** | 5.790 m |
+| **9 (kalan)** | — | %73,8 | %0,8 | 5.951 m |
+| 10,5 | +44 | %74,6 | %1,8 | 6.251 m |
+| 12 (geç fren) | +70 | **%74,5** | %1,6 | **6.217 m** |
+
+**Geç fren gerçekten kazandırıyor** — +44 ve +70 waypoint, 300 m'ye varan `furthest`. İki şey
+durduruyor. Kazançlar **taşınıyor** (10,5'in en büyük tek rotası −55'e karşı +44 alan, 12'ninki
++76'ya karşı +70), ve bedel bugünkü devrilme işinin yarattığı sütunda tek yönlü ve büyük:
+**yan yatarak geçen süre ikiye katlanıyor**, %0,8 → %1,8. Geç fren yapan araba, zaten dışarı
+çıkacağı viraja daha çok hızla giriyor ve devriliyor.
+
+6 ise her sütunda birden kötü, yani kullanılabilir aralık dar ve 9 onun içinde.
+
+**Ve bu, bugün ölçülen ilk "daha az yaparak kazandıran" kaldıraç** — sabah ne yaptıysak
+(saf takip, kilit sınırı) daha az direksiyon daha kötüydü; burada daha az fren daha çok ilerleme
+veriyor. Reddedilme sebebi de **bu sabah var olmayan bir ölçü**: yan yatarak geçen süre.
