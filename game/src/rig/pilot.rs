@@ -172,11 +172,16 @@ const REACHED: f32 = 18.0;
 ///
 /// | bound | waypoints | never lost the course | fell off the world |
 /// |---|---|---|---|
-/// | off | 927 | 14 / 64 | 2 |
-/// | 30 m | 883 | 14 / 64 | 4 |
-/// | **60 m** | **986** | **24 / 64** | 4 |
-/// | 80 m | 973 | 23 / 64 | 3 |
-/// | 100 m | 956 | 24 / 64 | 4 |
+/// | off | 927 | **22 / 64** | 2 |
+/// | 30 m | 883 | 14 / 64 † | 4 |
+/// | **60 m** | **986** | **32 / 64** | 4 |
+/// | 80 m | 973 | 23 / 64 † | 3 |
+/// | 100 m | 956 | 24 / 64 † | 4 |
+///
+/// † counted before `nfs_sim` stopped calling a car "lost the course" when it had never been on it
+/// — two grids sit outside the corridor and eight cars were being written off at t = 3 s, so those
+/// three rows understate by up to eight. The `off` and `60 m` rows are re-measured; the waypoint
+/// column, which is what decides, was never affected.
 ///
 /// Unimodal, with thirty *below* having no rule at all — it sits under the forty metres the failure
 /// actually needs, so it never fires where it would help and only ever fires close in, where
@@ -252,6 +257,9 @@ const BRAKE_GAIN: f32 = 1.5;
 ///
 /// **Swept over eight routes.** Waypoints driven past is the measure that decides it, for the same
 /// reason it decides the traffic look: it cannot be inflated by a lost car.
+///
+/// (The "never lost the course" column here predates the fix to that counter — see
+/// [`PASSED_NEAR`]; it understates by up to eight and the waypoint column does not.)
 ///
 /// | grip | waypoints | distinct nodes | never lost the course | fallen |
 /// |---|---|---|---|---|

@@ -535,6 +535,12 @@ async fn run() {
     // replaced.
     let wrongway = std::env::var("NFS_WRONGWAY").is_ok();
     let mut held_node: Vec<Option<u32>> = vec![None; field.len()];
+    // **A car cannot leave a course it was never on.** Some grids sit outside the corridor: on
+    // `Paths4002` the start line is 21 m from the nearest waypoint and **six of eight cars begin
+    // 12.3-19.4 m off it**, so the departure rule below fired for all six at t=3 s, before they had
+    // driven anywhere. Every count of "lost the course" carried them. Traced, all eight of the
+    // field's "already crawling when it left" cases were this and nothing else.
+    let mut entered = vec![false; field.len()];
     // (t, car, from, to, how far `to` is off the course, how many arms stayed on it)
     let mut strayed_at: Vec<(f32, usize, u32, u32, f32, usize)> = Vec::new();
     let mut silent = vec![0usize; field.len()];
@@ -844,7 +850,10 @@ async fn run() {
             // by then it has been wandering for minutes. This records the first departure that
             // *stuck*: off the corridor for three continuous seconds, which is long enough not to
             // count a corner cut and short enough to still be near the cause.
-            if lost[k].is_none() && f.off_for >= 3.0 {
+            if off <= city::COURSE_HALF_WIDTH {
+                entered[k] = true;
+            }
+            if entered[k] && lost[k].is_none() && f.off_for >= 3.0 {
                 lost[k] = Some((now, p.position, pilot.covered()));
                 // Freeze what led here. `LOST_BEFORE` is counted back from *this* instant, which is
                 // already three seconds after the car crossed the line, so the window has to be
@@ -999,8 +1008,13 @@ async fn run() {
                 "            kursu bıraktı: t={t:>6.1}s · waypoint {wp:>3} · ({:>7.0},{:>6.0},{:>7.0})",
                 at.x, at.y, at.z
             );
-        } else {
+        } else if entered[k] {
             println!("            kursu hiç bırakmadı");
+        } else {
+            let off = corridor.locate(at).map_or(f32::INFINITY, |x| x.distance);
+            println!(
+                "            kursa hiç girmedi — grid koridorun dışında, şu an {off:.0} m uzakta"
+            );
         }
         // The approach, in the pilot's own terms. Read down the `koridora` column for the moment it
         // passes 12 and then look left: what the wheel was being asked for, whether the pedal ever

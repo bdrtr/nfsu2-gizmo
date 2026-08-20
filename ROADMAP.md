@@ -3576,10 +3576,42 @@ boşaltan atlamanın ta kendisi.
 genişletme denemesi de birinde ya da diğerinde yıkıldı. Kalan 16 vaka bu kuralla çözülmüyor —
 çözümü kapıda değil, halkanın arabanın sürdüğü şeritle uyuşmamasında aramak gerekiyor.
 
+### "Kursu bıraktı" sayacı, kursa hiç girmemiş arabaları da sayıyormuş (2026-08-20)
+
+Kalan üç sorudan ikincisi — kursu bırakırken **zaten sürünen 8 araba** — ize bakılınca soru olmaktan
+çıktı. Sekizinin sekizi de tek bir örnekten ibaret: **t = 0,0, hız 0 km/h, koridora 12,3-19,4 m.**
+Yani bunlar kursu bırakmadı; **hiç girmediler.** Gridleri koridorun dışında.
+
+`Paths4002`'nin çıkış çizgisi en yakın waypoint'ten **21 m** uzakta (dosyanın kendi çıktısı:
+*"waypoint 0 is 785 m from the grid · nearest is #87 at 21 m"*), ve sekiz arabanın altısı 12,3-19,4 m
+dışarıda başlıyor. Kalıcı ayrılma kuralı "üç saniye koridorun dışında" olduğu için altısı da
+t = 3'te, daha hiçbir yere sürmeden "kursu bıraktı" sayılıyordu. `Paths4001`'de aynı şeyden iki
+araba var.
+
+**Düzeltme:** bir araba, koridorun içine **en az bir kez girmeden** onu bırakmış sayılamaz. Üçüncü
+bir durum eklendi (`kursa hiç girmedi`) ve sayaç ona göre kapılandı.
+
+**Sonuç, ve manşet ölçütü etkiliyor:** düzeltilmiş sayımda 4001 ve 4002'de sekiz arabanın **sekizi
+de** kursu hiç bırakmıyor (eskiden 6 ve 2 sayılıyordu). Alan sekiz rotada:
+
+| kol | waypoint | kursu hiç bırakmadı | bıraktı |
+|---|---|---|---|
+| kural yok (eski sayım) | 927 | 14 / 64 | 50 |
+| **kural yok (düzeltilmiş)** | 927 | **22 / 64** | 42 |
+| `PASSED_NEAR` 60 (eski sayım) | 986 | 24 / 64 | 40 |
+| **`PASSED_NEAR` 60 (düzeltilmiş)** | **986** | **32 / 64** | 32 |
+
+waypoint toplamı değişmiyor (986) — bu bir raporlama düzeltmesi, sürüşe dokunmuyor.
+
+**Bugünkü kayıtlar için ne demek:** "kursu hiç bırakmayan araba" sayısı gün boyu **eksik**
+raporlandı, ve eksiklik iki rotanın gridinden geliyor. Kollar arası **farklar** geçerli (aynı grid
+her kolda aynı), ama mutlak sayılar düşük. Bugünün kolları düzeltilmiş sayaçla yeniden koşuldu ve
+sayılar aşağıda yerine kondu.
+
 ## Nerede kaldık (2026-08-14 sonu)
 
 **Alan (2026-08-20 sonu, motor pini `58dc2623`, `GRIP` ve `PASSED_NEAR` açıkken): 986 geçilen
-waypoint, 64 arabanın 40'ı kursu bırakıyor (24'ü hiç bırakmıyor).** Günün ortasında, yalnız `GRIP`
+waypoint, 64 arabanın **yarısı** kursu hiç bırakmıyor (32/32).** Günün ortasında, yalnız `GRIP`
 varken: 927 waypoint, 50 araba bırakıyordu. Bir önceki hâli, aşağıdaki paragrafın ölçüldüğü gün:
 865 waypoint, 1.354 düğüm, 51 araba. (Bugün 869
 diye geçen sayı, pilot saati 4× hızlıyken ölçülmüştü; düzeltilince 865 oldu — yani saat platonun
