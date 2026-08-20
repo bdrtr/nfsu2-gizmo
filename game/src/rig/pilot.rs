@@ -107,7 +107,33 @@ const AIM_CLEAR: f32 = 5.0;
 /// unrepresentative, which a subset is free to be. Screening on half the routes to save time has
 /// now produced a false positive twice in a row (see the steering rate above); it is not a cheap
 /// version of the sweep, it is a different and unreliable instrument.
-const LOOKAHEAD_PER_SPEED: f32 = 0.9;
+///
+/// **Re-swept 2026-08-20 after the ring moved, and it reversed.** The 0.9 above was fitted against
+/// the chord ring; with the ring pulled onto the corridor the eight-route field says:
+///
+/// | seconds | waypoints | time on corridor | never lost | fell | furthest |
+/// |---|---|---|---|---|---|
+/// | 0.6 | 1302 | 77.0 % | 33 | 3 | 5514 m |
+/// | 0.9 (was) | 1317 | **78.9 %** | 32 | 3 | 5784 m |
+/// | 1.3 | 1378 | 73.0 % | 16 | **0** | 5878 m |
+/// | 1.5 | 1375 | 70.2 % | 12 | 5 | 5785 m |
+/// | **1.8** | 1417 | 77.7 % | 19 | 1 | **6023 m** |
+/// | 2.4 | **1433** | 72.0 % | 15 | 7 | 5377 m |
+///
+/// +100 waypoints over 0.9 — two and a half times the sweep's measured noise floor of ±37 — with
+/// the biggest single route +86, so it is a field result rather than one route's. `furthest` adds
+/// +239 m and the falls go 3 → 1.
+///
+/// **Time on the corridor looks like it disagrees and cannot.** The field mean falls 1.2 points,
+/// and *all* of that is `Paths4081` collapsing 99.1 % → 53.6 %; five of the eight routes improve,
+/// three of them hugely (`Paths4102` +19.0, `Paths4061` +10.3, `Paths4121` +7.0). A margin of 1.2
+/// against a single route's 45.5 is carried by definition.
+///
+/// **The cost is real and is one corner.** `Paths4081` has a cliff between 0.9 and 1.3 — 99.1 %,
+/// then 50.3, 49.6, 53.6, 48.1 — and its cars leave at `(−354, −180)` at 48 km/h with the aim
+/// 33 m away at 52°, cutting a corner the shorter lookahead took. That corner is the next thing
+/// to look at, not a reason to keep a constant the field has moved away from.
+const LOOKAHEAD_PER_SPEED: f32 = 1.8;
 const LOOKAHEAD_MIN: f32 = 12.0;
 const LOOKAHEAD_MAX: f32 = 40.0;
 

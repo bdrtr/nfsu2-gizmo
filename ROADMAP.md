@@ -4783,3 +4783,34 @@ Kiriş halkasında 8 ile 5 arasında ~100 waypoint vardı; çekilmiş halkada fa
 `GRIP`'in belgesinde yazılı hikâyenin nihayet göründüğü yer: kiriş, kirişin açısı yolun eğriliğini
 abarttığı için yüksek bir eşik istiyordu; halka dürüstleşince eşik **önemsizleşti**. Fiziksel değer
 kazanmıyor, ama artık kaybetmiyor da. 8 yerinde kalıyor (ikincil ölçülerde önde) ve kaydı düzeldi.
+
+### Ön-takip mesafesi tersine döndü: 0,9 s → 1,8 s, alan +100 waypoint (2026-08-20)
+
+`LOOKAHEAD_PER_SPEED` kiriş halkasında süpürülmüş ve 0,9 s'de sabitlenmişti; belgesinde 1,5 ve
+1,8'in **kaybettiği** yazılı (724 ve 858'e karşı 869). Halka çekilince aynı süpürme tersine döndü:
+
+| saniye | waypoint | kursta süre | hiç bırakmayan | düşen | furthest |
+|---|---|---|---|---|---|
+| 0,6 | 1.302 | %77,0 | 33 | 3 | 5.514 m |
+| 0,9 (eski) | 1.317 | **%78,9** | 32 | 3 | 5.784 m |
+| 1,3 | 1.378 | %73,0 | 16 | **0** | 5.878 m |
+| 1,5 | 1.375 | %70,2 | 12 | 5 | 5.785 m |
+| **1,8 (yeni)** | 1.417 | %77,7 | 19 | 1 | **6.023 m** |
+| 2,4 | **1.433** | %72,0 | 15 | 7 | 5.377 m |
+
+**+100 waypoint** — ölçülen gürültü tabanının (±37) iki buçuk katı — ve en büyük tek rota +86, yani
+alan sonucu. `furthest` +239 m, düşen 3 → 1.
+
+**Koridorda geçen süre karşı çıkıyor gibi görünüyor ve çıkamıyor.** Alan ortalaması 1,2 puan
+düşüyor ve bunun **tamamı** `Paths4081`'in çöküşü (%99,1 → %53,6). Sekiz rotanın beşinde süre
+*artıyor*, üçünde büyük ölçüde: 4102 **+19,0**, 4061 **+10,3**, 4121 **+7,0**. 1,2'lik bir farkın
+karşısında tek rotanın 45,5'i — bu, günün kuralının tanımı gereği taşınan bir sonuç.
+
+**Bedel gerçek ve tek bir viraj.** 4081'de 0,9 ile 1,3 arasında bir uçurum var (%99,1 → %50,3 ve
+orada kalıyor: 49,6 · 53,6 · 48,1) ve arabaları `(−354, −180)`'de, 48 km/h ile, nişanı 33 m'de 52°
+iken çıkıyor — kısa ön-takibin aldığı virajı kesiyorlar. Sıradaki iş o viraj; alanın taşındığı bir
+sabiti tutmak için sebep değil.
+
+**Ve buradaki asıl ders bugünün üçüncü tekrarı:** bir sabitin hangi kursa karşı oturtulduğu,
+sabitin kendisi kadar önemli. `GRIP` halka değişince **önemsizleşti** (5 ile 8 arasında tam sıfır
+fark), ön-takip ise **tersine döndü**. İkisi de kiriş halkasının kurgusuna oturtulmuştu.
