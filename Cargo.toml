@@ -26,13 +26,8 @@ gizmo-nfs = { path = "../PryHUB/crates/gizmo-nfs" }
 # etmez ve motor yine altından kayar. `cargo tree -p gizmo-engine` hangisinin geçerli
 # olduğunu söyler (git kaynağı mı, yoksa yerel path mi).
 #
-# ŞU AN AÇIK — 2026-08-20. Sebep: `MOTOR-NOTLARI.md` §14'ün düzeltmesi (`Material::alpha_cutoff`)
-# yerel `Gizmo` ağacında commit'li (`550a7df`) ama **pinli commit'te yok**. Oyun ona çağrı yapıyor
-# (`nfs_city`, `nfs_cruise`), yani bu iki satır yoruma alınırsa oyun DERLENMEZ. Kapanış sırası:
-# motoru push et → `game/Cargo.toml`'daki `rev`i o commit'e taşı → burayı yoruma al → süpürmeyi
-# yeniden koş (motor değişikliği sürüşü kaydırmamalı ama bu ölçülür, varsayılmaz).
-[patch."https://github.com/bdrtr/Gizmo"]
-gizmo-engine = { path = "../Gizmo/crates/gizmo" }
+# [patch."https://github.com/bdrtr/Gizmo"]
+# gizmo-engine = { path = "../Gizmo/crates/gizmo" }
 
 # Parser hata ayıklama derlemesinde de 7.6 MB'lık dosyalar açıyor: optimize kalsın, yoksa
 # araba yüklenmesi saniyeler sürüyor.
