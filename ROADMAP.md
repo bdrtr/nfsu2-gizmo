@@ -4407,3 +4407,62 @@ doğruymuş, sebebi de bulundu: kayacak bir kenar yoktu, **yol oradan aşağı i
 Waypoint kazancının yine de küçük olması şaşırtıcı değil: kurtulan yedi araba 4002 ve 4081'de, ve
 o iki rota zaten alanın en az ilerleyen rotaları (75 ve 79 waypoint). Çivilenmemek ilerlemek
 değil — ama çivilenmek kesinlikle ilerlememek.
+
+### Halka-bağımsız ölçüler: yürünmüş halka *sürüşte* daha kötü, ve sebebi nişan açısı (2026-08-20)
+
+Bugünkü bulgular yürünmüş halkayı dünya tarafında haklı çıkardı (gerçek yolda geçen oran %49 → %76,
+altında zemin olmayan hücre %11,0 → %2,9). Sıradaki soru, tabanın oraya taşınıp taşınmayacağıydı.
+İki halka farklı sayıda waypoint taşıdığı için "geçilen waypoint" bu karşılaştırmada anlamsız;
+`tools/ring-neutral.py` yazıldı ve **halkadan bağımsız** olanlara bakıldı — kursu hiç bırakmayan
+araba (koridora karşı ölçülüyor, halkaya değil), o arabaların bastığı ayrık düğüm, `furthest`,
+ve düşen.
+
+| kol | kursta | kursta kalanın düğümü | furthest | düşen |
+|---|---|---|---|---|
+| kiriş (bugünkü çitle) | **30 / 64** | **20,0 / araba** | **5.299 m** | 6 |
+| yürünmüş (bugünkü çitle) | 14 / 64 | 7,5 / araba | 5.237 m | **3** |
+
+**Yürünmüş halka sürüşte açık ara kötü.** Rota rota: 4001 **8/8 → 0/8**, 4041 4/8 → 0/8,
+4081 8/8 → 6/8. Buna karşılık 4002'nin `furthest`'ı 235 → **627 m** (2,7 kat) ve düşen yarıya
+iniyor.
+
+**İlk hipotez çürüdü.** "Halka yarışın kendi yollarını değil, herhangi bir yolu yürüyor" dendi;
+`NFS_WALKONLY=1` eklendi (bacak yalnız koridorun içindeki düğümlerden geçebilir) ve sonuç
+**bayt-birebir aynı** çıktı — halka zaten yarışın koridorunda.
+
+**İzler mekanizmayı gösterdi.** 4001'in sekiz arabası da aynı noktada, `(468, 1096)`'da, 0 km/h'de
+yığılıyor. Donmuş iz o anın 20 saniye öncesini gösteriyor:
+
+```
+t= 62.5 ( 391, 1148)  77 km/h · koridora 1.3 m · direksiyon -0.62 · gaz 0.46 fren 1.00
+        · nişan  49 m  66° · hedef 44  34 m  -3° · sonraki 64 m
+```
+
+Araba **koridorun 1,3 m içinde**, hedef waypoint **−3°'de yani tam önünde**, ama **nişan noktası
+66°'de**. Ön-takip noktası virajın arkasına düşmüş; araba düz yolda tam frenle direksiyonu kırıyor.
+
+**Ve bu sayılabilir bir şey.** `nişan açısı` sayımı eklendi (her araba, her adım):
+
+| rota | halka | ortalama | %>45° | %>90° | kursta |
+|---|---|---|---|---|---|
+| 4001 | kiriş | **9°** | %6,4 | %0,4 | **8/8** |
+| 4001 | yürünmüş | **21°** | %20,0 | %2,0 | **0/8** |
+| 4041 | kiriş | 44° | %34,6 | %19,8 | 4/8 |
+| 4041 | yürünmüş | 43° | %35,9 | %17,0 | 0/8 |
+| 4121 | kiriş | 45° | %35,2 | %17,9 | 0/8 |
+| 4121 | yürünmüş | **60°** | %50,6 | %30,6 | 0/8 |
+
+Kursu koruyan tek örnek (4001 kiriş) aynı zamanda nişan açısı **tek haneli** olan tek örnek. Bir
+saf-takip denetleyicisinin düz yolda birkaç derecede çalışması beklenir; 44-60° ortalama, hattın
+sürülebilir olmadığının değil, **nişanın yanlış yere düştüğünün** ölçüsü.
+
+### Ölçüyü iki kez bozan tuzak: boş değer "açık" demek (2026-08-20)
+
+`NFS_WALKLINE=` ve `NFS_BUNDLE=` — yani düğmeyi *boşaltmak* — `std::env::var(..).is_ok()` için
+**set** demek. Kontrol kolunu böyle temizleyen bir kabuk döngüsü iki özdeş kolu koşar, ve çıktı
+"iki halka bayt-birebir aynı" gibi görünür. Bugün iki ölçü bu yüzden yanlış okundu (biri
+`NFS_BUNDLE` boşken hiç çalışmadı, biri iki kiriş kolunu yürünmüş sanıp karşılaştırdı).
+
+`nfs_sim`'de artık tek bir `knob(name)` var: **boş değer = ayarlanmamış**. 26 okuma ona çevrildi;
+`NFS_RESCUE` ve `NFS_SHOTCAM` de aynı tuzaktaydı, onlar da kapatıldı. Sayısal düğmeler zaten
+güvenliydi (boş değer `parse` edilemez, varsayılana düşer).

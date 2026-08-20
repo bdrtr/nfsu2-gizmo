@@ -214,6 +214,16 @@ fn ground_map(ground: &city::Ground, at: Vec3, going: Vec3, half: f32, step: f32
     out
 }
 
+/// An environment knob's value, treating **empty as unset**.
+///
+/// `NFS_WALKLINE=` and `NFS_BUNDLE=` both read as *set* through `std::env::var(..).is_ok()`, and
+/// both produced a measurement that looked impossible before the cause was found: a shell loop
+/// that clears a knob for its control arm silently ran two identical arms. A knob that cannot be
+/// switched off the obvious way is a trap in the tool rather than in the world.
+fn knob(name: &str) -> Option<String> {
+    std::env::var(name).ok().filter(|v| !v.is_empty())
+}
+
 fn main() {
     pollster::block_on(run());
 }
@@ -225,7 +235,7 @@ async fn run() {
         .or_else(|| std::env::var("NFSU2_CAR").ok())
         .unwrap_or_else(|| DEFAULT_CAR.to_string());
     let seconds: f32 =
-        std::env::var("NFS_SECONDS").ok().and_then(|v| v.parse().ok()).unwrap_or(120.0);
+        knob("NFS_SECONDS").and_then(|v| v.parse().ok()).unwrap_or(120.0);
 
     let route = std::env::var("NFS_ROUTE").expect("NFS_SIM needs NFS_ROUTE: a race to drive");
     // NFS_BUNDLE=all: load the whole tracks directory instead of the one region bundle the route
@@ -236,7 +246,7 @@ async fn run() {
     // because the eight regions are separate places sharing an origin (`world::load::REGIONS`) and
     // loading them together stacks `L4RD` on `L4RA` with four arenas through the middle. A hole
     // that closes under `all` has been *covered by another world*, not filled in.
-    let pick = std::env::var("NFS_BUNDLE").ok().filter(|v| !v.is_empty());
+    let pick = knob("NFS_BUNDLE");
     let whole = pick.as_deref() == Some("all");
     let region = city::bundle_for_route(std::path::Path::new(&route));
     let source = match (&pick, &region) {
@@ -255,7 +265,7 @@ async fn run() {
     // not in fact a duplicate.
     let loaded = meshes.len();
     let meshes =
-        if std::env::var("NFS_DEDUP").is_ok_and(|v| v == "off") { meshes } else { city::dedup(meshes) };
+        if knob("NFS_DEDUP").is_some_and(|v| v == "off") { meshes } else { city::dedup(meshes) };
     println!(
         "bundle: {} · {loaded} meshes loaded, {} after dedup",
         source.rsplit('/').next().unwrap_or(&source),
@@ -284,7 +294,7 @@ async fn run() {
     // hole and so does `L4RD`, which is the same city packed for other races with 400 more
     // objects. Two independent packings agreeing is as close to the source data as this can get:
     // the ground really is absent there, and `all` does not fill it in, it covers it over.
-    let collide_all = std::env::var("NFS_COLLIDE").is_ok_and(|v| v == "all");
+    let collide_all = knob("NFS_COLLIDE").is_some_and(|v| v == "all");
     // What each filter costs, printed rather than assumed. A knob whose effect is invisible is a
     // knob that can be swept all day against a set it never changed.
     let (backdrop, distant) = meshes.iter().fold((0usize, 0usize), |(b, d), m| {
@@ -317,12 +327,12 @@ async fn run() {
     // Only for `NFS_HOLE`: everything, walls included. A place with no drivable surface and no
     // geometry at all is missing data; one with geometry that `surface_of` called a wall is a
     // classification question instead, and the two want different work.
-    let anything = std::env::var("NFS_HOLE")
-        .is_ok()
+    let anything = knob("NFS_HOLE")
+        .is_some()
         .then(|| city::Ground::of_everything(&colliders));
     // And where the barriers are. A place with no ground is only a defect if a car can reach it.
     let barriers =
-        std::env::var("NFS_HOLE").is_ok().then(|| city::Ground::of_walls(&colliders));
+        knob("NFS_HOLE").is_some().then(|| city::Ground::of_walls(&colliders));
     // **A measurement, not a mechanism.** Both ways of acting on a barrier through the *graph* were
     // swept and refuted (`ROADMAP.md`), and what is left to try is the pilot's aim — so the first
     // question is whether a pilot is in fact steering at points with something standing in the way,
@@ -333,7 +343,7 @@ async fn run() {
     // something after the rule has had its go. For the number the rule was written from, run it
     // with `NFS_AIMCLEAR=0`.
     let aim_lift: f32 =
-        std::env::var("NFS_AIMWALL").ok().and_then(|v| v.parse().ok()).unwrap_or(0.0);
+        knob("NFS_AIMWALL").and_then(|v| v.parse().ok()).unwrap_or(0.0);
     let walls = city::Walls::of(&colliders);
     // What the city is made of, once. A world whose walls are 3 % of it and whose race line has
     // none within 50 m is a different problem from a world with no walls at all, and the two were
@@ -382,11 +392,11 @@ async fn run() {
         .map(|e| e.outline.iter().map(|p| city::remap([p[0], p[1], 0.0])).collect())
         .unwrap_or_default();
     let step: f32 =
-        std::env::var("NFS_WPSTEP").ok().and_then(|v| v.parse().ok()).unwrap_or(WAYPOINT_STEP);
+        knob("NFS_WPSTEP").and_then(|v| v.parse().ok()).unwrap_or(WAYPOINT_STEP);
     // **The ring, from the roads rather than across them.** `NFS_WALKLINE=0` goes back to the
     // straight chord between outline corners — which is what every measurement before 2026-08-20
     // was taken against, and what put 55 % of the ring outside the corridor.
-    let walk = std::env::var("NFS_WALKLINE").is_ok_and(|v| v != "0");
+    let walk = knob("NFS_WALKLINE").is_some_and(|v| v != "0");
     let waypoints = if walk {
         // **A link with a wall across it is not a road, and the ring is where that matters.** The
         // graph joins carriageways that merely run beside each other, so a committed shortest path
@@ -415,7 +425,7 @@ async fn run() {
         // `NFS_WALKLEGS=1`: what each leg of the outline costs in road, against the chord it
         // replaces. A ring that doubles in length is either driving real roads round real blocks or
         // taking a detour, and only the per-leg numbers tell those apart.
-        if std::env::var("NFS_WALKLEGS").is_ok() {
+        if knob("NFS_WALKLEGS").is_some() {
             println!("anahat bacakları (kiriş → yol):");
             for (k, cw) in coarse.windows(2).enumerate() {
                 let plan = |a: Vec3, b: Vec3| Vec3::new(b.x - a.x, 0.0, b.z - a.z).length();
@@ -450,19 +460,58 @@ async fn run() {
         }
         // How far round a leg may go before the graph is admitting it has no road for it.
         let detour: f32 =
-            std::env::var("NFS_WALKDETOUR").ok().and_then(|v| v.parse().ok()).unwrap_or(3.0);
-        let (w, chords) =
-            city::along_roads(&net, &coarse, step, detour, |a, b| !blocked.contains(&(a, b)));
+            knob("NFS_WALKDETOUR").and_then(|v| v.parse().ok()).unwrap_or(3.0);
+        // `NFS_WALKONLY=1`: walk only the race's **own** roads.
+        //
+        // Measured 2026-08-20 and this is what the measurement asked for. On ring-neutral numbers
+        // — distinct nodes banked by cars that never lost the course, and how many those are — the
+        // walked ring is *worse* than the chord it replaces: 15 cars of 64 keep the course against
+        // 30, and they bank 8.5 nodes each against 20.0. A ring that follows real roads should not
+        // lose the course twice as often, unless the roads it follows are not this race's. They
+        // need not be: `along_roads` walks the whole network, and `Corridor` — which is what "on
+        // course" is judged against — is built from the route file's own paths. A leg routed down
+        // a side street is honest about the city and outside the race.
+        let only = knob("NFS_WALKONLY").is_some();
+        let on_course = |i: u32| {
+            net.node(i).is_some_and(|n| {
+                corridor.locate(n.at).is_some_and(|f| f.distance <= city::COURSE_HALF_WIDTH)
+            })
+        };
+        let (w, chords) = city::along_roads(&net, &coarse, step, detour, |a, b| {
+            !blocked.contains(&(a, b)) && (!only || (on_course(a) && on_course(b)))
+        });
         // **The caution this inherits, measured rather than assumed.** A committed shortest path
         // over this graph crosses joins a car cannot take — the graph links carriageways that
         // merely run beside each other, which is why `guide_to` was refuted in the driving role
         // (`ROADMAP.md`, `Network` header). A ring drawn through such a join drags the pilot
         // sideways across a central reservation, so count them: consecutive ring points with
         // something standing between them at car height.
-        let crossed = w
+        let crossing: Vec<usize> = w
             .windows(2)
-            .filter(|p| walls.across(&ground, p[0], p[1], 0.5, 3.0))
-            .count();
+            .enumerate()
+            .filter(|(_, p)| walls.across(&ground, p[0], p[1], 0.5, 3.0))
+            .map(|(i, _)| i)
+            .collect();
+        let crossed = crossing.len();
+        // **Where**, not just how many. `Paths4001`'s walked ring crosses fifteen times and all
+        // eight of its cars pile up at one place and stop — a count cannot say whether that is one
+        // bad leg or fifteen scattered ones, and the answer decides whether this is worth fixing.
+        if crossed > 0 {
+            let mut runs: Vec<(usize, usize)> = Vec::new();
+            for &i in &crossing {
+                match runs.last_mut() {
+                    Some(r) if i <= r.1 + 1 => r.1 = i,
+                    _ => runs.push((i, i)),
+                }
+            }
+            println!("   engelli geçişler {} öbekte:", runs.len());
+            for (a, b) in runs {
+                println!(
+                    "     waypoint {a:>4}-{b:<4} ({:>7.0},{:>7.0}) → ({:>7.0},{:>7.0})",
+                    w[a].x, w[a].z, w[b + 1].x, w[b + 1].z
+                );
+            }
+        }
         println!(
             "yarış hattı ağda yürünerek kuruldu: {} waypoint · {chords} bacak yol bulunamayıp \
              kirişte kaldı · {crossed} ardışık nokta arasında araç boyunda engel var",
@@ -478,7 +527,7 @@ async fn run() {
     // `NFS_ONLINE=0` turns the preference off; the width is in metres and defaults to a waypoint's
     // spacing, which is the scale at which "this node belongs to the race" stops being a question.
     let online: f32 =
-        std::env::var("NFS_ONLINE").ok().and_then(|v| v.parse().ok()).unwrap_or(WAYPOINT_STEP);
+        knob("NFS_ONLINE").and_then(|v| v.parse().ok()).unwrap_or(WAYPOINT_STEP);
     net.mark_line(&waypoints, online);
     {
         let (on, all) = net.on_line();
@@ -551,13 +600,13 @@ async fn run() {
     // NFS_SLOT_FROM=<k>: leave the first k places empty. The one way to ask whether a car that
     // stops is stopping because of where it starts or because of the car in front of it.
     let from: usize =
-        std::env::var("NFS_SLOT_FROM").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
+        knob("NFS_SLOT_FROM").and_then(|v| v.parse().ok()).unwrap_or(0);
     let mut field: Vec<(CarRig, Pilot)> = Vec::new();
     // NFS_SPREAD=<x>: push the grid apart by this factor about its own centre. Not a feature —
     // the one experiment that separates "the driver cannot drive here" from "the driver cannot
     // drive next to another driver", which is a real distinction because the pilot has no traffic
     // model at all.
-    let spread: f32 = std::env::var("NFS_SPREAD").ok().and_then(|v| v.parse().ok()).unwrap_or(1.0);
+    let spread: f32 = knob("NFS_SPREAD").and_then(|v| v.parse().ok()).unwrap_or(1.0);
     let centre = slots.iter().fold(Vec3::ZERO, |a, s| a + *s) / slots.len() as f32;
     let slots: Vec<Vec3> = slots.iter().map(|s| centre + (*s - centre) * spread).collect();
     for (k, slot) in slots.iter().enumerate().skip(from).take(rivals) {
@@ -590,7 +639,7 @@ async fn run() {
         pilot.place(stand, heading, &net, &waypoints);
         // NFS_STAGGER=<s>: seconds between one car pulling away and the next.
         let stagger: f32 =
-            std::env::var("NFS_STAGGER").ok().and_then(|v| v.parse().ok()).unwrap_or(0.0);
+            knob("NFS_STAGGER").and_then(|v| v.parse().ok()).unwrap_or(0.0);
         pilot.hold_for(stagger * k as f32);
         if let Some(j) = pilot.node().and_then(|i| net.node(i)) {
             println!(
@@ -628,10 +677,10 @@ async fn run() {
     // fixed step is what makes two runs of the same parameters give the same answer.
     // NFS_TRACE=<n>: print the field every n simulated seconds. A summary says where everyone
     // ended; this says when they stopped, which is a different question and usually the useful one.
-    let trace: f32 = std::env::var("NFS_TRACE").ok().and_then(|v| v.parse().ok()).unwrap_or(0.0);
+    let trace: f32 = knob("NFS_TRACE").and_then(|v| v.parse().ok()).unwrap_or(0.0);
     let mut next_trace = trace;
-    let watch: Option<usize> = std::env::var("NFS_WATCH").ok().and_then(|v| v.parse().ok());
-    let floor: Option<usize> = std::env::var("NFS_FLOOR").ok().and_then(|v| v.parse().ok());
+    let watch: Option<usize> = knob("NFS_WATCH").and_then(|v| v.parse().ok());
+    let floor: Option<usize> = knob("NFS_FLOOR").and_then(|v| v.parse().ok());
     let fence = std::env::var("NFS_FENCE").ok().is_none_or(|v| v != "0");
     let mut held = 0usize;
     // When each car last got further round the course, and how far it has been from the node it
@@ -652,7 +701,7 @@ async fn run() {
     // worth seeing can only be recognised three seconds after it — that is how long off the
     // corridor `lost` waits before calling a departure permanent, so a buffer that started at the
     // announcement would begin well past the cause.
-    let losing = std::env::var("NFS_LOST").is_ok();
+    let losing = knob("NFS_LOST").is_some();
     // **A car that stops is as much a departure as one that drives off, and the ring buffer was
     // only catching the second.** On `Paths4021` three cars stand still on flat open ground with
     // eleven of twelve directions clear, the pilot asking 0.03 throttle, seventeen escapes that
@@ -660,7 +709,7 @@ async fn run() {
     // and none of it is traced, because `lost` never fires for a car that never leaves the course.
     // Standing still this long is the trigger for the same window.
     let stuck_for: f32 =
-        std::env::var("NFS_STUCK").ok().and_then(|v| v.parse().ok()).unwrap_or(6.0);
+        knob("NFS_STUCK").and_then(|v| v.parse().ok()).unwrap_or(6.0);
     let mut standing = vec![0.0f32; field.len()];
     let mut ring: Vec<std::collections::VecDeque<Moment>> =
         vec![std::collections::VecDeque::new(); field.len()];
@@ -675,6 +724,8 @@ async fn run() {
     // Of the steps the fence held a car, how many were at a gap with ground at another level —
     // a road changing height rather than the world ending. See [`rig::Fence`].
     let mut fence_off_level = 0usize;
+    // The aim-angle census: how often the lookahead point sits well off the nose.
+    let (mut aim_steps, mut aim_sum, mut aim_wide, mut aim_hard) = (0usize, 0.0f32, 0usize, 0usize);
     let mut still = vec![0usize; field.len()];
     let mut rolled = vec![0usize; field.len()];
     let mut rescued = vec![0usize; field.len()];
@@ -709,7 +760,7 @@ async fn run() {
     // race's own line. That is the number that was hiding: on `Paths4121` the cars run at 60 km/h
     // inside the corridor with their goal waypoint **150-159 m** away, and the place where seven of
     // eight finally cross out has no waypoint within 80 m of it.
-    let wrongway = std::env::var("NFS_WRONGWAY").is_ok();
+    let wrongway = knob("NFS_WRONGWAY").is_some();
     let mut held_node: Vec<Option<u32>> = vec![None; field.len()];
     // **A car cannot leave a course it was never on.** Some grids sit outside the corridor: on
     // `Paths4002` the start line is 21 m from the nearest waypoint and **six of eight cars begin
@@ -741,7 +792,7 @@ async fn run() {
     let mut spun = vec![0.0f32; field.len()];
     // When and where each car first lost the corridor for good, and how far along it was.
     let mut lost: Vec<Option<(f32, Vec3, usize)>> = vec![None; field.len()];
-    let rescue = std::env::var("NFS_RESCUE").is_ok_and(|v| v != "0");
+    let rescue = knob("NFS_RESCUE").is_some_and(|v| v != "0");
     let mut ticks = vec![0usize; field.len()];
     let mut queued = vec![0usize; field.len()];
     let steps = (seconds / FIXED_DT) as usize;
@@ -1016,6 +1067,24 @@ async fn run() {
                 revved[k] += rpm;
                 torqued[k] += torque;
                 spun[k] += spin;
+            }
+            // **How far off the nose the pure-pursuit aim sits, over the whole field.** The trace
+            // shows it only for a car already in trouble, and the question the two rings raise is
+            // about the ordinary case: a ring that follows the road's own bends puts the lookahead
+            // point *around* the corner, and a car that steers at it turns before the corner does.
+            // Counted rather than argued: every car, every step.
+            {
+                let nose = p.rotation * Vec3::NEG_Z;
+                let fwd = Vec3::new(nose.x, 0.0, nose.z).normalize_or_zero();
+                let side = Vec3::new(-fwd.z, 0.0, fwd.x);
+                if let Some(a) = pilot.aim() {
+                    let d = Vec3::new(a.x - p.position.x, 0.0, a.z - p.position.z);
+                    let deg = d.dot(side).atan2(d.dot(fwd)).to_degrees().abs();
+                    aim_steps += 1;
+                    aim_sum += deg;
+                    aim_wide += usize::from(deg > 45.0);
+                    aim_hard += usize::from(deg > 90.0);
+                }
             }
             let f = &mut falls[k];
             f.below = g.below;
@@ -1401,7 +1470,7 @@ async fn run() {
     // has actually been measured holding turns that into a speed. Where that speed is below what
     // the cars arrive at, no steering rule can save them and the brake is the only lever; where it
     // is above, the corner is not the problem.
-    if std::env::var("NFS_CURVE").is_ok() {
+    if knob("NFS_CURVE").is_some() {
         // Measured, not chosen: the 90th percentile of `v · dψ/dt` over the field's own cornering
         // above 28 km/h is 5.2 m/s² and the 95th is 5.6 (`ROADMAP.md`, 2026-08-20). This is what a
         // 240SX on Bayview's tarmac in this build actually holds, whatever a tyre datasheet says.
@@ -1565,7 +1634,7 @@ async fn run() {
     // road** that only runs when a car happened to stop in the first thirty seconds is a
     // measurement whose absence says nothing, and on a route where every car keeps moving the
     // question would go silently unasked.
-    if std::env::var("NFS_BLOCKED").is_ok() {
+    if knob("NFS_BLOCKED").is_some() {
         // Before anything about walls: do the route's own nodes agree with the ground they are
         // supposed to sit on? Every height query in this file walks from the node's y, so if
         // the graph and the collision surface disagree the walls answer is about the wrong
@@ -1803,7 +1872,7 @@ async fn run() {
     // a 30 m one — and the 30 m one beside `Paths4041`'s junction is the whole reason the question
     // was asked. A blob that reaches the edge of the sampled box is the world running out, not a
     // hole in it, so those are dropped.
-    if std::env::var("NFS_HOLE").is_ok_and(|v| v == "city") {
+    if knob("NFS_HOLE").is_some_and(|v| v == "city") {
         const STEP: f32 = 8.0;
         let (lo, hi) = waypoints.iter().fold(
             (Vec3::splat(f32::MAX), Vec3::splat(f32::MIN)),
@@ -1900,7 +1969,7 @@ async fn run() {
     // know whether the world is missing ground *along the course*, and where. Every waypoint is
     // sampled across the corridor's own width, so a cell counted here is somewhere a car driving
     // the race is entitled to be.
-    if std::env::var("NFS_HOLE").is_ok_and(|v| v == "course") {
+    if knob("NFS_HOLE").is_some_and(|v| v == "course") {
         const LAT: [f32; 5] = [-10.0, -5.0, 0.0, 5.0, 10.0];
         // A hole matters differently depending on what it is under. The ring carries two kinds of
         // waypoint: ones the network actually walked to, and ones left on the raw chord because
@@ -2249,6 +2318,15 @@ async fn run() {
              point it was steering at — {:.1}% overall, per car {}",
             if seen > 0 { 100.0 * walled as f32 / seen as f32 } else { 0.0 },
             each.join(" ")
+        );
+    }
+    if aim_steps > 0 {
+        println!(
+            "nişan açısı: ortalama {:.0}° · adımların %{:.1}'inde 45°'den, %{:.1}'inde 90°'den \
+             büyük ({aim_steps} örnek)",
+            aim_sum / aim_steps as f32,
+            100.0 * aim_wide as f32 / aim_steps as f32,
+            100.0 * aim_hard as f32 / aim_steps as f32
         );
     }
     if held > 0 {

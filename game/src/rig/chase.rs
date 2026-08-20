@@ -66,7 +66,10 @@ impl ChaseCamera {
             distance: 6.5,
             height: 1.9,
             lag: 12.0,
-            shot: std::env::var("NFS_SHOTCAM").is_ok().then_some(Vec3::new(4.2, 1.4, -5.6)),
+            // Empty reads as unset: a knob cleared with `NFS_SHOTCAM=` should be off, not on.
+            shot: std::env::var("NFS_SHOTCAM")
+                .is_ok_and(|v| !v.is_empty())
+                .then_some(Vec3::new(4.2, 1.4, -5.6)),
         }
     }
 
