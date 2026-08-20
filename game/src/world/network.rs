@@ -399,6 +399,13 @@ impl Network {
         };
     }
 
+    /// Whether one node carries the mark. `false` when nothing has been marked, so a caller that
+    /// forgets [`Self::mark_line`] gets "off the line everywhere" rather than a silent pass.
+    #[must_use]
+    pub fn on_line_at(&self, i: u32) -> bool {
+        self.near_line.get(i as usize).copied().unwrap_or(false)
+    }
+
     /// How many nodes are on the line, and how many there are — for a caller that wants to know
     /// whether the mark says anything before trusting a result that depends on it.
     #[must_use]

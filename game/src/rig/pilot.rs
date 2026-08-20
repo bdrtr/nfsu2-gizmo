@@ -1052,6 +1052,7 @@ impl Pilot {
             .and_then(|v| v.parse().ok())
             .unwrap_or(LOOKAHEAD_PER_SPEED);
         let look = (speed * per).clamp(LOOKAHEAD_MIN, LOOKAHEAD_MAX);
+        let aim_line = std::env::var("NFS_AIMLINE").is_ok_and(|v| !v.is_empty() && v != "0");
         let (mut cur, mut prev) = (self.at?, self.from);
         let mut aim = net.node(cur)?.at;
         let mut walked = flat(aim - at).length();
@@ -1060,6 +1061,38 @@ impl Pilot {
                 break;
             }
             let Some(next) = net.step_avoiding(cur, prev, toward, &self.blocked) else { break };
+            // **Do not walk off the course to find something to aim at.** Measured 2026-08-20:
+            // the aim is a *network node*, not a ring waypoint, so pulling the ring onto the
+            // corridor did not put the aim there — and on `Paths4081` the aim is outside the
+            // corridor on **36.7 %** of steps against 0.7 % on `Paths4061` and 0.0 % on
+            // `Paths4001`. 4081 is the one route that collapsed when the lookahead went from 0.9 s
+            // to 1.8 s (99.1 % → 53.6 % of race time on the corridor), and a longer walk is
+            // exactly what reaches the parallel carriageway its junction 206 links to.
+            //
+            // This does **not** choose between arms — that rule was swept and refuted twice. It
+            // stops the walk, leaving the aim on the last node that was on the line, and only once
+            // there is already a usable aim ahead of the car: an aim behind is worse than an aim
+            // off the course, which the block above measures in detail.
+            //
+            // **And it is refuted as a field rule, while being exactly right on the route that
+            // motivated it.** On `Paths4081` it does what it was built to do: race time on the
+            // corridor **53.6 % → 96.5 %** at a 20 m mark (89.9 % at 12 m) and the aim outside the
+            // corridor 36.7 % → 2.1 %. Over the eight routes it loses anyway — −49 waypoints at
+            // 20 m and −94 at 12 m — because the four routes it does not fix, it breaks:
+            // `Paths4021` 94 → 77 %, `Paths4041` 91 → 82, `Paths4061` 65 → 51, `Paths4102` 68 → 57.
+            // The width matters and neither is right for everything, which is the same shape as
+            // every other rule that tried to keep this pilot near the line.
+            //
+            // The mark's width is the reason the first attempt did nothing at all: at the default
+            // 40 m the parallel carriageway 30-40 m away is *on the line*, so nothing was ever
+            // stopped and the run came out byte-identical.
+            if aim_line
+                && !net.on_line_at(next)
+                && flat(aim - at).dot(f) > 0.0
+                && walked >= LOOKAHEAD_MIN
+            {
+                break;
+            }
             let p = net.node(next)?.at;
             walked += flat(p - aim).length();
             aim = p;

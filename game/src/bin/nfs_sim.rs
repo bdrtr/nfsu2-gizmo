@@ -844,6 +844,7 @@ async fn run() {
     let mut raced = vec![0.0f32; field.len()];
     // The aim-angle census: how often the lookahead point sits well off the nose.
     let (mut aim_steps, mut aim_sum, mut aim_wide, mut aim_hard) = (0usize, 0.0f32, 0usize, 0usize);
+    let mut aim_off = 0usize;
     let mut still = vec![0usize; field.len()];
     let mut rolled = vec![0usize; field.len()];
     let mut rescued = vec![0usize; field.len()];
@@ -1198,6 +1199,14 @@ async fn run() {
                 if let Some(a) = pilot.aim() {
                     let d = Vec3::new(a.x - p.position.x, 0.0, a.z - p.position.z);
                     let deg = d.dot(side).atan2(d.dot(fwd)).to_degrees().abs();
+                    // **Is the pilot being pointed off the course?** The ring is pulled onto the
+                    // corridor now, so a waypoint cannot be outside it; the aim still can, because
+                    // it is the ring walked forward and then moved sideways by the clearance
+                    // search. A car steered at a point off the course drives off the course, and
+                    // this says how often that is what is happening.
+                    aim_off += usize::from(
+                        corridor.locate(a).is_none_or(|f| f.distance > city::COURSE_HALF_WIDTH),
+                    );
                     aim_steps += 1;
                     aim_sum += deg;
                     aim_wide += usize::from(deg > 45.0);
@@ -2522,10 +2531,11 @@ async fn run() {
     if aim_steps > 0 {
         println!(
             "nişan açısı: ortalama {:.0}° · adımların %{:.1}'inde 45°'den, %{:.1}'inde 90°'den \
-             büyük ({aim_steps} örnek)",
+             büyük · %{:.1}'inde nişan koridorun DIŞINDA ({aim_steps} örnek)",
             aim_sum / aim_steps as f32,
             100.0 * aim_wide as f32 / aim_steps as f32,
-            100.0 * aim_hard as f32 / aim_steps as f32
+            100.0 * aim_hard as f32 / aim_steps as f32,
+            100.0 * aim_off as f32 / aim_steps as f32
         );
     }
     if held > 0 {

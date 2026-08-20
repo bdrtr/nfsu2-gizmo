@@ -4814,3 +4814,37 @@ sabiti tutmak için sebep değil.
 **Ve buradaki asıl ders bugünün üçüncü tekrarı:** bir sabitin hangi kursa karşı oturtulduğu,
 sabitin kendisi kadar önemli. `GRIP` halka değişince **önemsizleşti** (5 ile 8 arasında tam sıfır
 fark), ön-takip ise **tersine döndü**. İkisi de kiriş halkasının kurgusuna oturtulmuştu.
+
+### Nişan noktası halkadan gelmiyor: **ağdan** geliyor — ve bu, çekmenin niye işe yaradığını açıklıyor (2026-08-20)
+
+4081'in çöküşü kovalanınca pilotun nasıl çalıştığı hakkında bugüne kadar örtük kalan bir şey
+çıktı. Nişan noktası bir waypoint **değil**: pilot `self.at`'ten başlayıp **ağı yürüyor**
+(`step_avoiding`), ve halka yalnız o yürüyüşe hangi yöne gideceğini söylüyor (`toward` = hedef
+waypoint). Yani "halkayı koridora çektik" demek nişanı koridora sokmak değil.
+
+Ölçü bunu doğruladı: halkanın %100'ü koridorun içindeyken **4081'de nişan adımların %36,7'sinde
+koridorun dışında** (4061 %0,7, 4001 %0,0). O da tam olarak uzun ön-takibin kırdığı rota.
+Kavşak 206'nın beş kolundan üçü 30-40 m doğudaki paralel bir hatta; yürüyüş uzayınca oraya
+sapıyor.
+
+**Ve bu, çekmenin niye bu kadar işe yaradığını açıklıyor:** halkayı taşımak nişanı taşımıyor,
+**kol seçimini** taşıyor. `step_avoiding` bir sonraki düğümü `toward`'a en yakın olana göre seçer;
+`toward` koridora çekilince seçim de koridorun içindeki kola kayıyor.
+
+**Kural denendi ve alanda çürüdü.** "Zaten önünde kullanılabilir bir nişan varsa, hattın dışına
+çıkan adımı atma" (`NFS_AIMLINE=1`):
+
+| | waypoint farkı | kursta süre | hiç bırakmayan | düşen | furthest |
+|---|---|---|---|---|---|
+| bugünkü | — | **%77,7** | 19 | **1** | 6.023 m |
+| hatta kal, 20 m | −49 | %76,3 | 18 | 2 | 5.940 m |
+| hatta kal, 12 m | −94 | %75,5 | 21 | **1** | **6.323 m** |
+
+Motive eden rotada **tam istendiği gibi** çalışıyor: 4081 **%53,6 → %96,5** (20 m'de), nişanın
+koridor dışında kalması %36,7 → %2,1. Ama düzeltmediği dört rotayı bozuyor: 4021 %94 → %77,
+4041 %91 → %82, 4061 %65 → %51, 4102 %68 → %57.
+
+**İlk denemenin hiçbir şey yapmaması da ayrı bir ders:** işaretin varsayılan genişliği 40 m, ve
+paralel hat 30-40 m ötede — yani "hatta" sayılıyordu. Koşu bayt-birebir aynı çıktı. Bir kuralın
+etkisiz görünmesi, kuralın yanlış olduğu anlamına gelmiyor; önce **eşiğinin ölçtüğü şeyi ölçüp
+ölçmediği** sorulmalı.
