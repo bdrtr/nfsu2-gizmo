@@ -3673,6 +3673,52 @@ belgesi bunu zaten yazıyor — "önce grafı doğru yap, sonra rotayı en iyi y
 politikasını bir kez daha ayarlamak değil, hattın kendi devamının neden sürülemediğini görmek:
 düğüm 110'un hat-üstü kollarının nereye gittiğini ve orada ne olduğunu ölçmek.
 
+### Ve kök sebep: pilotun sürdüğü "yarış hattı"nın yarısı yol değil (2026-08-20)
+
+Dördüncü rotalama çürütmesinden sonra kalan tek soru şuydu: düğüm 110'un hat-üstü kolları nereye
+gidiyor? `NFS_ARM=<düğüm>` ile kavşak tek tek soruldu:
+
+```
+düğüm 110 · (-424,1611) · hat 2 · yarış hattına 12 m · 3 kol
+   →  109 · hat 2 ·  37 m · hatta  14 m (HATTA) · zemin tam · önü açık   ← geldiği yön (batı)
+   →  111 · hat 2 ·  54 m · hatta  51 m         · zemin tam · önü açık   ← seçilen
+   →  294 · hat 1 ·  65 m · hatta  15 m (HATTA) · zemin tam · önü açık   ← (-488,1620), yine batı
+```
+
+**Hat-üstü kolların ikisi de arabanın geldiği yöne gidiyor.** Yarış ise waypoint 8'de (-420,1622)
+**güneye dönüyor** — ve düğüm 110'un güneye giden kolu yok. `NFS_HOLE=-419,1583`: oraya en yakın
+düğüm 28 m ötede ve o da 110'un kendisi. Güneyde düğüm yok, çünkü orada yol yok: zemin taraması
+z ≈ 1545'te bitiyor, ve waypoint 10 tam orada.
+
+**Sebep `densify`.** Waypoint halkası, olay anahatının köşeleri arasına çekilen **düz çizgi**:
+17 nokta, 6 km, medyan adım 425 m. İki köşe arasında ne varsa — bina, arazi kenarı, başka bir
+şerit — kiriş onun üstünden geçiyor. Ölçüldü:
+
+| rota | waypoint | en yakın düğümden >40 m | altında zemin yok | koridorun dışında |
+|---|---|---|---|---|
+| 4001 | 159 | 15 (%9) | 4 (%2) | 64 (**%40**) |
+| 4002 | 144 | 32 (%22) | 11 (%7) | 83 (**%57**) |
+| 4021 | 65 | 10 (%15) | 2 (%3) | 38 (**%58**) |
+| 4041 | 126 | 23 (%18) | 33 (**%26**) | 67 (**%53**) |
+| 4061 | 74 | 39 (**%52**) | 4 (%5) | 62 (**%83**) |
+| 4081 | 126 | 33 (%26) | 15 (%11) | 90 (**%71**) |
+| 4102 | 104 | 6 (%5) | 14 (%13) | 58 (**%55**) |
+| 4121 | 130 | 19 (%14) | 25 (%19) | 56 (**%43**) |
+| **TOPLAM** | **928** | **177 (%19)** | **108 (%11)** | **518 (%55)** |
+
+**Pilotun nişan aldığı çizginin yarıdan fazlası kursun dışında, ve her onda biri havada.** 4061'in
+her kolda tuhaf davranmasının sebebi de burada: waypoint'lerinin %52'si en yakın düğümden 40 m'den
+uzak, %83'ü koridor dışı.
+
+**Bugünün dört rotalama çürütmesi bu ışıkta okunmalı.** Kara liste, yönü şucu, listeyi eskitme ve
+hatta kalma — dördü de arabayı *bu çizgiye* yaklaştırmaya çalışıyordu. Çizgi yol olmadığı için
+dördü de kaybetti, ve "hatta kal" en sert biçimde kaybetti çünkü en doğrudan denedi.
+
+**Sıradaki iş, ve artık kanıtlı:** waypoint halkası anahat köşeleri arasında **ağda yürünerek**
+üretilmeli, lerp'lenerek değil. `network.rs`'in modül belgesi zaten "graf + anahat = sürülebilir
+rota" diyor; eksik olan, halkayı da o yürüyüşten türetmek. O yapılmadan pilot tarafında ölçülen
+her şey, yarısı hayalî bir hedefe göre ölçülüyor.
+
 ## Nerede kaldık (2026-08-14 sonu)
 
 **Alan (2026-08-20 sonu, motor pini `58dc2623`, `GRIP` ve `PASSED_NEAR` açıkken): 986 geçilen
@@ -3719,7 +3765,10 @@ elenmeyen dörtte −70. Karar yalnız sekiz rotadan çıkar.
   **iki kol** vardı. 4102'de aynı şey (58,6 m, bir kol). 21 vakanın 21'inde doğru kol mevcut ve
   seçilmiyor — **ama o kolu almak çürütüldü** (yukarıya bak): iki biçimde de alan düşüyor
   (986 → 815 waypoint) ve 4121 üçe katlanarak kötüleşiyor. Grafın "yanlış" dediği kol pratikte
-  sürülebilen olan. Sıradaki iş düğüm 110'un hat-üstü kollarının nereye gittiğini görmek.
+  sürülebilen olan. **Ve sebep bulundu** (yukarıya bak): hat-üstü kollar geriye gidiyor, yarış ise
+  ağın yol tanımadığı bir yöne dönüyor — çünkü waypoint halkası `densify` ile düz çizgi olarak
+  üretiliyor ve **928 waypoint'in 518'i (%55) koridorun dışında, 108'inin altında hiç zemin yok.**
+  Sıradaki iş halkayı ağda yürüyerek üretmek.
 - **Viraj cephesinin eski kaydı, artık bu ışıkta okunmalı:** Duran bir şey yok (en yakın duvar 225 m); iz,
   frenin eşiğin %8 altında kalarak hiç gelmediğini gösterdi ve nişan yayının eğriliğinden fren
   yapan terim (`GRIP = 8`) sekiz rotada **883 → 927 waypoint**, kursta kalan araba **9 → 14**

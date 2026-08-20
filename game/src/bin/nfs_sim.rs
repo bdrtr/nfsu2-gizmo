@@ -1147,6 +1147,68 @@ async fn run() {
     // answer. Three different failures wear the same number and want completely different work: a
     // car pinned by the fence, a car queued behind another car, and a car stuck against the city.
     let early: Vec<usize> = (0..field.len()).filter(|k| moved_at[*k] < 30.0).collect();
+    // NFS_ARM=<node>: what one junction actually offers, arm by arm.
+    //
+    // **The question left after four refuted routing rules.** On `Paths4121` every car steps from
+    // node 110 to node 111, which is 50.9 m off the racing line, and forcing it to take one of the
+    // two arms that stay on the line makes the route three times worse. So the on-line continuation
+    // is not drivable in some way the graph does not record, and the only way to find out which way
+    // is to ask the city about each arm: how far, which side, on the line or not, road under the
+    // whole link or a hole in it, and anything standing across it at car height.
+    if let Ok(id) = std::env::var("NFS_ARM").unwrap_or_default().parse::<u32>() {
+        if let Some(j) = net.node(id) {
+            let near = |p: Vec3| {
+                waypoints
+                    .iter()
+                    .map(|w| Vec3::new(w.x - p.x, 0.0, w.z - p.z).length())
+                    .fold(f32::INFINITY, f32::min)
+            };
+            println!(
+                "\ndüğüm {id} · ({:.0},{:.0},{:.0}) · hat {} · yarış hattına {:.0} m · {} kol",
+                j.at.x,
+                j.at.y,
+                j.at.z,
+                j.path,
+                near(j.at),
+                j.links.len()
+            );
+            for &l in &j.links {
+                let Some(n) = net.node(l) else { continue };
+                let d = Vec3::new(n.at.x - j.at.x, 0.0, n.at.z - j.at.z);
+                // The two questions `drop_walled` and the pilot's own sight ask, on this link.
+                let gap = ground.gap_along(j.at, n.at, PROBE_SLACK, 2.0);
+                let wall = walls.across_hit(&ground, j.at, n.at, 0.5, 3.0);
+                println!(
+                    "   → {l:>4} · hat {:>3} · {:>5.0} m · yarış hattına {:>5.0} m {} · zemin {} \
+                     · {}",
+                    n.path,
+                    d.length(),
+                    near(n.at),
+                    if near(n.at) <= WAYPOINT_STEP { "(HATTA)" } else { "       " },
+                    match gap {
+                        None => "tam".to_string(),
+                        Some(g) => format!("{g:.0} m'de bitiyor"),
+                    },
+                    match &wall {
+                        None => "önü açık".to_string(),
+                        Some(h) => {
+                            let (lo, hi) = h.over_floor();
+                            format!(
+                                "{:.0} m'de {:.1}..{:.1} m engel{}",
+                                h.along,
+                                lo,
+                                hi,
+                                if h.flat_too { "" } else { " (kat değişimi)" }
+                            )
+                        }
+                    }
+                );
+            }
+        } else {
+            println!("\ndüğüm {id} yok");
+        }
+    }
+
     // NFS_CURVE=1: the course's own speed limit, from its own geometry.
     //
     // **Why this and not another pilot sweep.** The corner that takes most of `Paths4121` has now
@@ -1241,6 +1303,30 @@ async fn run() {
                 }
             }
         }
+        // **And whether the line is a road at all.** `densify` lerps between the event outline's
+        // corners — 17 points over 6 km, median step 425 m — so the waypoints between two corners
+        // are a straight chord across whatever is there. This asks the city and the graph about
+        // each one, which is the question every routing rule tried today assumed away.
+        let (mut off_net, mut no_ground, mut off_cor) = (0usize, 0usize, 0usize);
+        for w in &waypoints {
+            let near = (0..net.len() as u32)
+                .filter_map(|i| net.node(i))
+                .map(|n| Vec3::new(n.at.x - w.x, 0.0, n.at.z - w.z).length())
+                .fold(f32::INFINITY, f32::min);
+            off_net += usize::from(near > WAYPOINT_STEP);
+            no_ground += usize::from(ground.heights_at(w.x, w.z).is_empty());
+            off_cor += usize::from(
+                corridor.locate(*w).map_or(f32::INFINITY, |x| x.distance) > city::COURSE_HALF_WIDTH,
+            );
+        }
+        println!(
+            "   hattın kendisi: {} waypoint'in {} tanesi en yakın düğümden {WAYPOINT_STEP} m'den \
+             uzak, {} tanesinin altında hiç zemin yok, {} tanesi koridorun dışında",
+            waypoints.len(),
+            off_net,
+            no_ground,
+            off_cor
+        );
         let under = |kmh: f32| {
             worst.iter().filter(|(r, _)| (HELD * r).sqrt() * 3.6 < kmh).count()
         };
