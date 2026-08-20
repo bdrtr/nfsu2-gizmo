@@ -4142,7 +4142,7 @@ tutmasının bedeli.
 | 4121 | 143 | 142 | 138 | −1 |
 | **toplam** | **1.662** | 1.610 | 1.570 | **−52** |
 
-6,5 sekiz rotanın **beşinde 8'i yeniyor**, altıncısında berabere; toplamı tek bir rotada,
+6,5 sekiz rotanın **dördünde 8'i yeniyor**, birinde berabere, üçünde kaybediyor; toplamı tek rotada,
 `Paths4061`'de kaybediyor — ve oradaki fark (−66) bütün alan farkından (−52) büyük. Bir arabanın
 bankacılığı da değil: 4061'in sekiz arabasının altısı birden düşüyor (42→30, 43→32, 45→33,
 40→15, 42→33).
@@ -4156,3 +4156,55 @@ rota başına dağılımdan küçükse, o ortalama bir sonuç değil bir tesadü
 
 **Süpürme okumasına yeni kural:** bir kolun alan farkı, o farkın rotalar arası yayılımından
 küçükse, sonuç "kazandı" diye yazılmaz. Rota tablosu da yazılır.
+
+### Yeni kural dört sabite geriye dönük uygulandı: süpürmeler dört mekanizma kurdu, dört sayı değil (2026-08-20)
+
+Bir önceki bölüm şu kuralı yazdı: *bir kolun alan farkı, o farkın rotalar arası yayılımından
+küçükse, sonuç "kazandı" diye yazılmaz.* Kuralı yazıp geçmek dürüst olmazdı — günün dört kabul
+edilmiş sabitinin süpürme log'ları hâlâ duruyor, hepsi yeniden okundu. Ölçü aynı: geçilen
+waypoint, rota rota.
+
+| sabit | karşılaştırma | alan farkı | en büyük tek rota | rota rota | okuma |
+|---|---|---|---|---|---|
+| `GRIP` 8 | fren **hiç yok**a karşı | +44 | **4001: +95** | 4/8, 1 berabere | **taşınıyor** |
+| `GRIP` 8 | 6'ya karşı | +325 | −120 | 7/8, 1 berabere | sağlam |
+| `GRIP` 8 | 12'ye karşı | +112 | −61 | 4/8, 1 berabere | sağlam |
+| `PASSED_NEAR` 60 | **kapalı**ya karşı | +75 | **4121: +104** | 4/8, 1 berabere | **taşınıyor** |
+| `PASSED_NEAR` 60 | 30'a karşı | +103 | −60 | 3/8, 4 berabere | sağlam |
+| `PASSED_NEAR` 60 | 80'e karşı | +13 | **−21** | 3/8, 4 berabere | **taşınıyor** |
+| `PASSED_NEAR` 60 | 100'e karşı | +30 | **−47** | 4/8, 3 berabere | **taşınıyor** |
+| `BEHIND` 170° | **kapalı**ya karşı | +14 | −8 | 4/8, 2 berabere | sağlam |
+| `BEHIND` 170° | 150°'ye karşı | +20 | **−31** | 4/8, 3 berabere | **taşınıyor** |
+| `ESCAPE_FULL` | kaçışta **da kesme**ye karşı | +35 | −19 | 4/8, 2 berabere | sağlam |
+| `ESCAPE_FULL` | **hep tam gaz**a karşı | **−3** | +7 | 4/8, 2 berabere | **ayırt edilemez** |
+
+**Sütunun kendisi de bir bulgu:** on bir karşılaştırmanın dokuzunda kazanan taraf sekiz rotanın
+yalnız **dördünde** önde; gerisi ya berabere ya karşı tarafın. Yani "alan kazandı" dediğimiz her
+şey, aslında yarı yarıya bölünmüş bir alanın toplamı. `PASSED_NEAR` 60 ile 80 sekiz rotanın
+**dördünde bayt-birebir aynı** sonucu veriyor — o iki sayı arasındaki fark, sahanın yarısında
+hiç yok.
+
+**Şekil dördünde de aynı ve tek cümleyle söylenebilir: mekanizmanın *varlığı* sağlam, sayının
+*değeri* değil.**
+
+* Eğriliğe fren **olması** 4001'e dayanıyor: o rota olmasa frensiz pilot alanı kazanırdı, ve zaten
+  8 rotanın 3'ünde kazanıyor. Ama 8'in 6 ve 12'ye üstünlüğü tartışmasız — yani "fren olsun mu"
+  sorusunun cevabı tek rotalık, "ne kadar" sorusununki değil.
+* Geçilen waypoint'i bırakmak 4121'e dayanıyor; 60'ın 80 ve 100'e üstünlüğü ise gürültü
+  (+13 ve +30, tek rotalık sapmalar −21 ve −47). 60 ile 80 arasında ölçüyle seçim yapılamaz.
+* Bir yanı seçip tutmak sağlam; **170° ile 150° arasında seçim yapılamaz** (+20, ama 4102 tek
+  başına −31).
+* Kaçışta gaz kesmemek sağlam; **2 m/s eşiği ise hiçbir şey**: hep tam gaz waypoint'te +3 önde,
+  kursta kalan arabada 3 geride (27'ye 30), düşende 1 geride (7'ye 6). Üç ölçünün ikisi eşiği
+  tutuyor, biri tutmuyor, üçü de gürültü içinde. Eşik yerinde kalıyor — çünkü "gürültüde
+  kıpırdama" kuralı iki yöne de işler ve yürürlükte olan o.
+
+**Bu, sabitlerin geri alınması demek değil.** Dördü de alanı 883'ten 1.035'e taşıyan zincirin
+halkaları ve hiçbiri geri alındığında daha iyisini vermiyor. Demek olan şu: **bu dört sayı
+ölçülmüş değil, ölçülmüş bir mekanizmanın makul birer ayarı.** İnce ayarları (60'a karşı 80,
+170°'ye karşı 150°, eşiğe karşı eşiksiz) savunulacak bir bulgu gibi yazmak, bu tablodan sonra
+yanlış olur; belgelerinin her birine bu ayrım eklendi.
+
+**Ve asıl sonuç yön veriyor:** sekiz rotalık alan, ince ayarları ayırt edecek kadar duyarlı değil.
+Bir sonraki kazanç ayar aramakta değil, hâlâ kursu bırakan 31 arabanın (%48) ve altı düşüşün
+kaynağında — orada farklar rota gürültüsünün çok üstünde.

@@ -142,6 +142,11 @@ const LOOKAHEAD_MAX: f32 = 40.0;
 /// on a map with nothing at its rim, which is the standing barrier item and not this rule's doing.
 ///
 /// `NFS_ESCFULL=0` puts the lift back everywhere.
+/// **Read route by route, the threshold is nothing and the rule is everything.** Not lifting at
+/// all while escaping is solid: +35 waypoints over lifting, larger than any single route's share
+/// of it. The 2 m/s *threshold* is not: full throttle always scores 1038 against this one's 1035,
+/// keeps 3 fewer cars on course and falls once more — three measures, two for the threshold, all
+/// three inside the routes' own spread. It stays because it is the incumbent, not because it won.
 const ESCAPE_FULL: f32 = 2.0;
 
 /// Past this angle the aim point has no usable side, so the side already chosen is kept.
@@ -174,6 +179,10 @@ const ESCAPE_FULL: f32 = 2.0;
 /// three-quarter turns as well, and those are turns pure pursuit can do perfectly well.
 ///
 /// `NFS_BEHIND=0` restores the coin toss.
+/// **Read route by route, holding a side is solid and this angle is not.** Against no rule at all
+/// the field gains +14 and no single route moves it by more than 8 — a real win. Against 150° it
+/// gains +20, but `Paths4102` alone is −31, more than the whole margin. Between 150° and 170°
+/// the eight-route field cannot choose; see `ROADMAP.md`, 2026-08-20.
 const BEHIND: f32 = 2.97;
 
 /// Steering lock the pilot will ask for, as a fraction of the controller's own.
@@ -265,6 +274,11 @@ const REACHED: f32 = 18.0;
 /// the end of a sprint, so the last waypoint's forward direction points back down the course. No
 /// car has reached the end of a route in ninety seconds — the best is 25 of 130 — so it is recorded
 /// rather than special-cased.
+/// **Read route by route, only the wide gap is solid.** 60 beats 30 by +103 with no route
+/// swinging it by more than 60 — real. But 60 beats 80 by only +13 (one route is −21) and 100 by
+/// +30 (one route is −47), and it beats switching the release *off* by +75 of which `Paths4121`
+/// alone is +104 — with off ahead on three of the eight. The release is measured; 60 rather than
+/// 80 is not. See `ROADMAP.md`, 2026-08-20.
 const PASSED_NEAR: f32 = 60.0;
 
 /// How near a waypoint counts as having driven past it, for [`Pilot::covered`].
@@ -369,12 +383,17 @@ const BRAKE_GAIN: f32 = 1.5;
 /// falls double at 5 (3 → 6) — the cars that brake harder do stay on the ring longer (15 → 18
 /// never losing it) and the ring is what runs off the road.
 ///
-/// The field total hides the shape, though. Route by route, 6.5 **beats** 8 on five of the eight
-/// and ties a sixth; it loses the total on one, `Paths4061`, by −66 — more than the whole field
+/// The field total hides the shape, though. Route by route, 6.5 **beats** 8 on four of the eight
+/// and ties a fifth; it loses the total on one, `Paths4061`, by −66 — more than the whole field
 /// margin of −52, and spread over six of that route's eight cars rather than banked by one. So
 /// this is not one value being right. It is one value being a compromise between routes that want
 /// different ones, and 8 stays because it wins the deciding measure and is already in, not
 /// because the sweep found it correct.
+/// **And read route by route, even the chord-ring win splits in two.** 8 over 6 (+325) and over
+/// 12 (+112) are solid — larger than any single route's share. 8 over *no curvature brake at all*
+/// is +44 with `Paths4001` alone worth +95, and the brakeless pilot ahead on three of the eight:
+/// the question "should there be this brake" is answered by one route, the question "how much"
+/// by the field.
 const GRIP: f32 = 8.0;
 
 /// How much steering costs throttle.
