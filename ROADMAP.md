@@ -3719,6 +3719,48 @@ dördü de kaybetti, ve "hatta kal" en sert biçimde kaybetti çünkü en doğru
 rota" diyor; eksik olan, halkayı da o yürüyüşten türetmek. O yapılmadan pilot tarafında ölçülen
 her şey, yarısı hayalî bir hedefe göre ölçülüyor.
 
+### Halka ağda yürünerek kuruldu: geometri düzeldi, sürüş kötüleşti (2026-08-20)
+
+Bir önceki bölümün işaret ettiği iş yapıldı. `Network::path` (plan görünümünde Dijkstra, testleri
+yazıldı) ve `route::along_roads`: anahat köşeleri arasındaki yol **ağda yürünerek** bulunuyor,
+sonra o çoklu-doğru densify ediliyor. `NFS_WALKLINE=1`.
+
+**Halkanın geometrisi neredeyse mükemmel oldu:**
+
+| | kiriş | ağda yürünmüş |
+|---|---|---|
+| waypoint | 928 | 1.426 |
+| en yakın düğümden >40 m | 177 (%19) | **0** |
+| altında zemin yok | 108 (%11) | **3** |
+| koridorun dışında | 518 (%55) | **5** |
+
+**Sürüş yine de kötüleşti** (sekiz rota):
+
+| halka | furthest | kursu hiç bırakmayan | düşen |
+|---|---|---|---|
+| kiriş | **5.413 m** | **32 / 64** | 4 |
+| yürünmüş | 5.193 m | 15 / 64 | 2 |
+
+Rota rota: 4002 +175 m, 4081 +52, 4041 +33, 4021 +14; buna karşılık **4121 −363**, 4001 −117.
+Kursta kalan araba 4001'de 8 → 0, 4021'de 3 → 0, 4081'de 5 → 2.
+
+**Sebep, ve grafın kendi başlığının uyardığı şey.** Bu ağ yan yana giden yolları birbirine
+bağlıyor; **taahhüt edilmiş** bir en-kısa-yol da arabanın geçemeyeceği bağlantılardan geçiyor —
+`guide_to`'nun sürüş rolünde neden kaybettiğini açıklayan cümlenin aynısı. Halkanın kendisi
+üzerinde sayıldı, ardışık waypoint'ler arasında araç boyunda engel olanlar:
+
+```
+4001: 15    4081: 14    4121: 8    4021: 7    4061: 0
+```
+
+Bunlar tam olarak arabaların kursta kalmayı bıraktığı rotalar, ve halkası temiz olan tek rota
+(4061) zaten hareket etmeyen rota. **Pilot orta refüjün içinden geçirilmeye çalışılıyor.**
+
+**Durum:** `NFS_WALKLINE` varsayılan olarak kapalı; kod, ölçümü ve kusuruyla birlikte duruyor.
+Sıradaki adım başka bir arama değil, bu aramaya **duvarı olan bağlantının yol olmadığını
+öğretmek**: `drop_walled` zaten bir bağlantı boyunca *zeminin* devam edip etmediğini soruyor, ama
+hiçbir şey içinde bir şey **durup durmadığını** sormuyor.
+
 ## Nerede kaldık (2026-08-14 sonu)
 
 **Alan (2026-08-20 sonu, motor pini `58dc2623`, `GRIP` ve `PASSED_NEAR` açıkken): 986 geçilen
@@ -3768,7 +3810,9 @@ elenmeyen dörtte −70. Karar yalnız sekiz rotadan çıkar.
   sürülebilen olan. **Ve sebep bulundu** (yukarıya bak): hat-üstü kollar geriye gidiyor, yarış ise
   ağın yol tanımadığı bir yöne dönüyor — çünkü waypoint halkası `densify` ile düz çizgi olarak
   üretiliyor ve **928 waypoint'in 518'i (%55) koridorun dışında, 108'inin altında hiç zemin yok.**
-  Sıradaki iş halkayı ağda yürüyerek üretmek.
+  **Yapıldı ve ölçüldü** (yukarıya bak): halka düzeldi (koridor dışı 518 → 5) ama sürüş kötüleşti
+  (furthest 5.413 → 5.193, kursta kalan 32 → 15), çünkü en-kısa-yol duvarlı bağlantılardan geçiyor.
+  Sıradaki adım aramaya duvarı öğretmek.
 - **Viraj cephesinin eski kaydı, artık bu ışıkta okunmalı:** Duran bir şey yok (en yakın duvar 225 m); iz,
   frenin eşiğin %8 altında kalarak hiç gelmediğini gösterdi ve nişan yayının eğriliğinden fren
   yapan terim (`GRIP = 8`) sekiz rotada **883 → 927 waypoint**, kursta kalan araba **9 → 14**

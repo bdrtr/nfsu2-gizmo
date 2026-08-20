@@ -302,6 +302,90 @@ pub fn densify(outline: &[Vec3], step: f32) -> Vec<Vec3> {
     out
 }
 
+/// The course ring, built by **walking the roads** between the outline's corners instead of
+/// interpolating across them.
+///
+/// **Why.** [`densify`] draws a straight chord between corners that are up to 425 m apart, and
+/// measured over the eight sweep routes that puts **55 % of the ring outside the course corridor**
+/// and 11 % of it over no ground at all — 928 waypoints, 518 outside, 108 in the air. The pilot
+/// aims at that ring, so more than half the time it is aiming at somewhere there is no road; four
+/// separate routing rules were refuted in one day trying to pull cars *towards* it.
+///
+/// The corners still say where the race goes — that is all the file gives — but the way between two
+/// of them is taken from [`Network`], which is roads. Returns the ring and how many legs had to
+/// fall back to the chord because the graph could not join their ends; a caller that does not print
+/// that number is hiding the part of the course that is still a guess.
+///
+/// **Swept over eight routes, and as built it is a regression — `NFS_WALKLINE` is off by default.**
+/// The ring it draws is very nearly perfect as geometry: the chord version puts 518 of 928
+/// waypoints outside the corridor and 108 over nothing, this one puts **5 of 1,426** outside and 3
+/// over nothing. The driving is worse anyway:
+///
+/// | ring | furthest | never lost the course | fell |
+/// |---|---|---|---|
+/// | chord | **5 413 m** | **32 / 64** | 4 |
+/// | walked | 5 193 m | 15 / 64 | 2 |
+///
+/// **And the reason is the one the graph's own header warns about.** This network joins roads that
+/// merely run beside each other, so a *committed* shortest path crosses joins a car cannot take —
+/// the same sentence that explains why `guide_to` lost in the driving role. Counted on the ring
+/// itself, consecutive waypoints with something standing between them at car height: **4001 has 15,
+/// 4081 has 14, 4121 has 8, 4021 has 7 — and 4061 has none.** Those are exactly the routes whose
+/// cars stopped staying on the course (4001 8 → 0, 4081 5 → 2, 4021 3 → 0), and the one with a
+/// clean ring is the one that did not move. The pilot is being steered through a central
+/// reservation.
+///
+/// So the next attempt is not a different search: it is teaching this one that a link with a wall
+/// across it is not a road. [`super::Network::drop_walled`] already asks whether the *ground*
+/// continues along a link and nothing yet asks whether anything stands in it.
+#[must_use]
+pub fn along_roads(net: &super::Network, outline: &[Vec3], step: f32) -> (Vec<Vec3>, usize) {
+    let mut poly: Vec<Vec3> = Vec::new();
+    let mut chords = 0usize;
+    // Two nodes of a route file can sit on top of each other; a polyline with a zero-length segment
+    // has no direction, which every consumer of this ring asks it for.
+    let push = |p: Vec3, poly: &mut Vec<Vec3>| {
+        if poly.last().is_none_or(|q| Vec3::new(p.x - q.x, 0.0, p.z - q.z).length() > 0.5) {
+            poly.push(p);
+        }
+    };
+    // **Snap in plan, not in space.** [`Network::nearest`] is deliberately three-dimensional —
+    // Bayview stacks four roads over one another and a driver's "nearest node" has to mean the one
+    // on its own deck. An outline corner has no deck: it arrives as `remap([x, y, 0.0])`, so its
+    // height is a literal zero and a 3-D snap prefers whichever node happens to sit lowest. The
+    // corner is a plan-view mark on a map and is matched as one.
+    let snap = |p: Vec3| {
+        (0..net.len() as u32)
+            .filter_map(|i| net.node(i).map(|n| (i, n.at)))
+            .min_by(|a, b| {
+                let d = |q: Vec3| Vec3::new(q.x - p.x, 0.0, q.z - p.z).length();
+                d(a.1).total_cmp(&d(b.1))
+            })
+            .map(|(i, _)| i)
+    };
+    for w in outline.windows(2) {
+        let legs = snap(w[0])
+            .zip(snap(w[1]))
+            .and_then(|(a, b)| net.path(a, b))
+            .map(|ids| ids.iter().filter_map(|i| net.node(*i)).map(|n| n.at).collect::<Vec<_>>());
+        match legs {
+            Some(pts) if pts.len() > 1 => {
+                for p in pts {
+                    push(p, &mut poly);
+                }
+            }
+            // No road joins these two corners: keep the chord rather than dropping the leg, so the
+            // ring still goes where the race says even where this cannot improve on it.
+            _ => {
+                chords += 1;
+                push(w[0], &mut poly);
+                push(w[1], &mut poly);
+            }
+        }
+    }
+    (densify(&poly, step), chords)
+}
+
 /// The track id free roam's own markers carry.
 ///
 /// Not a race number: no `Paths4000.bin` exists. It is the id the free-roam markers are filed

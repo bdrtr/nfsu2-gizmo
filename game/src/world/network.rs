@@ -287,6 +287,69 @@ impl Network {
         self.step_avoiding(here, came_from, toward, &[])
     }
 
+    /// The shortest way through the graph from one node to another, by plan-view length.
+    ///
+    /// **Not for driving.** Following a solved route is separately refuted — a field solved over the
+    /// whole graph made the cars do *worse*, because this graph joins roads that merely run beside
+    /// each other and a committed route crosses joins a car cannot take (see this module's own
+    /// header). What it is for is **building the course**: the event outline gives corners up to
+    /// 425 m apart and the ring between them is currently a straight chord, which measured 55 % of
+    /// its waypoints outside the corridor. A path over the roads is a better guess at what the race
+    /// goes round, and the pilot still walks the graph greedily as it always did.
+    ///
+    /// Dijkstra over a few hundred nodes at setup, which is nothing; the heap is ordered on a
+    /// scaled integer because `f32` is not `Ord`.
+    #[must_use]
+    pub fn path(&self, from: u32, to: u32) -> Option<Vec<u32>> {
+        use std::collections::BinaryHeap;
+        if from as usize >= self.nodes.len() || to as usize >= self.nodes.len() {
+            return None;
+        }
+        if from == to {
+            return Some(vec![from]);
+        }
+        let plan = |a: Vec3, b: Vec3| Vec3::new(b.x - a.x, 0.0, b.z - a.z).length();
+        let mut best = vec![f32::INFINITY; self.nodes.len()];
+        let mut came: Vec<Option<u32>> = vec![None; self.nodes.len()];
+        // `Reverse` on a scaled cost: centimetres are finer than any decision this makes.
+        let mut heap = BinaryHeap::new();
+        best[from as usize] = 0.0;
+        heap.push((std::cmp::Reverse(0i64), from));
+        while let Some((std::cmp::Reverse(c), i)) = heap.pop() {
+            if i == to {
+                break;
+            }
+            if (c as f32) / 100.0 > best[i as usize] + 1e-3 {
+                continue;
+            }
+            let Some(node) = self.node(i) else { continue };
+            for &l in &node.links {
+                let Some(n) = self.node(l) else { continue };
+                let step = best[i as usize] + plan(node.at, n.at);
+                if step + 1e-3 < best[l as usize] {
+                    best[l as usize] = step;
+                    came[l as usize] = Some(i);
+                    heap.push((std::cmp::Reverse((step * 100.0) as i64), l));
+                }
+            }
+        }
+        if !best[to as usize].is_finite() {
+            return None;
+        }
+        let mut out = vec![to];
+        let mut at = to;
+        while let Some(prev) = came[at as usize] {
+            out.push(prev);
+            at = prev;
+            // A cycle here would be a bug in the relaxation, not a graph the caller can fix.
+            if out.len() > self.nodes.len() {
+                return None;
+            }
+        }
+        out.reverse();
+        Some(out)
+    }
+
     /// Say where the race's own line runs, so the walk can prefer to stay on it.
     ///
     /// **Measured, and this is why it exists.** With no such preference, on `Paths4121` all eight
@@ -383,5 +446,64 @@ impl Network {
             steep,
             self.walled,
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A graph built by hand, because [`Network::of`] needs a parsed route file and a city.
+    fn graph(at: &[(f32, f32)], links: &[(u32, u32)]) -> Network {
+        let mut nodes: Vec<Junction> = at
+            .iter()
+            .map(|(x, z)| Junction { at: Vec3::new(*x, 0.0, *z), path: 0, links: Vec::new() })
+            .collect();
+        for (a, b) in links {
+            nodes[*a as usize].links.push(*b);
+            nodes[*b as usize].links.push(*a);
+        }
+        Network { nodes, walled: 0, near_line: Vec::new() }
+    }
+
+    /// The short way round, not the first way found. A greedy walk down the long arm would answer
+    /// three hops; the point of a search is that it does not.
+    #[test]
+    fn the_path_is_the_short_way_round() {
+        //   0 ─ 1 ─ 2      (10 m apart)
+        //   └────────┘     one 100 m link straight from 0 to 2
+        let net = graph(&[(0.0, 0.0), (10.0, 0.0), (20.0, 0.0), (0.0, 100.0)], &[(0, 1), (1, 2), (0, 3), (3, 2)]);
+        assert_eq!(net.path(0, 2), Some(vec![0, 1, 2]), "20 m of road beats 200 m of road");
+        assert_eq!(net.path(0, 0), Some(vec![0]), "already there");
+    }
+
+    /// Two islands. A course built over this has to know the difference between "the way is long"
+    /// and "there is no way", because the first is a route and the second is a hole to report.
+    #[test]
+    fn nothing_joins_two_islands() {
+        let net = graph(&[(0.0, 0.0), (10.0, 0.0), (500.0, 0.0), (510.0, 0.0)], &[(0, 1), (2, 3)]);
+        assert_eq!(net.path(0, 3), None);
+        assert_eq!(net.path(0, 9), None, "a node that is not there is not reachable");
+    }
+
+    /// The walk comes back in order, from the node asked for to the node asked about, and every
+    /// step of it is a link the graph holds.
+    #[test]
+    fn the_path_is_a_sequence_of_real_links() {
+        let net = graph(
+            &[(0.0, 0.0), (10.0, 0.0), (20.0, 0.0), (30.0, 0.0), (40.0, 0.0)],
+            &[(0, 1), (1, 2), (2, 3), (3, 4)],
+        );
+        let p = net.path(0, 4).expect("a straight chain is connected");
+        assert_eq!(p.first(), Some(&0));
+        assert_eq!(p.last(), Some(&4));
+        for w in p.windows(2) {
+            assert!(
+                net.node(w[0]).is_some_and(|n| n.links.contains(&w[1])),
+                "{} → {} is not a link",
+                w[0],
+                w[1]
+            );
+        }
     }
 }

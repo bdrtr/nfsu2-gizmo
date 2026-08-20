@@ -324,7 +324,31 @@ async fn run() {
         .unwrap_or_default();
     let step: f32 =
         std::env::var("NFS_WPSTEP").ok().and_then(|v| v.parse().ok()).unwrap_or(WAYPOINT_STEP);
-    let waypoints = city::densify(&coarse, step);
+    // **The ring, from the roads rather than across them.** `NFS_WALKLINE=0` goes back to the
+    // straight chord between outline corners — which is what every measurement before 2026-08-20
+    // was taken against, and what put 55 % of the ring outside the corridor.
+    let walk = std::env::var("NFS_WALKLINE").is_ok_and(|v| v != "0");
+    let waypoints = if walk {
+        let (w, chords) = city::along_roads(&net, &coarse, step);
+        // **The caution this inherits, measured rather than assumed.** A committed shortest path
+        // over this graph crosses joins a car cannot take — the graph links carriageways that
+        // merely run beside each other, which is why `guide_to` was refuted in the driving role
+        // (`ROADMAP.md`, `Network` header). A ring drawn through such a join drags the pilot
+        // sideways across a central reservation, so count them: consecutive ring points with
+        // something standing between them at car height.
+        let crossed = w
+            .windows(2)
+            .filter(|p| walls.across(&ground, p[0], p[1], 0.5, 3.0))
+            .count();
+        println!(
+            "yarış hattı ağda yürünerek kuruldu: {} waypoint · {chords} bacak yol bulunamayıp \
+             kirişte kaldı · {crossed} ardışık nokta arasında araç boyunda engel var",
+            w.len()
+        );
+        w
+    } else {
+        city::densify(&coarse, step)
+    };
     // **Tell the graph which of its roads this race uses.** Without it the walk picks the neighbour
     // nearest the goal in a straight line, and on Bayview that is regularly a parallel carriageway:
     // measured, 21 of 21 departures from the racing line had an arm that would have stayed on it.
