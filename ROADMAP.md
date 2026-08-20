@@ -3541,6 +3541,41 @@ değil: takıldıkları waypoint, bırakılması bir bedeli olan bir waypoint.
 **Sıradaki turun soruları, artık tek bir baskın sebep olmadığı için üç tane:** kalan 16 arka nişan
 (sınır değilse ne?), 8 "zaten yavaş" araba (durma/kaçış makinesi), ve 9 "düz açılma" (viraj, hâlâ).
 
+### Kalan on altı vaka aynı arıza, ve kapıyı iyileştirmenin iki yolu da çürüdü (2026-08-20)
+
+Kalan 16 arka-nişan vakasının **16'sında da hedef takılı** — bir öncekiyle aynı mekanizma, sadece
+eşiğin dışındaki mesafelerde. Uzaklığı bileşenlerine ayırınca iki ayrı şekil çıkıyor:
+
+| rota | hedef uzaklığı | yanal | boyuna (geride) |
+|---|---|---|---|
+| 4102 | 66 m | **64 m** | 17 m |
+| 4041 | 76 m | 71 m | 26 m |
+| 4121 | 85 m | 65 m | 55 m |
+| 4021 | 49 m | 44 m | 21 m |
+| 4081 | 119 m | 6 m | **119 m** |
+
+Yani çoğunda araba waypoint'i **yalnız 17-26 m boyunca geçmiş ama 44-71 m yanında** — halka komşu
+şeritte. 4081'inki bambaşka: 6 m yanda, 119 m geride; dönmüş bir araba.
+
+"Toplam mesafe bu ikisini ayıramıyor, **boyuna aşım** ayırır" diye düşünmek doğal, ve denendi:
+serbest bırakmayı `0 < aşım < 40 m` ile kapılamak. 4021'de +27, 4041'de +43 kazandırıyor — ve
+**4121'de 152 → 48**, 4102'de −21, toplamda 927 (mevcut kural 986). Mesafe sınırının erdemi, kusuru
+sandığım şeymiş: **yanal olarak uzak bir waypoint'i reddediyor**, ve 4121'in virajında dışarı
+savrulan araba waypoint'ini bir iki metre geçmiş ama on metrelerce yanındadır. Orada bırakmak, rotayı
+boşaltan atlamanın ta kendisi.
+
+| kapı | waypoint | kursta kalan | düşen |
+|---|---|---|---|
+| kural yok | 927 | 14 | 2 |
+| **mesafe < 60 m** | **986** | **24** | 4 |
+| mesafe < 80 m | 973 | 23 | 3 |
+| boyuna aşım < 40 m | 927 | 23 | 2 |
+
+İki bağımsız rota kuralı iki yandan sıkıştırıyor: **4121 fazla istekli her bırakmayı cezalandırıyor,
+4102 ise kendi waypoint 12'sini bırakmayı.** 60 m ikisini birden sağlayan nokta, ve iki farklı
+genişletme denemesi de birinde ya da diğerinde yıkıldı. Kalan 16 vaka bu kuralla çözülmüyor —
+çözümü kapıda değil, halkanın arabanın sürdüğü şeritle uyuşmamasında aramak gerekiyor.
+
 ## Nerede kaldık (2026-08-14 sonu)
 
 **Alan (2026-08-20 sonu, motor pini `58dc2623`, `GRIP` ve `PASSED_NEAR` açıkken): 986 geçilen

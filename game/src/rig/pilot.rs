@@ -759,11 +759,23 @@ impl Pilot {
             // "behind the nose", and for the sweep.
             let past = |i: usize| {
                 let (a, b) = (course[i % course.len()], course[(i + 1) % course.len()]);
-                flat(at - a).dot(flat(b - a).normalize_or_zero()) > 0.0
+                flat(at - a).dot(flat(b - a).normalize_or_zero())
             };
             for _ in 0..3 {
                 let next = (self.goal + 1) % course.len();
-                let overtaken = passed > 0.0 && d(self.goal) < passed && past(self.goal);
+                // **Bounding the overshoot instead of the distance is refuted, and it is the more
+                // obvious rule of the two.** Decomposing the goals that are *still* stuck with this
+                // rule in place shows two shapes the distance bound cannot tell apart: on
+                // `Paths4102` the car is 17 m past its waypoint and **64 m to the side of it** — the
+                // ring is on the neighbouring carriageway — while on `Paths4081` a stuck goal is 6 m
+                // to the side and **119 m behind**, a car that has turned round. "How far past along
+                // the road" separates those cleanly and gains 70 waypoints on 4021 and 4041 doing
+                // it. It also loses 104 on 4121 and 21 on 4102, for 927 against **986** — because
+                // the virtue of the distance bound turns out to be the thing that looked like its
+                // flaw: it **rejects** a waypoint that is far away sideways, and at 4121's corner a
+                // car running wide is a metre or two past its waypoint and tens of metres beside it.
+                // Releasing there is the skip that empties the route.
+                let overtaken = passed > 0.0 && d(self.goal) < passed && past(self.goal) > 0.0;
                 if !overtaken && d(next) >= d(self.goal) && d(self.goal) > reached {
                     break;
                 }
