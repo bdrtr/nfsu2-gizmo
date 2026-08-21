@@ -1410,6 +1410,50 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
     );
     println!("camera at {eye:?} looking at {mid:?}, near={near:.1} far={far:.1}");
 
+    // **`NFS_FLY=<n>`: render `n` frames flying along the race line instead of one still.**
+    //
+    // Nothing outside this process can photograph the game: the desktop is a rootless Xwayland
+    // under a Wayland compositor, and an X11 grab of it comes back black — measured, not assumed.
+    // So the frames have to come from the renderer itself, which this binary already drives
+    // offscreen. Given a route it walks the drawn line, puts the camera behind and above each step
+    // looking at the one ahead, and writes `<out>.0000`, `.0001`, … for a tool like `ffmpeg` to
+    // stitch. One city load, `n` frames.
+    let fly: usize = std::env::var("NFS_FLY").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
+    let line: Vec<Vec3> = routes.iter().flat_map(|p| p.points.iter().copied()).collect();
+    if fly > 1 && line.len() > 4 {
+        // Behind and above, in the direction the line is going.
+        let back: f32 = std::env::var("NFS_FLYBACK").ok().and_then(|v| v.parse().ok()).unwrap_or(38.0);
+        let lift: f32 = std::env::var("NFS_FLYLIFT").ok().and_then(|v| v.parse().ok()).unwrap_or(14.0);
+        let ahead: usize =
+            std::env::var("NFS_FLYAHEAD").ok().and_then(|v| v.parse().ok()).unwrap_or(6);
+        println!("uçuş: {fly} kare · hat {} nokta · {back} m geride, {lift} m yukarıda", line.len());
+        for k in 0..fly {
+            let i = k * (line.len().saturating_sub(ahead + 1)) / fly.max(1);
+            let at = line[i];
+            let to = line[(i + ahead).min(line.len() - 1)];
+            let f = Vec3::new(to.x - at.x, 0.0, to.z - at.z).normalize_or(Vec3::Z);
+            let eye = at - f * back + Vec3::Y * lift;
+            let look = to + Vec3::Y * 1.5;
+            let d = (look - eye).normalize_or(Vec3::Z);
+            // `add_component` replaces, which is the only typed way to move a camera here.
+            world.add_component(cam, Transform::new(eye));
+            world.add_component(
+                cam,
+                Camera::new(
+                    std::f32::consts::FRAC_PI_4,
+                    0.5,
+                    far,
+                    d.z.atan2(d.x),
+                    d.y.asin(),
+                    true,
+                ),
+            );
+            let frame = format!("{out}.{k:04}");
+            shoot(&mut world, &mut renderer, &frame, w, h);
+        }
+        return;
+    }
+
     let pixels = shoot(&mut world, &mut renderer, out, w, h);
 
     if let Some((px, py)) = id_probe {
