@@ -6801,3 +6801,44 @@ yapmadı.
 **Sıradaki iş belli ve ilk kez birleşik:** halkayı şeridin üstüne oturt **ve** pilotun dört sabitini
 o halkaya göre yeniden süpür. Tek tek değiştirip ölçmek üç kez aynı duvara çarptı; değiştirilmesi
 gereken şey ikisinin bileşimi.
+
+### Bileşik adım tuttu: halka şeride, lookahead 1,8 → 0,7 (2026-08-21)
+
+Bir önceki kaydın çıkardığı sonuç denendi: halkayı taşımak tek başına kaybediyorsa, pilotun ona göre
+oturtulmuş sabitleriyle **birlikte** taşınmalı. `NFS_PULLLANE=15` sabit tutulup `LOOKAHEAD_PER_SPEED`
+süpürüldü:
+
+| `NFS_LOOK` | waypoint | kursta süre | hiç bırakmayan | ilerlemesi duran | **kursta kalan nüfus: araba / toplam / araba başına** |
+|---|---|---|---|---|---|
+| **1,8** (koridor halkası, kalan) | **1.451** | %74,3 | 14 | **30** | 14 / 262 / **18,7** |
+| 1,8 (şerit halkası) | 1.162 | %69,8 | 17 | 35 | 17 / 280 / 16,5 |
+| 1,2 | 1.212 | %73,5 | 18 | 32 | 18 / 215 / 11,9 |
+| 0,9 | 1.184 | **%78,9** | **28** | 32 | 28 / 471 / 16,8 |
+| **0,7** | 1.155 | %78,0 | **27** | **31** | **27 / 509 / 18,9** |
+
+**0,7'de nüfus ikiye katlanıyor ve kimse yavaşlamıyor.** Kursu hiç bırakmayan araba 14 → 27, o
+nüfusun topladığı waypoint 262 → **509**, ve araba başına ilerlemesi 18,7 → **18,9** — yani
+değişmemiş. Duran araba 30 → 31. Bugün her adayı öldüren test buydu ve ilk kez geçiliyor.
+
+**Rota rota, kursu hiç bırakmayan arabalar (sayı / waypoint):**
+
+| rota | 4001 | 4002 | 4021 | 4041 | 4061 | **4081** | 4102 | 4121 |
+|---|---|---|---|---|---|---|---|---|
+| kalan | 1 / 42 | 5 / 31 | 6 / 138 | 2 / 51 | 0 / 0 | **0 / 0** | 0 / 0 | 0 / 0 |
+| şerit + 0,7 | **7 / 231** | 5 / 28 | **5 / 41** | 2 / 57 | 0 / 0 | **8 / 152** | 0 / 0 | 0 / 0 |
+
+`Paths4081` sıfırdan **sekiz arabaya** çıkıyor ve koridorda geçen süresi %53,9 → **%99,8**.
+`Paths4001` 1 → 7 araba, 42 → 231 waypoint.
+
+**Ve bedeli yazılı.** `Paths4021` gerçekten kaybediyor: kursta kalan nüfusu 6/138 → 5/41, duran
+arabası 3 → 7. `Paths4002` az kaybediyor. Alan waypoint'i 1.451 → 1.155, ki nüfus ayrımı bunun
+kaybolan nüfusun 50'den 37 arabaya inmesinden geldiğini söylüyor. 4061, 4102 ve 4121 hiç
+kıpırdamıyor.
+
+**Varsayılan yapılmadı, ve bu bilerek.** Bugün iki kabul aynı gün geri alındı, ikisi de erken
+kabuldü. Bu kol üç sütunun üçünde de doğru yönde (nüfus, nüfusun ilerlemesi, duran araba) ama bir
+rotayı gerçekten bozuyor ve ikisi bir çift değişiklik — halkanın hedefi ve pilotun bir sabiti.
+Varsayılan olmadan önce **4021'de ne olduğu anlaşılmalı**: orada kursta kalan altı arabanın topladığı
+138 waypoint, beş arabanın 41'ine düşüyor.
+
+İki düğme de kapalı duruyor, ölçüleri yanlarında: `NFS_PULLLANE=<m>` ve `NFS_LOOK=<s>`.
