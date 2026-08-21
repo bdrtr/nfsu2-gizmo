@@ -6621,3 +6621,46 @@ Bugün 4121'e nişan alan üç ayrı düzeltme denendi ve üçü de düştü: ha
 (`NFS_WALKGAPS`), işaretçiyi hatta sınırlamak (`NFS_ADVANCE=line`), ve kavşak tekrarlarını elemek
 (`NFS_DEDUP`). Üçünün de ortak noktası, **halkanın eksik tarifini bir graf ya da sürücü kusuru gibi
 ele almaları.**
+
+### Şerit dosyaları ilk kez açıldı, ve halkanın deliklerinin boşluk olduğunu söylüyorlar (2026-08-21)
+
+`Routes####F.bin` rota dosyasının yanında duruyor, `0x00034121` şerit bloklarını taşıyor, ve
+**`nfsu2-gizmo`'nun hiçbir binary'si onu bugüne kadar açmadı.** Yükseklik yok ve hangi yolun yarışa
+ait olduğunu söylemiyor — ama *yolun nerede olduğunu* yoğun biçimde söylüyor: `Paths4121` için 342
+düğüme karşı 163 blok ve 1.950 nokta.
+
+Bu, üç düzeltmenin üstünde tökezlediği soruyu bağımsız bir kaynakla yanıtlıyor: halkanın bir deliğin
+üstünden attığı düz kiriş, tarif edilmemiş bir yol mu, yoksa hiçliğin üstünden bir çizgi mi?
+
+**Halkanın kendisi büyük ölçüde yolda:** waypoint'lerinin %81-95'i bir şerit noktasının 15 m içinde
+(4001 %81, 4121 %84, 4002 %89, 4102 %95).
+
+**Delikler ise tam olarak halkanın yoldan çıktığı yerler.** On metrede bir örneklenip 15 m eşikle
+sorulduğunda, kiriş ile grafın o deliği kapatan yolu:
+
+| rota · aralık | uzunluk | **kirişin şeritte olan payı** | **yolun** |
+|---|---|---|---|
+| 4002 · w96→w97 | 212 m | **%5** (en uzak **104 m**) | %94 (23 m) |
+| 4002 · w95→w96 | 169 m | %6 (71 m) | %93 (23 m) |
+| 4121 · w63→w64 | 70 m | %14 (35 m) | %88 (21 m) |
+| **4121 · w11→w12** | **228 m** | **%17** (en uzak **103 m**) | **%98** (18 m) |
+| 4002 · w15→w16 | 147 m | %20 (41 m) | %95 (19 m) |
+| 4121 · w121→w122 | 146 m | %33 (58 m) | %94 (18 m) |
+| 4121 · w31→w32 | 108 m | %36 (32 m) | %100 (10 m) |
+| 4102 · w34→w35 | 106 m | %36 (36 m) | %100 (10 m) |
+| 4102 · w11→w12 | 99 m | %40 (33 m) | %100 (11 m) |
+
+Dört rotanın 28 geniş aralığında yolun payı **%88-100**; kirişlerin payı %5 ile %100 arasında ve
+büyük deliklerde dibe vuruyor. (Kirişin de %100 olduğu aralıklar var — orada düz çizgi zaten yolu
+takip ediyor. Bir aykırı satır: 4002'nin w66→w67'sinde "yolun %0"ı, grafın iki ucu aynı düğüme
+eşlemesinden kaynaklanan boş yol, ölçünün kusuru.)
+
+**Bu, günün teşhisini bağımsız bir chunk'la doğruluyor.** Halkanın delikleri tarif eksiğidir: düğüm
+tablosunun bağlantı alanları oradan bir yol geçtiğini söylüyordu, şerit dosyası da orada yol
+olduğunu söylüyor, ve halkanın kirişi 103 m'ye kadar hiçbir şeyin üstünden geçiyor.
+
+**Ve açık soruyu keskinleştiriyor.** `NFS_WALKGAPS` o delikleri *tam da bu yolla* doldurmuştu ve
+4121 kötüleşti. Yani "tarif eksik" kanıtlanmış durumda, ama "eksiği yolla tamamla" ölçülüp düşmüş.
+İkisi çelişmiyor: doldurma halkanın boyunu değiştiriyor (iki sütunu diskalifiye ediyor) ve
+yoğunluktan bağımsız sütunlar da düştü. Sıradaki soru artık "delik gerçek mi" değil — o kapandı —
+**"neden doğru yolu koyduğumuzda araba daha kötü sürüyor"**.

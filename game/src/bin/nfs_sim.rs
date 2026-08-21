@@ -1356,6 +1356,87 @@ async fn run() {
                 seen.len()
             );
         }
+        // **`0x00034121` — the lane blocks, and nothing in this game has ever opened them.**
+        //
+        // `Routes####F.bin` sits beside the route file and carries a per-race lane mask: for
+        // `Paths4121`, 163 blocks and 1,950 points against a 342-node table, about six times the
+        // density. It has no height and it does not say which roads the race uses — but it does say,
+        // densely, **where there is road at all**, which is the one question the event outline
+        // cannot answer. So it can arbitrate the thing three separate fixes have now failed on: is
+        // the ring's straight chord across a hole a road the description skipped, or a line over
+        // nothing?
+        if let Some(dir) = std::path::Path::new(&route).parent() {
+            let lane_file = dir.join(format!("Routes{event}F.bin"));
+            match std::fs::read(&lane_file)
+                .ok()
+                .and_then(|b| gizmo_nfs::world::routes::lanes(&b).ok())
+            {
+                Some(blocks) => {
+                    let pts: Vec<Vec3> = blocks
+                        .iter()
+                        .flat_map(|b| b.points.iter())
+                        .map(|q| city::remap([q.at[0], q.at[1], 0.0]))
+                        .collect();
+                    let near = |p: Vec3| {
+                        pts.iter()
+                            .map(|q| (p.x - q.x).hypot(p.z - q.z))
+                            .fold(f32::MAX, f32::min)
+                    };
+                    println!(
+                        "şerit dosyası {}: {} blok · {} nokta",
+                        lane_file.file_name().and_then(|s| s.to_str()).unwrap_or("?"),
+                        blocks.len(),
+                        pts.len()
+                    );
+                    let on = waypoints.iter().filter(|w| near(**w) <= 15.0).count();
+                    println!(
+                        "   halkanın {} waypoint'inin {on}'i bir şerit noktasının 15 m içinde \
+                         (%{:.0})",
+                        waypoints.len(),
+                        100.0 * on as f32 / waypoints.len().max(1) as f32
+                    );
+                    // Sample a polyline every ten metres and say how much of it the lanes cover.
+                    let covered = |line: &[Vec3]| -> (f32, f32) {
+                        let (mut n, mut hit, mut worst) = (0usize, 0usize, 0.0f32);
+                        for pair in line.windows(2) {
+                            let d = (pair[1].x - pair[0].x).hypot(pair[1].z - pair[0].z);
+                            let steps = (d / 10.0).ceil().max(1.0) as usize;
+                            for k in 0..steps {
+                                let t = k as f32 / steps as f32;
+                                let q = near(pair[0].lerp(pair[1], t));
+                                n += 1;
+                                hit += usize::from(q <= 15.0);
+                                worst = worst.max(q);
+                            }
+                        }
+                        (100.0 * hit as f32 / n.max(1) as f32, worst)
+                    };
+                    for (i, pair) in waypoints.windows(2).enumerate() {
+                        let chord = (pair[1].x - pair[0].x).hypot(pair[1].z - pair[0].z);
+                        if chord <= step * 1.5 {
+                            continue;
+                        }
+                        let road: Option<Vec<Vec3>> = net
+                            .nearest(pair[0])
+                            .zip(net.nearest(pair[1]))
+                            .and_then(|(a, b)| net.path(a, b))
+                            .map(|ids| ids.iter().filter_map(|j| net.node(*j)).map(|n| n.at).collect());
+                        let (kc, wc) = covered(pair);
+                        let r = road.as_ref().map(|l| covered(l));
+                        println!(
+                            "   aralık w{i}→w{} ({chord:.0} m): kirişin %{kc:.0}'i şeritte \
+                             (en uzak {wc:.0} m) · yolun {}",
+                            i + 1,
+                            match r {
+                                Some((kr, wr)) => format!("%{kr:.0}'i (en uzak {wr:.0} m)"),
+                                None => "yolu yok".into(),
+                            }
+                        );
+                    }
+                }
+                None => println!("şerit dosyası okunamadı: {}", lane_file.display()),
+            }
+        }
         let total: usize = by_path.values().sum();
         println!(
             "   halkanın hangi hattın üstünde: {}",
