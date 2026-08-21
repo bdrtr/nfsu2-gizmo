@@ -1396,6 +1396,11 @@ async fn run() {
     // further off than `LOOKAHEAD_MAX` is the proof that nothing was controlling it.
     let (mut aim_dist, mut aim_on_node, mut aim_behind) = (0.0f64, 0usize, 0usize);
     let mut aim_far = [0usize; 3];
+    // **Where the aim ends up behind the car.** Measured over the eight routes it is 14 % of steps
+    // and half of `Paths4121`'s cases are the walk finding *nothing* in front within eight hops —
+    // so the question is no longer the walk but the place. Keyed by the node the pilot holds,
+    // because that is where the walk starts.
+    let mut behind_at: std::collections::HashMap<u32, usize> = Default::default();
     let mut aim_off = 0usize;
     let mut still = vec![0usize; field.len()];
     let mut rolled = vec![0usize; field.len()];
@@ -1781,6 +1786,11 @@ async fn run() {
                         aim_far[t] += usize::from(reach > *edge);
                     }
                     aim_behind += usize::from(d.dot(fwd) <= 0.0);
+                    if d.dot(fwd) <= 0.0 {
+                        if let Some(i) = pilot.node() {
+                            *behind_at.entry(i).or_default() += 1;
+                        }
+                    }
                     // The aim sitting on the held node means the walk broke at its first test —
                     // it had already "walked" far enough before taking a step.
                     aim_on_node += usize::from(
@@ -3476,6 +3486,38 @@ async fn run() {
             100.0 * aim_on_node as f32 / aim_steps as f32,
             100.0 * aim_behind as f32 / aim_steps as f32
         );
+        // The places, not the count. A node that carries a fifth of a route's aim-behind steps is a
+        // junction to go and look at; a residue spread over eighty nodes is a driver problem.
+        let mut worst: Vec<_> = behind_at.into_iter().collect();
+        worst.sort_by_key(|(_, n)| std::cmp::Reverse(*n));
+        if !worst.is_empty() {
+            println!("   nişanın arkada kaldığı adımlar hangi düğümde tutulurken:");
+            for (i, n) in worst.iter().take(6) {
+                let Some(j) = net.node(*i) else { continue };
+                let arms: Vec<String> = j
+                    .links
+                    .iter()
+                    .filter_map(|l| {
+                        let k = net.node(*l)?;
+                        Some(format!(
+                            "{l}{}@({:.0},{:.0}) {:.0}m",
+                            if net.on_line_at(*l) { "*" } else { "" },
+                            k.at.x,
+                            k.at.z,
+                            (k.at - j.at).length()
+                        ))
+                    })
+                    .collect();
+                println!(
+                    "     düğüm {i:>4} · {n:>6} adım (%{:.1}) · ({:.0},{:.0}) hat{} · kollar: {}",
+                    100.0 * *n as f32 / aim_steps.max(1) as f32,
+                    j.at.x,
+                    j.at.z,
+                    if net.on_line_at(*i) { "ta" } else { "ta DEĞİL" },
+                    arms.join(" · ")
+                );
+            }
+        }
     }
     if held > 0 {
         println!(

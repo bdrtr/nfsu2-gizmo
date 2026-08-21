@@ -6119,3 +6119,46 @@ gittiği yönün tersine bakıyor. 4121'in uzun süredir bilinen düğüm 110 �
 **Sıradaki iş:** o adımlarda pilotun tuttuğu düğüm nerede, arabanın burnu nereye bakıyor, ve grafın o
 noktadaki kolları nereye gidiyor. `NFS_ARM=<düğüm>` bunu tek bir kavşak için zaten yazdırıyor;
 eksik olan, bu adımların hangi düğümlerde yoğunlaştığı.
+
+### 4121'in sapması tek bir kenar, ve hattaki alternatifi geriye gidiyor (2026-08-21)
+
+Nişanın arkada kaldığı adımlar, pilotun o sırada tuttuğu düğüme göre sayıldı. Dağılmıyorlar:
+
+| rota | en çok tutulan düğüm | adım | rotanın tüm adımlarının | yarış hattına |
+|---|---|---|---|---|
+| **4121** | **274** | 33.377 | **%20,0** | **156 m** |
+| 4102 | 43 | 22.418 | %13,4 | hatta |
+| 4002 | 16 | 12.120 | %7,3 | hatta |
+
+4121'de tek bir düğüm rotanın **bütün adımlarının beşte birini** ve nişanın arkada kaldığı adımların
+**%75'ini** taşıyor. `NFS_ARM=274`: düğüm hattan 156 m uzakta ve beş kolunun hepsi de 72-167 m
+uzakta — grafın oradan yarışa dönen bir kolu yok. Araba oraya vardıktan sonra nişan alacak bir şey
+kalmıyor; bu bir nişan kuralı sorunu değil, varış yeri sorunu.
+
+**Oraya nasıl gidiliyor, kenar kenar:**
+
+| düğüm | hatta uzaklık | kolları (hatta uzaklık) |
+|---|---|---|
+| 110 | 10 m | 109 (4 m, HATTA) · 111 (26 m, HATTA) · 294 (2 m, HATTA) |
+| **111** | **26 m** | 110 (10 m, HATTA) · **112 (72 m)** · 294 (2 m, HATTA) |
+| 112 | 72 m | 111 (26 m, HATTA) · 113 (120 m) · 274 (156 m) |
+
+**Ve bu, iki gün önceki refütasyonu açıklıyor.** Kayıtta "sapma 110 → 111'de, ve 21 sapmanın
+21'inde hatta kalan bir kol vardı ve alınmadı" yazıyor. Kenar aslında **111 → 112**, ve 111'de
+hatta kalan kol gerçekten var: 294, hattan yalnız 2 m. Ama 294 **118 m uzakta ve geriye gidiyor** —
+111 (−371) ile 294 (−488) arasında 110 (−424) duruyor, yani 294 arabanın az önce geçtiği yerin
+batısında, üstelik farklı bir hatta (hat 1, 111 ise hat 2).
+
+Yani "hattaki kolu tercih et" kuralı arabaları geri gönderiyordu. `mark_line` ölçümü doğruydu,
+kuraldan çıkarılan sonuç yanlıştı, ve neden yanlış olduğu artık tek bir kavşakta yazılı:
+**111'in ileri giden tek kolu hattı terk ediyor.**
+
+**Sıradaki iş buradan iki yöne gidiyor, ve ikisi de sürücü tarafında değil:**
+
+- Yarış hattı 111'den sonra nereye gidiyor? Halka koridora çekildiğinden beri hattın kendisi
+  yolların üstünde; eğer 111'den sonra hat, grafın 112'ye giden kenarından 72 m ötede devam
+  ediyorsa, orada yol var ve graf onu bilmiyor demektir — `is_road` kaydındaki kapsam sorusunun
+  sürüşteki karşılığı.
+- 274 ve 112/113, `Paths4121`'in kendi dosyasında hangi hatta ait? 274 hat 3, 112-113 hat 2, 294
+  hat 1. Rota dosyası bu üç hattı birbirine bağlıyor ve yarış yalnız birinden geçiyor; hangisi
+  olduğunu söyleyen tek şey outline, ve outline 40 m'lik bir bantla soruluyor.
