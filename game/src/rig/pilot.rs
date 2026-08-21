@@ -803,8 +803,6 @@ impl Pilot {
         self.seen.len()
     }
 
-    /// Which node of the network it is on.
-    #[must_use]
     /// The node the walk came from, so a measurement can ask what `step_avoiding` was allowed to
     /// offer. Exposed for the diagnosis in `nfs_sim`, which has to reconstruct the eligible arm set
     /// to tell a blocked gate from a pruned one.
@@ -813,6 +811,8 @@ impl Pilot {
         self.from
     }
 
+    /// Which node of the network it is on.
+    #[must_use]
     pub fn node(&self) -> Option<u32> {
         self.at
     }
