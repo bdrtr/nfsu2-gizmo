@@ -5864,3 +5864,59 @@ düğme delikleri bir arenanın tabanıyla kapatıyor — ama bu sefer kapanan �
 farklı bir iddia ve ayrıca ölçülmeye değer.
 
 **Sonuç: `is_road` olduğu gibi kalıyor.** Ölçülen bir refütasyon, bir düzeltme değil.
+
+### Güverte ölçüsü iki ayrı şeyi karıştırıyormuş; ayrılınca sekizin beşi sıfır (2026-08-21)
+
+Güverte sapması "araba, pilotunun tuttuğu düğümün kaç metre üstünde" diye ölçülüyordu ve **ikisinin
+planda ne kadar uzak olduğunu hiç sormuyordu**. Pilot düzenli olarak onlarca metre ötedeki bir
+düğümü tutuyor — grafın baştan beri bilinen paralel-şerit sorunu — ve o zaman ikisi ayrı yollarda
+oluyor, yani aralarındaki kot farkı *rota seçimi* hakkında bir olgu, kot çözümü hakkında değil.
+
+`DECK_NEAR = 15 m` eklendi (düğüm aralığı medyan 29 m, yani yolun üstünde duran bir araba tuttuğu
+düğüme bundan yakındır) ve ölçü ikiye ayrıldı:
+
+| rota | tüm adım >3 m | **araba düğümündeyken >3 m** | düğüme ort. plan mesafesi | >30 m olan adım |
+|---|---|---|---|---|
+| 4001 | %7,3 | **%9,6** | 14,5 m | %9,5 |
+| 4002 | %6,4 | **%0,0** | 54,5 m | %43,0 |
+| 4021 | %7,5 | **%0,0** | 30,7 m | %24,9 |
+| 4041 | %5,9 | **%3,9** | 15,5 m | %12,1 |
+| 4061 | %11,8 | **%2,1** | 32,0 m | %28,6 |
+| 4081 | %1,7 | **%0,0** | 33,5 m | %42,6 |
+| 4102 | %0,0 | **%0,0** | 47,1 m | %50,6 |
+| 4121 | %22,5 | **%0,0** | 81,8 m | %49,0 |
+| **ALAN** | | **%2,6** (579.625 adımın 15.321'i) | | |
+
+Sekiz rotanın **beşi tam sıfır**. 4121'in iki gündür konuşulan %22,5'i tamamen bu: arabalar tuttukları
+düğümden ortalama **81,8 m** uzakta.
+
+**Ve kot çözümünü suçlayan sayı artık sıfır.** `deck_had` sürülebilir zemine soruyordu, yani "arabanın
+kotunda bir katman var" diyordu, "bir yol var" demiyordu — ikincisi eklendi ve **sekiz rotanın
+hepsinde %0,0**: sapan hiçbir adımda düğümün kendi XZ'sinde arabanın kotunda bir *yol* yok. Yol
+zemini girdiğinden beri "seçim yanlış" sınıfı bitmiş durumda.
+
+**Kalan sapmanın nerede olduğu da artık adlı adınca belli.** 4001'in %9,6'sının neredeyse tamamı dört
+düğümde, ve dördünün de altında yol nesnesi yok:
+
+| düğüm | çözülen kot | yol adayları | sürülebilir adaylar |
+|---|---|---|---|
+| 292 | 11,54 | — | [11,5 · 11,8 · 13,9] |
+| 293 | 4,31 | — | [4,3 · 12,9 · 15,0] |
+| 294 | 3,86 | — | [3,9 · 14,0 · 16,1] |
+| 295 | 3,38 | [3,4] | [3,4 · 15,3 · 17,4] |
+
+295'te şehrin verdiği tek yol 3,4'te ve çözüm doğru olarak onu alıyor; arabalar 18'de sürüyor. Yani
+oradaki üst güvertenin `ROADA` nesnesi yok — `is_road` kaydındaki kapsam boşluğunun ta kendisi, bu
+sefer sürüşün içinde görünüyor.
+
+### Sıradaki iş, ve artık kot değil
+
+Ayrım asıl işi ortaya çıkardı: **pilot, üstünde olmadığı bir düğümü tutuyor.** Arabanın tuttuğu
+düğüme plan mesafesi rota ortalaması 14,5 m ile 81,8 m arasında, ve adımların %9,5 ile %50,6'sı
+**bir düğüm aralığından (30 m) daha uzakta**. Bu, `Network::step_avoiding`'in kendi dokümanının
+anlattığı paralel-şerit sorununun ilk kez sayıya dökülmüş hâli, ve ölçülen her şeyin üstünde
+duruyor: kavşak sayımı, `strayed`, güverte, hepsi "tutulan düğüm" üzerinden tanımlı.
+
+Bir sonraki ölçüm bu olmalı — ve dikkat: mesafe büyük olduğunda arabanın *daha yakın* bir düğüm
+olup olmadığı ayrıca sorulmalı, çünkü "yanlış düğümü tutuyor" ile "orada düğüm yok" farklı
+şeyler ve bu tablo ikisini ayırmıyor.

@@ -36,6 +36,18 @@ use nfsu2::world as city;
 const MASS_KG: f32 = 1220.0;
 const WHEEL_R: f32 = 0.31;
 
+/// How near its held node a car has to be, in plan, for the height between them to mean anything.
+///
+/// **The deck measure compares a car's height with the height of the node its pilot is holding, and
+/// says nothing about how far apart they are.** A pilot regularly holds a node tens of metres away —
+/// that is the parallel-carriageway problem the graph has had all along — and the two are then on
+/// different roads, so their height difference is a fact about the *route choice*, not about the
+/// height solve. Measured 2026-08-21: with the road-filtered ground in, **not one** deviating step
+/// on any of the eight routes has a road at the car's height under its node, and most of what is
+/// left is this. Node spacing is a median 29 m, so half of it is the width at which "the car is at
+/// this node" stops being true.
+const DECK_NEAR: f32 = 15.0;
+
 /// How far above its held node a car has to be before it is on a different deck, in metres.
 ///
 /// A road climbs, and the chassis rides about 0.65 m over the tarmac, so a metre or two of
@@ -1332,6 +1344,23 @@ async fn run() {
     let mut on_side = vec![0.0f32; field.len()];
     let mut deck_max = vec![f32::MIN; field.len()];
     let (mut deck_steps, mut deck_out, mut deck_had) = (0usize, 0usize, 0usize);
+    // The same question asked of the roads alone. `deck_had` asks the drivable ground, which calls a
+    // flat roof a surface, so it says "a layer exists at the car's height" and not "a road does" —
+    // and only the second can accuse the height solve of choosing wrong.
+    let mut deck_had_road = 0usize;
+    // The same counts restricted to steps where the car is actually at the node it holds — see
+    // `DECK_NEAR`. This pair is the honest field measure; the unrestricted one above is kept
+    // because every number before 2026-08-21 was taken on it.
+    let (mut near_steps, mut near_out) = (0usize, 0usize);
+    // And the distance itself, because a single threshold is a claim about where to put it. Node
+    // spacing is a median 29 m, so a car sitting perfectly on the road is under ~15 m from the
+    // node it holds and never beyond 30 unless it is holding the wrong one.
+    let mut plan_far = [0usize; 3];
+    let mut plan_sum = 0.0f64;
+    // Which node was being held when it went wrong. A field percentage says how much; this says
+    // where, and a residue concentrated on a handful of nodes is a different finding from one
+    // spread over the whole route.
+    let mut deck_by_node: std::collections::HashMap<u32, (usize, f32)> = Default::default();
     let mut off_line_for = vec![0.0f32; field.len()];
     let mut left_line: Vec<Option<(f32, Vec3, f32)>> = vec![None; field.len()];
     let mut line_at = vec![Vec3::ZERO; field.len()];
@@ -1788,6 +1817,15 @@ async fn run() {
                 let dy = p.position.y - n.at.y;
                 deck_max[k] = deck_max[k].max(dy);
                 deck_steps += 1;
+                let plan = (p.position.x - n.at.x).hypot(p.position.z - n.at.z);
+                plan_sum += f64::from(plan);
+                for (t, edge) in [15.0f32, 30.0, 50.0].iter().enumerate() {
+                    plan_far[t] += usize::from(plan > *edge);
+                }
+                if plan <= DECK_NEAR {
+                    near_steps += 1;
+                    near_out += usize::from(dy > DECK_OUT);
+                }
                 if dy > DECK_OUT {
                     deck_out += 1;
                     // **Could the node have been solved onto the car's deck?** The heights are
@@ -1800,6 +1838,17 @@ async fn run() {
                             .iter()
                             .any(|h| (p.position.y - h).abs() < 2.0),
                     );
+                    deck_had_road += usize::from(
+                        roads
+                            .heights_at(n.at.x, n.at.z)
+                            .iter()
+                            .any(|h| (p.position.y - h).abs() < 2.0),
+                    );
+                    if let Some(i) = pilot.node() {
+                        let e = deck_by_node.entry(i).or_insert((0, 0.0));
+                        e.0 += 1;
+                        e.1 = e.1.max(dy);
+                    }
                 }
             }
             let f = &mut falls[k];
@@ -3307,10 +3356,42 @@ async fn run() {
             deck_max.iter().map(|v| format!("{v:.1}")).collect::<Vec<_>>().join(" ")
         );
         println!(
-            "   o adımların %{:.1}'inde düğümün kendi XZ'sinde arabanın kotunda bir yüzey VARDI \
-             — yani seçim yanlıştı, yüzey eksik değil",
-            100.0 * deck_had as f32 / deck_out.max(1) as f32
+            "   o adımların %{:.1}'inde düğümün kendi XZ'sinde arabanın kotunda bir yüzey VARDI, \
+             %{:.1}'inde bir YOL vardı — ikincisi seçimi suçlayan sayı",
+            100.0 * deck_had as f32 / deck_out.max(1) as f32,
+            100.0 * deck_had_road as f32 / deck_out.max(1) as f32
         );
+        println!(
+            "   arabanın gerçekten tuttuğu düğümde olduğu adımlar ({DECK_NEAR:.0} m): {near_steps} \
+             / {deck_steps} · {near_out} tanesinde, yani %{:.1}'inde {DECK_OUT:.0} m'den fazla \
+             — ASIL SAYI bu",
+            100.0 * near_out as f32 / near_steps.max(1) as f32
+        );
+        println!(
+            "   arabanın tuttuğu düğüme plan mesafesi: ortalama {:.1} m · %{:.1}'i 15 m'den, \
+             %{:.1}'i 30 m'den, %{:.1}'i 50 m'den uzak",
+            plan_sum / deck_steps.max(1) as f64,
+            100.0 * plan_far[0] as f32 / deck_steps.max(1) as f32,
+            100.0 * plan_far[1] as f32 / deck_steps.max(1) as f32,
+            100.0 * plan_far[2] as f32 / deck_steps.max(1) as f32
+        );
+        // The nodes the residue sits on, worst first, with what the city offers at each: the road
+        // candidates the solve chose from and the drivable ones it could not see.
+        let mut worst_nodes: Vec<_> = deck_by_node.into_iter().collect();
+        worst_nodes.sort_by_key(|(_, (n, _))| std::cmp::Reverse(*n));
+        println!("   sapma en çok şu düğümlerde:");
+        for (i, (steps, dy)) in worst_nodes.iter().take(8) {
+            let Some(n) = net.node(*i) else { continue };
+            let r = roads.heights_at(n.at.x, n.at.z);
+            let g = ground.heights_at(n.at.x, n.at.z);
+            println!(
+                "     düğüm {i:>4} · {steps:>4} adım · en fazla {dy:>5.1} m · çözülen kot \
+                 {:>6.2} · yol adayları {:?} · sürülebilir {:?}",
+                n.at.y,
+                r.iter().map(|v| (v * 10.0).round() / 10.0).collect::<Vec<_>>(),
+                g.iter().map(|v| (v * 10.0).round() / 10.0).collect::<Vec<_>>()
+            );
+        }
     }
     if aim_steps > 0 {
         println!(
