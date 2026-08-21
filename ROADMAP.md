@@ -6238,3 +6238,57 @@ söylüyor.
 Halkanın boyunu değiştiren bir kol yalnız şunlarla yargılanır: `furthest`, kavşak, ayrık düğüm,
 kursta süre (koridor `build_route`'tan gelir, halkadan değil), `away`, `fallen`. Hepsi bu kolda ya
 düz ya aşağı.
+
+## Günün sonunda nerede duruyoruz (2026-08-21)
+
+Bugün on sekiz commit girdi ve bir tek varsayılan taşındı. Bu bölüm bir özet, yeni bir iddia değil;
+her satırın dayanağı yukarıda kendi kaydında duruyor.
+
+### Taşınan tek varsayılan
+
+**Grafın düğüm kotları artık yol-filtreli zeminden geliyor**, ve şehrin hiç yolu olmayan düğümlerde
+sürülebilir zemine düşüyor. Güverte uyuşmazlığı adımların %18,6'sından %7,9'una indi, hiçbir yolun
+tırmanamayacağı bağlantı 11 → 6, ve sürüş nötr kaldı (1.449 → 1.451 waypoint). Bunun ortaya
+çıkardığı iki kusur — adaysız düğümün grafı bölmesi ve `fill`'in hat sınırını aşması — düzeltildi ve
+eski zeminde ispatlı biçimde atıl.
+
+### Kapanan sorular
+
+| soru | cevap |
+|---|---|
+| Çözümü çıkış gridinden çıpalamak? | **Hayır** — sekiz rotanın hepsinde graf gridle zaten ≤1,4 m uyuşuyor, çıpanın düzeltecek şeyi yok |
+| `is_road` çok mu dar? | **Hayır** — TUNNEL/BRIDGE/MERIDIAN/RUNWAY/DRIFT/PUDDLE jetonlarının her biri sıfır düğüm kurtarıyor; kurtaran üçü (TERRAIN/CEILING/TRAINTRACK) eklenmemeli |
+| Dokümanın `RDP_*` iddiası? | **Yanlış** — RDP bir yol sınıfı değil, havaalanı bölgesi öneki; 699 nesnesinin hiçbirinde `ROAD` geçmiyor |
+| Güverte sapması bir kot hatası mı? | **Artık değil** — araba gerçekten tuttuğu düğümdeyken alan %2,6, sekiz rotanın beşi tam sıfır, ve sapan hiçbir adımda düğümün kotunda bir *yol* yok |
+| Pilot yanlış düğümü mü tutuyor? | **Evet, ölçüldü** — 4121'de ortalama 81,8 m'ye karşı en yakın düğüm 16,2 m'de; ve **düzeltmek kaybettiriyor** |
+| Halkanın delikleri yol mu? | **Evet** — grafın köprülediği yol medyan ×1,2; ama **doldurmak kendi rotasında kaybediyor** |
+| Arabalar daire mi çiziyor? | **Hayır** — alan kavşak/ayrık düğüm oranı 1,05 |
+| 4102'de yan yatmak durmanın sebebi mi? | **Hayır** — yan yatan 4 araba 177 kavşağın 73'ünü alıyor |
+
+### Bugün çürüyenler (hepsi düğme olarak, ölçüleriyle duruyor)
+
+`drop_climbing` · çıkış-gridi çıpası · `NFS_ADVANCE=arms` · `NFS_WALKCAP` · `NFS_AIMHOPS` ·
+`NFS_AIMKEEP` · `NFS_AIMREACH` (kabul edildi, aynı gün geri alındı) · `NFS_AIMREACH=lerp` ·
+`NFS_LOOKMAX` · `NFS_REDENSIFY` (yeni tabana karşı) · `NFS_WALKGAPS`.
+
+### Öğrenilen okuma kuralları — ikisi bir kabule mal oldu
+
+1. **Duran araba başarı sayılıyor.** *Koridorda geçen süre* ve *hattı bırakmama* bir kabulün tek
+   dayanağı olamaz; kavşak · ayrık düğüm · `furthest` · duran araba ile birlikte okunmalı.
+2. **Halkanın boyunu değiştiren kol iki sütunu diskalifiye eder.** *Geçilen waypoint* ve *ilerlemesi
+   duran araba* halkaya karşı sayılır; böyle bir kol yalnız `furthest`, kavşak, ayrık düğüm, kursta
+   süre, `away` ve `fallen` ile yargılanır.
+3. **Pilotun tuttuğu düğüme göre tanımlı her sütun,** ilerletme kuralını değiştiren bir kolda
+   kendiliğinden hareket eder.
+
+`tools/sweep-columns.py` üçünü de kendi dokümanında söylüyor ve gereken sütunları basıyor.
+
+### Açık cephe
+
+- **4121 ve 4102'de kursu hiç bırakmayan araba sıfır**, her kolda. 4121'in sebebi bilinen: düğüm
+  111'in ileri giden tek kolu hattı terk ediyor, ve varılan yer (274, hattan 156 m) bir çukur —
+  grafın oradan dönen kolu yok. 4102'de nişan açısı ortalama **56°**, yani pilot sürekli yana
+  bakıyor; sebebi henüz daraltılmadı.
+- **4001'in kalan güverte sapması** dört düğümde (292-295) ve dördünün de altında yol nesnesi yok.
+- **Nişan mesafesini denetleyen kural** (`NFS_AIMREACH`) gerçek bir mekanizmayı düzeltiyor ama
+  ilerleme sütunlarında bedelli. Takas 4121'de çözülür.
