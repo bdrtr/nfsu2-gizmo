@@ -85,20 +85,60 @@ impl Network {
         // a car and a ribbon cannot end up on different decks of the same interchange.
         let flat: Vec<Vec3> = nodes.iter().map(|n| remap([n.x, n.y, 0.0])).collect();
         let mut height: Vec<f32> = vec![0.0; nodes.len()];
-        let mut i = 0;
-        while i < nodes.len() {
-            let mut j = i;
-            while j + 1 < nodes.len() && nodes[j + 1].path == nodes[i].path {
-                j += 1;
+
+        // **`NFS_DECK=0` goes back to solving one path at a time.** Per-path is right for a path
+        // and blind to a junction: two carriageways that meet can be solved onto different decks
+        // of the same interchange, and every test downstream is plan-view so nothing says so.
+        // Measured over eight routes, cars drive as much as 22.5 m above the node their own pilot
+        // holds, on seven routes of eight — and where they do, the node's own XZ *has* a surface
+        // at the car's height 88 % of the time. See [`route::follow_graph`].
+        //
+        // The adjacency is built here rather than below because the graph solve needs it, and it
+        // is a property of the file: neighbours along a path, plus the record's own cross-links.
+        let mut adj: Vec<Vec<u32>> = vec![Vec::new(); nodes.len()];
+        let mut join = |a: usize, b: usize, adj: &mut Vec<Vec<u32>>| {
+            if a != b && a < adj.len() && b < adj.len() {
+                if !adj[a].contains(&(b as u32)) {
+                    adj[a].push(b as u32);
+                }
+                if !adj[b].contains(&(a as u32)) {
+                    adj[b].push(a as u32);
+                }
             }
+        };
+        for i in 0..nodes.len() {
+            if i + 1 < nodes.len() && nodes[i + 1].path == nodes[i].path {
+                join(i, i + 1, &mut adj);
+            }
+            for l in nodes[i].linked() {
+                join(i, l as usize, &mut adj);
+            }
+        }
+
+        if std::env::var("NFS_DECK").ok().is_none_or(|v| v != "0") {
             let candidates: Vec<Vec<f32>> =
-                (i..=j).map(|k| ground.heights_at(flat[k].x, flat[k].z)).collect();
-            let mut solved = super::route::follow(&candidates);
+                flat.iter().map(|p| ground.heights_at(p.x, p.z)).collect();
+            let mut solved = super::route::follow_graph(&candidates, &adj);
             super::route::fill(&mut solved);
-            for (k, h) in (i..=j).zip(&solved) {
+            for (k, h) in solved.iter().enumerate() {
                 height[k] = h.unwrap_or(0.0);
             }
-            i = j + 1;
+        } else {
+            let mut i = 0;
+            while i < nodes.len() {
+                let mut j = i;
+                while j + 1 < nodes.len() && nodes[j + 1].path == nodes[i].path {
+                    j += 1;
+                }
+                let candidates: Vec<Vec<f32>> =
+                    (i..=j).map(|k| ground.heights_at(flat[k].x, flat[k].z)).collect();
+                let mut solved = super::route::follow(&candidates);
+                super::route::fill(&mut solved);
+                for (k, h) in (i..=j).zip(&solved) {
+                    height[k] = h.unwrap_or(0.0);
+                }
+                i = j + 1;
+            }
         }
 
         let mut out: Vec<Junction> = nodes
@@ -111,23 +151,8 @@ impl Network {
             })
             .collect();
 
-        let edge = |a: usize, b: usize, out: &mut Vec<Junction>| {
-            if a != b && a < out.len() && b < out.len() {
-                if !out[a].links.contains(&(b as u32)) {
-                    out[a].links.push(b as u32);
-                }
-                if !out[b].links.contains(&(a as u32)) {
-                    out[b].links.push(a as u32);
-                }
-            }
-        };
-        for i in 0..nodes.len() {
-            if i + 1 < nodes.len() && nodes[i + 1].path == nodes[i].path {
-                edge(i, i + 1, &mut out);
-            }
-            for l in nodes[i].linked() {
-                edge(i, l as usize, &mut out);
-            }
+        for (j, links) in out.iter_mut().zip(adj) {
+            j.links = links;
         }
         let mut me = Self { nodes: out, walled: 0, climbed: 0, near_line: Vec::new() };
         me.drop_climbing();

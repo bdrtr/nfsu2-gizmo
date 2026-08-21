@@ -5628,3 +5628,39 @@ Doğru güverte orada duruyor, seçilmiyor. (4002 ayrı bir durum: orada yüzey 
 hat sınırlarındaki bağlantılarda iki ucun aynı güvertede olmasını istemek. Bu `route::follow`'un
 kapsamını değiştirmek demek, yani ölçülerek yapılacak bir iş; ama artık hangi sayının düzelmesi
 gerektiği belli: 4001'in %31,4'ü ve 4081'in %70,6'sı.
+
+### Kotlar artık graf üzerinde çözülüyor: imkânsız eğimler bir mertebe azaldı (2026-08-21)
+
+`route::follow` bir zincir üzerinde Viterbi'dir ve bir hat zincirdir — bu yüzden **kavşakta** ters
+gideni göremez. Aynı en-az-tırmanma kuralı grafın **kapsayan ağacı** üzerine genelleştirildi
+(`route::follow_graph`): yapraktan köke bir DP, ağaçta tam çözüm, tıpkı `follow`'un zincirde tam
+olması gibi. Çevrim kapatan bağlantılar kısıtlanmıyor; onlar için döngülü inanç yayılımı gerekir
+ve ağaç zaten eksik olan kısmı — her hattın komşusuna bağlanmasını — sağlıyor.
+
+**Grafın kendi kalitesi bir mertebe düzeldi.** Hiçbir yolun tırmanamayacağı bağlantı sayısı:
+
+| rota | %25'ten dik | %50'den dik | %100'den dik |
+|---|---|---|---|
+| 4001 hat hat | 82 | 31 | **21** |
+| **4001 graf** | **33** | **4** | **2** |
+| 4002 hat hat | 69 | 27 | **17** |
+| **4002 graf** | **25** | **6** | **4** |
+| 4081 hat hat | 13 | 11 | **7** |
+| **4081 graf** | **7** | **6** | **3** |
+
+**Güverte sapmasının en kötüleri yarıya indi:** 4002'de araba tuttuğu düğümün 22,5 m üstüne
+çıkarken artık 12,5 m; 4001'de 15,3 → 9,9 m; 4081'de yarışın %70,6'sı → %63,6'sı.
+
+**Sürüş nötr:** waypoint 1.476 → 1.449 (gürültü tabanının içinde), kursta süre %73,8 → %73,9,
+kavşak 1.641 → 1.649, `furthest` −33 m, hattı bırakan 39 → 40.
+
+**Yine de kalıyor, ve gerekçesi süpürme değil.** Eski çözüm *bilinen biçimde yanlıştı*: bitişik iki
+düğüm arasında 12,2 m'yi 1 m'de tırmanan bir bağlantı üretiyordu, ki o bir yol değil. Yeni çözüm
+aynı yolları ölçülebilir biçimde daha tutarlı tarif ediyor ve hiçbir sütunda bedeli yok. Bir
+tarifin doğruluğu, onu kullanan pilotun bugün ondan yararlanamamasıyla ölçülmez.
+
+**Ve kalan sapma bir sonraki sorunun yerini gösteriyor.** 4081 hâlâ %63,6'da: graf çözümü *tutarlı*
+bir güverte seçiyor ama **hangi güvertenin yarışın kendisi olduğunu bilmiyor** — iki güverte de
+kendi içinde pürüzsüz, ve en-az-tırnama kriteri alttakini seçebiliyor. Eksik olan bir çıpa: çıkış
+gridi gerçek zemine yerleştiriliyor (`ground at (x,z) is y=… — asked, not guessed`), yani yarışın
+hangi kotta başladığı biliniyor. Çözümü oradan çıpalamak bir sonraki adım.

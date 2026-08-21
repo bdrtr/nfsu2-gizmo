@@ -826,6 +826,99 @@ fn point_to_segment(p: Vec3, a: Vec3, b: Vec3) -> (f32, f32) {
 ///
 /// Nodes the city could not answer for are left `None` here and filled by [`fill`]; they carry no
 /// cost, so a hole does not decide anything for its neighbours.
+/// The same choice, made over the whole **graph** instead of one path at a time.
+///
+/// [`follow`] is a Viterbi pass along a chain, and a path is a chain — which is exactly why it
+/// cannot see the thing that goes wrong at a junction. Heights solved one path at a time leave
+/// each path internally smooth and say nothing about the two sides of a path boundary, so two
+/// carriageways that meet can be solved onto **different decks** of the same interchange. Measured
+/// over the eight sweep routes: cars end up as much as 22.5 m above the node their own pilot is
+/// holding, on seven routes of eight, and for 70.6 % of the race on the worst — and in 88 % of
+/// those steps the node's own XZ *has* a surface at the car's height. The surface is there. The
+/// choice is wrong.
+///
+/// So the same minimum-climb rule is applied over a spanning tree of the graph: a leaf-to-root DP
+/// that is exact on a tree exactly as [`follow`] is exact on a chain. Links that close a cycle are
+/// not constrained — capturing those needs loopy belief propagation and the tree already ties
+/// every path to its neighbours, which is the part that was missing.
+pub(crate) fn follow_graph(candidates: &[Vec<f32>], links: &[Vec<u32>]) -> Vec<Option<f32>> {
+    let n = candidates.len();
+    let mut out = vec![None; n];
+    let live = |i: usize| candidates.get(i).is_some_and(|c| !c.is_empty());
+
+    let mut seen = vec![false; n];
+    for root in 0..n {
+        if seen[root] || !live(root) {
+            continue;
+        }
+        // Breadth-first, so the tree is shallow and the DP below is a single reverse pass.
+        let mut order = vec![root];
+        let mut parent = vec![usize::MAX; n];
+        seen[root] = true;
+        let mut head = 0;
+        while head < order.len() {
+            let i = order[head];
+            head += 1;
+            for &l in links.get(i).into_iter().flatten() {
+                let j = l as usize;
+                if j < n && !seen[j] && live(j) {
+                    seen[j] = true;
+                    parent[j] = i;
+                    order.push(j);
+                }
+            }
+        }
+
+        // `cost[i][j]` is the cheapest total climb in `i`'s subtree given `i` takes candidate `j`;
+        // `pick[i][j]` records, per child, which of its candidates that answer chose.
+        let mut cost: Vec<Vec<f32>> = order.iter().map(|&i| vec![0.0; candidates[i].len()]).collect();
+        let mut pick: std::collections::HashMap<(usize, usize), Vec<usize>> =
+            std::collections::HashMap::new();
+        let slot: std::collections::HashMap<usize, usize> =
+            order.iter().enumerate().map(|(s, &i)| (i, s)).collect();
+
+        for s in (1..order.len()).rev() {
+            let i = order[s];
+            let p = parent[i];
+            let ps = slot[&p];
+            let mut chosen = vec![0usize; candidates[p].len()];
+            let mut add = vec![0.0f32; candidates[p].len()];
+            for (a, g) in candidates[p].iter().enumerate() {
+                let mut best = f32::MAX;
+                for (b, h) in candidates[i].iter().enumerate() {
+                    let c = cost[s][b] + (h - g).abs();
+                    if c < best {
+                        best = c;
+                        chosen[a] = b;
+                    }
+                }
+                add[a] = if best.is_finite() { best } else { 0.0 };
+            }
+            for (a, v) in add.iter().enumerate() {
+                cost[ps][a] += v;
+            }
+            pick.insert((p, i), chosen);
+        }
+
+        // Cheapest root, ties to the lower surface (candidate lists are sorted), then walk down.
+        let rs = slot[&root];
+        let mut take = vec![usize::MAX; n];
+        take[root] = cost[rs]
+            .iter()
+            .enumerate()
+            .min_by(|a, b| a.1.total_cmp(b.1))
+            .map_or(0, |(j, _)| j);
+        for &i in order.iter().skip(1) {
+            let p = parent[i];
+            take[i] = pick.get(&(p, i)).and_then(|c| c.get(take[p]).copied()).unwrap_or(0);
+        }
+        for &i in &order {
+            out[i] = candidates[i].get(take[i]).copied();
+        }
+    }
+    out
+}
+
 pub(crate) fn follow(candidates: &[Vec<f32>]) -> Vec<Option<f32>> {
     let live: Vec<usize> = (0..candidates.len()).filter(|i| !candidates[*i].is_empty()).collect();
     let mut out = vec![None; candidates.len()];
