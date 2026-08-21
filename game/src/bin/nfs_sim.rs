@@ -1464,6 +1464,29 @@ async fn run() {
                         }
                         (100.0 * hit as f32 / n.max(1) as f32, worst)
                     };
+                    // **And the outline itself, leg by leg.** Everything the game builds for a
+                    // course comes off these 17-ish corners; `densify` draws a straight line
+                    // between each pair and every later repair works on the result. Nobody has
+                    // asked how good a description the corners are. The lane mask can: a leg whose
+                    // chord runs off the lanes is a leg whose straight line is not a road, and that
+                    // is where every hole in the ring is born.
+                    println!("   anahat bacakları ({} köşe):", coarse.len());
+                    let (mut legs_on, mut legs) = (0usize, 0usize);
+                    for (k, cw) in coarse.windows(2).enumerate() {
+                        let d = (cw[1].x - cw[0].x).hypot(cw[1].z - cw[0].z);
+                        let (pc, wc) = covered(cw);
+                        legs += 1;
+                        legs_on += usize::from(pc >= 90.0);
+                        if pc < 90.0 {
+                            println!(
+                                "     bacak {k:>2}: {d:>5.0} m · kirişin %{pc:.0}'i şeritte \
+                                 (en uzak {wc:.0} m)"
+                            );
+                        }
+                    }
+                    println!(
+                        "     {legs_on} / {legs} bacağın kirişi %90'dan fazlasıyla şeritte",
+                    );
                     for (i, pair) in waypoints.windows(2).enumerate() {
                         let chord = (pair[1].x - pair[0].x).hypot(pair[1].z - pair[0].z);
                         if chord <= step * 1.5 {

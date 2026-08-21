@@ -6708,3 +6708,48 @@ varyant), grafın kenarları (`drop_climbing`, `NFS_DEDUP`), ve şimdi halkanın
 ham `WALKGAPS`, yeniden örneklenmiş `WALKGAPS`). Üçü de aynı şeyi söylüyor: **`Paths4121`'de
 arabaların kursta kalmamasının sebebi ne tarifin geometrisi, ne grafın kenarları, ne de pilotun
 işaretçisi.** Geriye bakılmamış tek yer, halkanın *nereden geldiği*: olay anahatı, 6 km'de 17 köşe.
+
+### Anahat bir kurs tarifi değil, kursun etrafına çizilmiş bir çokgen (2026-08-21)
+
+Bugün üç aile kapandıktan sonra geriye bakılmamış tek yer kalmıştı: halkanın **nereden geldiği**.
+Şerit dosyası artık elde olduğu için sorulabildi — anahattın kendi bacaklarının kirişi yolun üstünde
+mi? On metrede bir örneklenip 15 m eşikle:
+
+| rota | anahat köşesi | **kirişi %90'dan fazlasıyla şeritte olan bacak** | halkanın şeritte olan payı |
+|---|---|---|---|
+| 4001 | 17 | **2 / 16** | %81 |
+| 4002 | 17 | **0 / 16** | %89 |
+| 4021 | 14 | 3 / 13 | %91 |
+| 4041 | 16 | 3 / 15 | %97 |
+| 4061 | 7 | **0 / 6** | %86 |
+| 4081 | 12 | 1 / 11 | %90 |
+| 4102 | 17 | 3 / 16 | %95 |
+| 4121 | 18 | **1 / 17** | %84 |
+| **toplam** | | **13 / 110** | |
+
+**110 bacağın 97'si yol değil.** Tek tek bakıldığında bacaklar %7 ile %89 arası, kirişler 749 m'ye
+kadar uzun, ve şeritten uzaklıkları 109 m'ye çıkıyor. `Paths4121`'in 1 numaralı bacağı — 272 m,
+kirişin %18'i şeritte, en uzak **109 m** — bugün bütün gün "111'in sapması" diye incelenen deliğin
+doğduğu yer.
+
+**Yani anahat, kursun *boyunca* bir çizgi değil, kursun *etrafına* çizilmiş bir çokgen.** Parser'ın
+kendi notu bunu zaten ima ediyordu: `length_hint` anahattın çevresine karşı medyan 0,90 veriyor ve
+doküman *"which is what you get comparing a road's length with the outline drawn around it"* diyor.
+
+**Ve bu, bugünün bütün başarısızlıklarını tek cümlede topluyor.** `densify` bir çokgeni yol
+sanıyor; çekme onu koridora sürükleyerek sürülebilir hâle getiriyor (halkanın %81-97'si şeritte —
+çekmenin yaptığı iş bu) ve bedeli 228 m'lik delikler; sonra o delikleri kapatmaya çalışan her şey —
+`REDENSIFY`, ham ve korumalı `WALKGAPS` — deliği yamamaya çalışıyor, oysa halkanın geri kalanı da
+aynı ölçüde uydurma, sadece daha az görünür biçimde. Bir çokgen, delik delik yamayarak yarış
+hattına dönüşmüyor.
+
+**Kayıttaki eski cümle de yerine oturuyor:** *"A car cannot be steered onto a line that is not a
+road."* O gün ölçülen "halkanın %55'i koridor dışında" rakamı çekmeden önceydi; çekme o rakamı
+düzeltti ama kaynağı düzeltmedi.
+
+**Sıradaki iş, ve ilk kez doğru yerde.** Kurs tarifi anahattan *türetilmemeli*, yollardan
+kurulmalı — anahat yalnızca **sırayı** vermeli, ki verdiği şey o (köşeleri tur sırasında, ve bu
+parser'da doğrulanmış). `route::along_roads` bunu denedi ve kaybetti, ama iki eksikle: grafın
+en-kısa-yolunu kullanıyordu (arabanın geçemeyeceği bağlantılardan geçen taahhütlü bir yol) ve
+şerit maskesi yoktu. Şerit dosyası artık okunuyor ve yolun nerede olduğunu %88-100 doğrulukla
+söylüyor. Üçüncü deneme bu ikisiyle yapılmalı.
