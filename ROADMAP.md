@@ -6450,3 +6450,39 @@ sonra da, ki orada en yakın kol düzenli olarak paralel şerit. Aranan şey ayn
 **onset'te** — araba hâlâ kursun üstündeyken — geçerli olan biçimi. `line` bunu `mark_line` ile
 denedi ve kaybetti çünkü en kötü yerlerde tutulan düğüm zaten hattın dışında; koridorun kendisi
 (`Corridor`) pilota hiç verilmiyor, ve "araba koridordayken" bu ayrımın doğru tarafı olabilir.
+
+### İşaretçi ailesi tükendi: dört varyant, dördü de aynı yerde (2026-08-21)
+
+Bir önceki kayıt, `arms`'ın neden kaybettiğini "araba kaybolduktan sonra da ateşlendiği için"
+diye açıklamış ve düzeltmesini adlandırmıştı: aynı geri düşme, ama yalnız araba hâlâ kursun
+üstündeyken. Yazıldı (`NFS_ADVANCE=near`, eşik en yakın **waypoint**'e mesafe — koridor değil,
+çünkü koridor yandaki şeride sıfır der) ve iki genişlikte süpürüldü.
+
+| | waypoint | kursta süre | hiç bırakmayan | ilerlemesi duran | kursta kalanın araba başına ilerlemesi |
+|---|---|---|---|---|---|
+| **kalan** | **1.451** | **%74,3** | **14** | **30** | **18,7** |
+| `arms` (kapısız) | 1.359 | %68,9 | 11 | — | — |
+| `line` (hat kısıtlı) | 1.368 | %66,6 | 11 | 44 | 16,8 |
+| `free` (listesiz) | 1.369 | %68,8 | 12 | 40 | 17,2 |
+| `near` 40 m | 1.369 | %67,9 | 11 | 42 | 17,0 |
+| `near` 25 m | 1.371 | %66,8 | 10 | 41 | 14,3 |
+
+**Dördü de aynı yere düşüyor, ve bu tek başına bir bulgu.** Kapıyı kursun üstüne kısıtlamak `arms`'ı
+neredeyse hiç değiştirmiyor (1.359 → 1.369) — yani zarar araba kaybolduktan *sonra* verilmiyor,
+araba hâlâ kursun üstündeyken veriliyor. Bir önceki kaydın gerekçesi yanlıştı.
+
+**Ailenin tamamı kapandı.** İşaretçinin gecikmesi bir kol seçme kuralıyla kapanmıyor: bütün kollar,
+hat-üstü kollar, listesiz kollar, ve kurs-üstü kapılı kollar — dördü de alanı ve ilerleme
+sütunlarını kaybediyor. Onset ölçümü (dört rotada sekiz arabanın sekizinde arabaya daha yakın uygun
+bir kol var) gerçek ve duruyor; ona **işaretçi tarafından** müdahale etmek çürüdü.
+
+Geriye tek yön kalıyor ve o da kapalı: amaca müdahale etmek, yani `step_avoiding`'in `min_by`'ını
+araba mesafesiyle harmanlamak. Deponun kendi kaydı onu açıkça yasaklıyor — *"Whatever fixes it
+starts by asking where node 110's on-line arms go and what is there, not by weighting this `min_by`
+again."* Ve bugün o soru soruldu: 111'in ileri giden tek kolu hattı terk ediyor, hat-üstü alternatifi
+118 m geriye gidiyor. Yani ağırlıklandırmanın seçeceği daha iyi bir kol orada **yok**.
+
+**Bunun anlamı:** işaretçinin gecikmesi bir pilot kusuru değil, **kursun tarifi ile grafın
+uyuşmazlığı**. Aynı sonuca bugün üç ayrı yoldan varıldı — halkanın 228 m'lik deliği, 111'in kolları,
+ve şimdi dört kol kuralının hep birlikte düşmesi. Bir sonraki oturumun sürücüde arayacak bir şeyi
+kalmadı; aranacak yer rota dosyasının kendisi.

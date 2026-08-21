@@ -1158,16 +1158,41 @@ impl Pilot {
         // largest gain the pilot has, cars that got away 32/64 → 41/64 — but nothing measured says
         // it should also freeze the pilot's idea of **where it is**. This changes only the
         // bookkeeping walk; the escape and `step_avoiding` still see the whole list.
+        // **`NFS_ADVANCE=near`: the same fallback as `arms`, but only while the car is still on the
+        // course.**
+        //
+        // Measured 2026-08-21 at the *onset* — the first step where the marker falls a node's
+        // spacing behind — rather than over every stuck step: on `Paths4021`, `Paths4041`,
+        // `Paths4081` and `Paths4121` **all eight cars** have an eligible arm nearer the car at that
+        // moment, at 47-82 km/h with a goal 1.1-3.6 s old. That is the objective mismatch, and it is
+        // what starts the failure. `arms` fixes it and loses the field anyway, because it goes on
+        // firing after the car is lost, where the nearest arm is regularly the carriageway beside
+        // the one being raced. The blacklist tables that dominate the *steady state* are the
+        // aftermath, not the cause.
+        //
+        // So the fallback is gated on the car still being on the race's own line. The test is
+        // distance to the **nearest waypoint**, not the corridor: the corridor is the union of every
+        // path in the route file and answers a comfortable zero for a car on the next carriageway
+        // along. `NFS_ADVNEAR=<m>` is the width, a waypoint's own spacing by default.
         let advance = std::env::var("NFS_ADVANCE").unwrap_or_default();
-        let arms = advance == "arms" || advance == "line" || advance == "free";
+        let arms = matches!(advance.as_str(), "arms" | "line" | "free" | "near");
         let on_line_only = advance == "line";
         let ignore_list = advance == "free";
+        let near_only = advance == "near";
+        let adv_near: f32 =
+            std::env::var("NFS_ADVNEAR").ok().and_then(|v| v.parse().ok()).unwrap_or(40.0);
+        let on_course = !near_only
+            || course
+                .iter()
+                .map(|w| flat(*w - at).length())
+                .fold(f32::MAX, f32::min)
+                <= adv_near;
         for _ in 0..cap {
             let here_now = self.at?;
             let step = net.step_avoiding(here_now, self.from, toward, &self.blocked);
             let next = match step {
                 Some(n) if dist(n) < dist(here_now) => Some(n),
-                _ if arms => net
+                _ if arms && on_course => net
                     .node(here_now)
                     .into_iter()
                     .flat_map(|n| n.links.iter().copied())
