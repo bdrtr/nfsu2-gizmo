@@ -503,6 +503,36 @@ async fn run() {
     // any rule that acts at one node — a tie-break, an anchor — acts on one of these and no more.
     println!("kot çözümü: {trees} ağaç · komşudan yükseklik alan {filled} düğüm");
 
+    // **`NFS_NODES=<a>-<b>`: the file's own record for a run of nodes, unmediated.**
+    //
+    // Everything else in this binary reports the *graph*, which is what the game builds out of the
+    // file. When the question is what the file said rather than what was built from it — which path
+    // a node is on, which three links it names, and what its along-route measure is — there was
+    // nowhere to look. `progress` in particular is only ever used to find the start; the record
+    // refutes it as a lap coordinate *across* the network but nothing has asked what it says
+    // *along one path*, which is exactly the question at a junction where the graph and the course
+    // disagree.
+    if let Some(range) = knob("NFS_NODES") {
+        let (a, b) = range.split_once('-').unwrap_or((range.as_str(), range.as_str()));
+        let (a, b): (usize, usize) =
+            (a.trim().parse().unwrap_or(0), b.trim().parse().unwrap_or(0));
+        println!("dosyanın kendi kaydı, düğüm {a}-{b}:");
+        for (i, n) in nodes.iter().enumerate().skip(a).take(b.saturating_sub(a) + 1) {
+            let here = city::remap([n.x, n.y, 0.0]);
+            println!(
+                "   {i:>4} · hat {:>3} · ilerleme {:>9.1} · ({:>7.0},{:>7.0}) · bağlar {:?} \
+                 · w10 {} w18 {}",
+                n.path,
+                n.progress,
+                here.x,
+                here.z,
+                n.links.map(|l| l.map_or(-1i32, i32::from)),
+                n.word_10,
+                n.word_18
+            );
+        }
+    }
+
     // **`NFS_ROADNAMES=1`: what the city calls the things a route node stands on.**
     //
     // `route::is_road` is a *name* filter — "the name contains ROAD" — and a name filter can only

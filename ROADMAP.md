@@ -6486,3 +6486,61 @@ again."* Ve bugün o soru soruldu: 111'in ileri giden tek kolu hattı terk ediyo
 uyuşmazlığı**. Aynı sonuca bugün üç ayrı yoldan varıldı — halkanın 228 m'lik deliği, 111'in kolları,
 ve şimdi dört kol kuralının hep birlikte düşmesi. Bir sonraki oturumun sürücüde arayacak bir şeyi
 kalmadı; aranacak yer rota dosyasının kendisi.
+
+### DÜZELTME — 274 bir çukur değil, yarışın kendi yolu; dosya bunu açıkça söylüyor (2026-08-21)
+
+`NFS_NODES=<a>-<b>` eklendi: rota dosyasının bir düğüm aralığı için **kendi kaydı** — hat, ilerleme,
+üç bağlantı alanı, ve uninterpreted `+10`/`+18`. Bu binary'de her şey graf'ı raporluyordu; dosyanın
+ne dediğine bakacak yer yoktu. `Paths4121`, düğüm 106-118 ve 272-278:
+
+| düğüm | hat | ilerleme | konum | bağlar |
+|---|---|---|---|---|
+| 294 | **1** | **859,7** | (−488, 1620) | 108 |
+| 108 | **2** | **859,7** | (−488, 1618) | 294 |
+| 109 | 2 | 832,5 | (−460, 1616) | 294 |
+| 110 | 2 | 795,4 | (−424, 1611) | 294 |
+| **111** | 2 | **741,4** | (−371, 1600) | 294 |
+| **112** | 2 | **694,2** | (−328, 1580) | **274** |
+| 113 | 2 | 642,6 | (−294, 1542) | 274 |
+| 114 | 2 | 590,9 | (−268, 1497) | 274 |
+| 115 | 2 | 553,1 | (−258, 1461) | 274 |
+| **274** | **3** | 5466,6 | (−258, 1458) | 115 |
+| 277 | 3 | 5360,3 | (−312, 1394) | **36** |
+| 36 | **4** | 5357,9 | (−314, 1392) | 277 |
+| **38** | 4 | 5279,3 | (−391, 1378) | 277, 6 |
+
+**Üç şey birden çıkıyor.**
+
+1. **İlerleme hat içinde monoton ve hat sınırında sürekli.** Hat 1'in son düğümü 294 ile hat 2'nin
+   ilk düğümü 108 aynı ilerlemede (859,7) ve uzayda 3 m arayla; hat 3'ün 277'si (5360,3) ile hat
+   4'ün 36'sı (5357,9) 2,4 arayla. Dosyanın ilerleme alanı, hat *dizisi* boyunca bir koordinat —
+   kayıttaki "ilerleme bir tur koordinatı değil" refütasyonu ağ genelinde doğru, hat zinciri
+   boyunca değil.
+2. **Dosya yarışın 111'den sonra nereye gittiğini söylüyor:** 112 → 113 → 114 → 115 → 274 → 275 →
+   276 → 277 → 36 → 37 → **38**. Ve 112-115'in dördü de doğrudan 274'e bağlanıyor, yani 141 m'lik
+   kısayol da dosyanın kendi bağlantısı.
+3. **38, halkanın bir sonraki waypoint'i.** w11 düğüm 111'de, w12 düğüm 38'de — yani halkanın
+   228 m'lik kirişi ile dosyanın 373 m'lik yolu **aynı yolculuk**. Halka köşeyi kesiyor, arabalar
+   yolu sürüyor.
+
+**Bu bugünkü bir kaydı çürütüyor, benim yazdığım kaydı.** "4121'in sapması tek bir kenar" bölümü
+111 → 112'yi bir *sapma*, 274'ü de "hattan 156 m uzakta bir çukur, grafın oradan dönen kolu yok"
+diye tarif etmişti. Yanlış: 274'ün kolları 275 → 276 → 277 üzerinden hat 4'e ve oradan halkanın
+kendi w12'sine çıkıyor. "Hattan 156 m" ölçüsü, halkanın orada 228 m'lik bir deliği olduğu için
+öyle okunuyor — düğümün yolla ilgisi yok, halkanın tarifiyle ilgisi var. Bir yolun üstündeki
+düğüme, o yolu tarif etmeyen bir halkaya olan uzaklığıyla "çukur" demişim.
+
+**Ve bu, "111'in ileri giden tek kolu hattı terk ediyor" cümlesini de yeniden okutuyor.** Kol hattı
+terk etmiyor; *halka* orada yok. Aynı şey `mark_line`'ın o 373 m boyunca hiçbir düğümü hat-üstü
+saymamasını da açıklıyor, ve `NFS_ADVANCE=line`'ın neden elinde aday bulamadığını.
+
+**Ne değişmiyor:** `NFS_WALKGAPS` o deliği tam da bu yol boyunca doldurmuştu (grafın en kısa yolu,
+8 düğüm, dosyanın 112 → 274 kısayolunu kullanarak) ve 4121 yine kötüleşti. Yani "halkayı düzelt"
+denenmiş ve düşmüş durumda. Değişen şey teşhis: orada bir çukur, bir sapma ya da bir kayıp araba
+yok; **halkanın tarifi eksik ve ölçülerin yarısı o eksikliği arabanın hatası gibi okuyor.**
+
+**Sıradaki iş, ve artık dosyanın kendi alanıyla:** ilerlemenin hat zinciri boyunca sürekli olması,
+"bir yarışın hangi hat dizisinden geçtiği" sorusuna dosyadan bir cevap olabilir — kayıt bu soruyu
+iki kez sorup iki kez çürütmüştü, ama ikisi de *ağ genelinde* ilerlemeyi sıralamayı denemişti,
+hat uçlarının ilerlemesini eşleştirmeyi değil. Ölçüsü dar: kurulumun 105 rota dosyasında, bir hattın
+son düğümünün ilerlemesi ile bağlandığı hattın ilk düğümünün ilerlemesi ne sıklıkta eşleşiyor?
