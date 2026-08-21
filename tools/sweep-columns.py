@@ -50,6 +50,11 @@ DECK = re.compile(r"güverte: araba tuttuğu düğümün (-?[\d.]+) m üstüne k
 NEAR = re.compile(r"m\): \d+ / \d+ · \d+ tanesinde, yani %([\d.]+)")
 PLAN = re.compile(r"plan mesafesi: ortalama ([\d.]+) m · %([\d.]+)'i 15 m'den, %([\d.]+)'i 30")
 HELD = re.compile(r"tutulan düğüm en yakını mı: adımların %([\d.]+)'inde evet · %([\d.]+)'inde")
+AIM = re.compile(r"nişan mesafesi: ortalama ([\d.]+) m · %([\d.]+)'i 40 m'den")
+AIMB = re.compile(r"%([\d.]+)'inde arabanın arkasında")
+# One per car: its own totals, and whether the line under it says it never left the course.
+CAR = re.compile(r"car \d+: .*?(\d+) waypoints driven past")
+KEPT = "kursu hiç bırakmadı"
 HAD = re.compile(r"o adımların %([\d.]+)'inde düğümün kendi XZ")
 SUMM = re.compile(r"SUMMARY held=(\d+) away=(\d+) junctions=(\d+) waypoint=(\d+) "
                   r"furthest=(\d+)\s+fallen=(\d+)")
@@ -72,6 +77,9 @@ COLUMNS = [
     ("plan_30", "düğüme 30 m'den uzak %adım", lambda v: sum(v) / len(v)),
     ("held_is", "tutulan = en yakın %", lambda v: sum(v) / len(v)),
     ("held_nearer", "daha yakını vardı %", lambda v: sum(v) / len(v)),
+    ("aim_mean", "nişan mesafesi m", lambda v: sum(v) / len(v)),
+    ("aim_far", "nişan 40 m'den uzak %adım", lambda v: sum(v) / len(v)),
+    ("aim_behind", "nişan arabanın arkasında %adım", lambda v: sum(v) / len(v)),
     ("deck_max", "güverte max m (tek adım)", max),
     ("had", "…o adımlarda yüzey VARDI %", lambda v: sum(v) / len(v)),
     ("steep", "1:1'den dik bağlantı", sum),
@@ -87,6 +95,18 @@ def one(text):
     s, d, n, k = (SUMM.search(text), DECK.search(text), NET.search(text), SOLVE.search(text))
     t, h = TIME.search(text), HAD.search(text)
     near, plan, held = NEAR.search(text), PLAN.search(text), HELD.search(text)
+    am, ab = AIM.search(text), AIMB.search(text)
+    # The population split: which cars never left the course, and what they alone covered.
+    lines = text.splitlines()
+    kept_cars = kept_wp = lost_cars = lost_wp = 0
+    for i, line in enumerate(lines):
+        m = CAR.search(line)
+        if not m:
+            continue
+        if i + 1 < len(lines) and KEPT in lines[i + 1]:
+            kept_cars, kept_wp = kept_cars + 1, kept_wp + int(m.group(1))
+        else:
+            lost_cars, lost_wp = lost_cars + 1, lost_wp + int(m.group(1))
     # `deck_max` starts at f32::MIN, so a car that never held a node prints -3.4e38. Anything that
     # far down is "no sample", not a car under the road.
     worst = float(d.group(1)) if d else 0.0
@@ -112,6 +132,13 @@ def one(text):
         plan_30=float(plan.group(3)) if plan else 0.0,
         held_is=float(held.group(1)) if held else 0.0,
         held_nearer=float(held.group(2)) if held else 0.0,
+        aim_mean=float(am.group(1)) if am else 0.0,
+        aim_far=float(am.group(2)) if am else 0.0,
+        aim_behind=float(ab.group(1)) if ab else 0.0,
+        kept_cars=kept_cars,
+        kept_wp=kept_wp,
+        lost_cars=lost_cars,
+        lost_wp=lost_wp,
     )
 
 
@@ -145,6 +172,30 @@ def main(argv):
                 f"    {n} − {base}: {margin:+.1f} · en büyük tek rota {worst:+.1f}"
                 f" → {'TAŞINIYOR' if carried else 'sağlam'}"
             )
+    split(data, names)
+
+
+def split(data, names):
+    """The one reading that keeps a good change from looking like a loss.
+
+    A car that leaves the course keeps walking the graph and keeps banking waypoints, so a change
+    that *keeps cars on the road* shrinks the population that was inflating the field total. Judge
+    it on the cars that stayed: how many there are, and what each of them covered.
+    """
+    print("\n== kursu bırakan / bırakmayan nüfus ==")
+    for n in names:
+        k = sum(data[n][r]["kept_cars"] for r in ROUTES)
+        kw = sum(data[n][r]["kept_wp"] for r in ROUTES)
+        l = sum(data[n][r]["lost_cars"] for r in ROUTES)
+        lw = sum(data[n][r]["lost_wp"] for r in ROUTES)
+        print(
+            f"  {n:>10}  hiç bırakmayan {k:>3} araba · {kw:>5} waypoint "
+            f"(araba başına {kw / max(k, 1):5.1f})"
+        )
+        print(
+            f"  {'':>10}  bırakan       {l:>3} araba · {lw:>5} waypoint "
+            f"(araba başına {lw / max(l, 1):5.1f})"
+        )
 
 
 if __name__ == "__main__":

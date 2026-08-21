@@ -6006,3 +6006,82 @@ tuttuğu düğüme olan mesafesiyle tohumlanıyor ve `look` en fazla `LOOKAHEAD_
 54,5 m veya 81,8 m olunca tohum tek başına `walked >= look`'u sağlıyor, yani o rotalarda
 **lookahead sabiti tamamen atıl** ve yürüyüşün tek kalan çıkışı "arabanın önündeki ilk düğüm" —
 kontrolsüz bir mesafede. Ölçülmesi gereken bir sonraki şey nişan mesafesinin kendi dağılımı.
+
+### Nişan mesafesini hiçbir şey denetlemiyormuş; denetleyen kural kalıcı (2026-08-21)
+
+Bir önceki kaydın işaret ettiği yer ölçüldü. Nişan yürüyüşünün sayacı arabanın **tuttuğu düğüme**
+olan mesafesiyle tohumlanıyor, `look` ise `hız × 1,8 s` ve 12-40 m'ye kırpılı. Gecikme 54,5 m veya
+81,8 m olunca tohum tek başına `walked >= look`'u sağlıyor, yani yürüyüşün tek kalan çıkışı
+"nişan arabanın önünde" — mesafeyi hiçbir şey belirlemiyor. Ölçüldü:
+
+| rota | nişan ort. | %40 m'den uzak | %100'den | nişan tutulan düğümün üstünde | nişan arabanın ARKASINDA |
+|---|---|---|---|---|---|
+| 4001 | 45,4 m | %55,9 | %2,9 | %6,3 | %0,3 |
+| 4002 | 33,2 m | %19,5 | %7,6 | %9,4 | **%29,7** |
+| 4021 | 40,0 m | %37,0 | %2,2 | %5,5 | %12,0 |
+| 4041 | 36,5 m | %37,0 | %0,1 | %4,4 | %5,8 |
+| 4061 | 49,4 m | %55,5 | %5,0 | %13,4 | %10,6 |
+| 4081 | 33,7 m | %28,5 | %0,8 | %6,9 | %19,0 |
+| 4102 | **56,6 m** | %46,4 | **%15,8** | %14,1 | %22,7 |
+| 4121 | 54,0 m | %43,4 | %10,8 | %9,0 | %9,3 |
+
+40 m'lik tavan hiçbir rotada ortalamayı tutmuyor, ve 4002'de adımların **%29,7'sinde nişan arabanın
+arkasında** — modülün kendi dokümanının "tam kilit ve bir daire" dediği durum.
+
+### `NFS_AIMREACH` — yürüyüşü arabadan uzaklığa göre durdur (kalıcı)
+
+Saf takip (pure pursuit) yolun üstünde **araçtan** `look` metre uzaktaki noktayı ister. Durdurmayı
+öyle ölçmek, yol-mesafesi sayacının var oluş sebebini bozmuyor — nişan hâlâ yürünen yolun üstündeki
+bir düğüm, yani hâlâ köşeyi kesmek yerine yolu dönüyor — sadece yürüyüşün nerede durduğunu
+değiştiriyor.
+
+| | waypoint | kursta süre | hiç bırakmayan | away | fallen | kavşak | furthest |
+|---|---|---|---|---|---|---|---|
+| eski | 1.451 | %74,3 | 14 | 64 | 0 | 1.665 | 5.923 m |
+| **`reach` (kalan)** | 1.355 | **%80,0** | **33** | 64 | 0 | 1.454 | 5.432 m |
+| `lerp` (tam çember) | 1.306 | %77,4 | 22 | 64 | 0 | — | — |
+| yalnız tavan 60/100 | 1.462 | %74,2 | **10** | 64 | 0 | — | — |
+
+**Alan waypoint'i düşüyor ve bu bir kayıp değil** — deponun kendi okuma tuzağı, tersinden. Metrikler
+kursu bırakan/bırakmayan diye ayrıldığında:
+
+| | araba | waypoint | araba başına |
+|---|---|---|---|
+| eski · hiç bırakmayan | 14 | 262 | 18,7 |
+| eski · bırakan | 50 | 1.189 | 23,8 |
+| **`reach` · hiç bırakmayan** | **33** | **768** | **23,3** |
+| `reach` · bırakan | 31 | 587 | 18,9 |
+
+Yani kursta kalan nüfus ikiye katlanıyor **ve** o nüfusun araba başına ilerlemesi %25 artıyor
+(18,7 → 23,3); alan toplamının düşmesi, 23,8 puan toplayarak dolaşan kayıp nüfusun 50'den 31'e
+inmesinden. Rota rota, kursu hiç bırakmayan arabalar (sayı / waypoint):
+
+| rota | 4001 | 4002 | 4021 | 4041 | 4061 | 4081 | 4102 | 4121 |
+|---|---|---|---|---|---|---|---|---|
+| eski | 1 / 42 | 5 / 31 | 6 / 138 | 2 / 51 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
+| `reach` | **6 / 213** | **6 / 44** | 8 / 116 | **4 / 129** | **5 / 222** | **4 / 44** | 0 / 0 | 0 / 0 |
+
+Beş rotada kazanıyor, 4021'de araba sayısı artarken toplam düşüyor, iki rotada ikisi de sıfır.
+
+**İki rakip açıklama ölçülerek elendi.**
+
+1. **"Tam denetim daha iyi olmalı" — hayır.** `NFS_AIMREACH=lerp` nişanı lookahead çemberiyle
+   kesişime koyuyor, yani mesafeyi *tam* olarak `look`'a oturtuyor (4061'de nişan ortalaması
+   55,1 → 29,0 m, tavanın ötesi %85,1 → **%0,0**). Alan: 1.306 waypoint, %77,4, 22 araba — üç
+   sütunda da `reach`'in altında.
+2. **"O hâlde tavan küçük" — hayır, ve bu ayırt edici deney.** `NFS_LOOKMAX=60` ve `=100` (kural
+   yok, yalnız tavan) birbirinin aynı çıkıyor ve **kaybettiriyor**: kursta süre %74,2, hiç
+   bırakmayan 14 → **10**, o nüfusun araba başına ilerlemesi 18,7 → **16,2**. Mekanizma mesafe
+   değil; yürüyüşü *arabanın nerede olduğuna* göre durdurmak.
+
+**Bedeli 4121, ve yazılı duruyor.** O rotada kursta süre %66,2 → %48,0, waypoint 158 → 72, furthest
+787 → 360 m. İki kolda da kursu hiç bırakmayan arabası yok, yani sayılarının tamamı dolaşan
+nüfusun; ama kursta süre deponun tercih ettiği ölçü ve orada gerçek bir kayıp. Muhtemel sebep
+ölçülü: `reach` yürüyüşü uzattığı için sekiz-sıçrama sınırı daha sık tükeniyor ve nişan arkada
+kalıyor — 4121'de arkada kalma **%9,3 → %26,8**, 4001'de %0,3 → %8,4.
+
+Tabloların hepsi `tools/sweep-columns.py` çıktısı; nüfus ayrımı da artık orada, çünkü bu değişikliği
+"kayıp" gibi gösteren tek şey onu yapmamaktı.
+
+**Sıradaki iş:** yürüyüş sıçrama sınırını tüketince nişanın arkada bırakılması. Sınırı büyütmek
+veya tükenince önde görülmüş son düğüme dönmek — ikisi de ölçülmedi, ve 4121 ikisinin de sınavı.

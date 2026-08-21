@@ -1177,14 +1177,65 @@ impl Pilot {
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(LOOKAHEAD_PER_SPEED);
-        let look = (speed * per).clamp(LOOKAHEAD_MIN, LOOKAHEAD_MAX);
+        // `NFS_LOOKMAX=<m>` re-opens the cap. It has never been swept against the pulled ring, and
+        // the aim census says why it matters: with the walk stopping on "at least `look` and in
+        // front" the aim comes out a mean 33-57 m away — i.e. the cap is not what has been setting
+        // the distance, so an exact rule at 40 m is a different pilot rather than a tidier one.
+        let cap: f32 =
+            std::env::var("NFS_LOOKMAX").ok().and_then(|v| v.parse().ok()).unwrap_or(LOOKAHEAD_MAX);
+        let look = (speed * per).clamp(LOOKAHEAD_MIN, cap.max(LOOKAHEAD_MIN));
         let aim_line = std::env::var("NFS_AIMLINE").is_ok_and(|v| !v.is_empty() && v != "0");
         let aim_lerp = std::env::var("NFS_AIMLERP").is_ok_and(|v| !v.is_empty() && v != "0");
+        // **`NFS_AIMREACH=1`: stop the walk at `look` metres *from the car*, not `look` metres of
+        // road from the node it holds.**
+        //
+        // The odometer below is seeded with the car-to-held-node distance, and that distance is a
+        // mean 54.5 m on `Paths4002` and 81.8 m on `Paths4121` against a `LOOKAHEAD_MAX` of 40 —
+        // so on those routes the first test is satisfied before a step is taken and the only
+        // remaining exit is "the aim is in front". Measured 2026-08-21 over the eight routes, that
+        // is what it produces: the aim sits a mean 33-57 m out, beyond the 40 m cap on
+        // **19.5-55.9 %** of steps, beyond 100 m on 15.8 % of `Paths4102`'s, and **behind the car**
+        // on 29.7 % of `Paths4002`'s. Nothing is controlling the distance.
+        //
+        // Pure pursuit wants a point on the path at the lookahead distance from the *vehicle*.
+        // Measuring the stop that way keeps everything the road-distance odometer was for — the aim
+        // is still a node on the walked path, so it still follows the road round a corner rather
+        // than cutting across it — and only changes where the walk stops.
+        //
+        // **And as a bare `>=` it is a lower bound, not a target, which is measurably not the same
+        // thing.** Swept: the aim's mean distance *rose* on four routes and the share beyond the
+        // 40 m cap went 55.5 % → 83.7 % on `Paths4061`, because a walk that must reach 40 m from
+        // the car overshoots to the next node at 65. Worse, the longer walk runs the eight-hop cap
+        // out more often and the aim is then left wherever the walk stopped — behind the car on
+        // 26.8 % of `Paths4121`'s steps, up from 9.3 %, and that route is the one that collapses.
+        //
+        // `NFS_AIMREACH=lerp` asks for the point pure pursuit actually wants: where the path
+        // crosses the lookahead circle. On the leg that leaves the circle it solves for the exact
+        // crossing instead of taking the far node, so the aim is *at* `look` metres rather than at
+        // least `look`. Distinct from the refuted `NFS_AIMLERP`, which interpolates by **road**
+        // distance and therefore collapses onto the held node whenever the odometer's seed already
+        // exceeds `look` — which is the case this whole block is about.
+        //
+        // **Kept, and the discriminator is what makes it a finding rather than a knob.** What this
+        // does to the aim is mostly to put it *further* out, so the obvious rival explanation is
+        // that `LOOKAHEAD_MAX` is simply too small for this course. It is not: raising the cap
+        // alone to 60 or 100 m (`NFS_LOOKMAX`) is inert on the field's time on the corridor
+        // (74.3 → 74.2 %) and **loses** where it counts — cars that never leave the course 14 →
+        // **10**, and their own progress 18.7 → 16.2 waypoints each. Distance is not the mechanism;
+        // stopping the walk on where the *car* is, rather than on road walked from a node the car
+        // may be eighty metres past, is.
+        //
+        // `NFS_AIMREACH=0` goes back to the road odometer, which is what every number before
+        // 2026-08-21 was taken on.
+        let how = std::env::var("NFS_AIMREACH").unwrap_or_else(|_| "1".to_string());
+        let reach = how != "0";
+        let reach_lerp = how == "lerp";
         let (mut cur, mut prev) = (self.at?, self.from);
         let mut aim = net.node(cur)?.at;
         let mut walked = flat(aim - at).length();
         for _ in 0..8 {
-            if walked >= look && flat(aim - at).dot(f) > 0.0 {
+            let far = if reach { flat(aim - at).length() } else { walked };
+            if far >= look && flat(aim - at).dot(f) > 0.0 {
                 break;
             }
             let Some(next) = net.step_avoiding(cur, prev, toward, &self.blocked) else { break };
@@ -1222,6 +1273,25 @@ impl Pilot {
             }
             let p = net.node(next)?.at;
             let leg = flat(p - aim).length();
+            // Where this leg crosses the circle of radius `look` about the car, in plan. The far
+            // root, because the point wanted is the one the path leaves through; skipped when the
+            // leg does not reach the circle, or when the crossing is behind the car.
+            if reach_lerp {
+                let (o, d) = (flat(aim - at), flat(p - aim));
+                let (aa, bb) = (d.length_squared(), o.dot(d));
+                let cc = o.length_squared() - look * look;
+                let disc = bb * bb - aa * cc;
+                if aa > 1e-6 && disc >= 0.0 {
+                    let t = (-bb + disc.sqrt()) / aa;
+                    if (0.0..=1.0).contains(&t) {
+                        let hit = aim + (p - aim) * t;
+                        if flat(hit - at).dot(f) > 0.0 {
+                            aim = hit;
+                            break;
+                        }
+                    }
+                }
+            }
             // **`NFS_AIMLERP=1`: put the aim *on* the lookahead, not on the node past it.**
             //
             // The walk stops at whichever node first carries `walked` past `look`, so the aim is

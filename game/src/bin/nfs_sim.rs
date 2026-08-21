@@ -1388,6 +1388,14 @@ async fn run() {
     let mut in_gear = vec![[0.0f32; 8]; field.len()];
     // The aim-angle census: how often the lookahead point sits well off the nose.
     let (mut aim_steps, mut aim_sum, mut aim_wide, mut aim_hard) = (0usize, 0.0f32, 0usize, 0usize);
+    // **How far ahead the pilot is actually aiming.** The lookahead is `speed × 1.8 s` clamped to
+    // 12-40 m, but the walk that produces the aim seeds its odometer with the distance from the car
+    // to the node it holds — and that distance is a mean 54.5 m on `Paths4002` and 81.8 m on
+    // `Paths4121`. When the seed alone exceeds the cap the walk's first test is already satisfied
+    // and the aim is whatever node happens to be in front, at no controlled distance at all. An aim
+    // further off than `LOOKAHEAD_MAX` is the proof that nothing was controlling it.
+    let (mut aim_dist, mut aim_on_node, mut aim_behind) = (0.0f64, 0usize, 0usize);
+    let mut aim_far = [0usize; 3];
     let mut aim_off = 0usize;
     let mut still = vec![0usize; field.len()];
     let mut rolled = vec![0usize; field.len()];
@@ -1767,6 +1775,20 @@ async fn run() {
                     aim_sum += deg;
                     aim_wide += usize::from(deg > 45.0);
                     aim_hard += usize::from(deg > 90.0);
+                    let reach = d.length();
+                    aim_dist += f64::from(reach);
+                    for (t, edge) in [40.0f32, 60.0, 100.0].iter().enumerate() {
+                        aim_far[t] += usize::from(reach > *edge);
+                    }
+                    aim_behind += usize::from(d.dot(fwd) <= 0.0);
+                    // The aim sitting on the held node means the walk broke at its first test —
+                    // it had already "walked" far enough before taking a step.
+                    aim_on_node += usize::from(
+                        pilot
+                            .node()
+                            .and_then(|i| net.node(i))
+                            .is_some_and(|j| (j.at.x - a.x).hypot(j.at.z - a.z) < 0.5),
+                    );
                 }
             }
             // **Losing the race line, which is not the same as leaving the corridor.** The
@@ -3442,6 +3464,17 @@ async fn run() {
             100.0 * aim_wide as f32 / aim_steps as f32,
             100.0 * aim_hard as f32 / aim_steps as f32,
             100.0 * aim_off as f32 / aim_steps as f32
+        );
+        println!(
+            "   nişan mesafesi: ortalama {:.1} m · %{:.1}'i 40 m'den (lookahead tavanı), \
+             %{:.1}'i 60'tan, %{:.1}'i 100'den uzak · %{:.1}'inde nişan tutulan düğümün \
+             ÜSTÜNDE (yürüyüş ilk testte kırıldı) · %{:.1}'inde arabanın arkasında",
+            aim_dist / aim_steps as f64,
+            100.0 * aim_far[0] as f32 / aim_steps as f32,
+            100.0 * aim_far[1] as f32 / aim_steps as f32,
+            100.0 * aim_far[2] as f32 / aim_steps as f32,
+            100.0 * aim_on_node as f32 / aim_steps as f32,
+            100.0 * aim_behind as f32 / aim_steps as f32
         );
     }
     if held > 0 {
