@@ -5957,3 +5957,52 @@ gerisindeki bir düğümü tutuyorsa, o sayıların hepsi kaymış bir referansa
 **Sıradaki iş:** pilotun düğüm ilerletme kuralı. Dikkat: "en yakın düğüme atla" diye bir kural
 denenmemeli — grafın kendi başlığı paralel şeritleri birbirine bağladığını söylüyor, ve `guide_to`
 ile `along_roads` tam olarak o yüzden kaybetti. Ölçülecek şey, ilerletmenin neden geride kaldığı.
+
+### İlerletme kuralı okundu, iki aday sınandı, ikisi de çürüdü (2026-08-21)
+
+**Mekanizma tek bir satırda.** `self.at`'i üç yer yazıyor: `Pilot::place` (araba başına bir kez),
+tıkanma çıkışı, ve yürüyüş — yani bir düğüm ancak *üstünden yürünerek* bırakılabiliyor,
+yeniden-edinme yolu yok. Yürüyüşün tamamı:
+
+```rust
+for _ in 0..3 {
+    let Some(next) = net.step_avoiding(self.at?, self.from, toward, &self.blocked) else { break };
+    if dist(next) >= dist(self.at?) { break; }
+```
+
+`step_avoiding` **tek** bir kol döndürüyor ve onu `toward`'a — hedef waypoint'e — yakınlığa göre
+seçiyor; kapı ise **arabaya** yakınlığa bakıyor. İki ayrı amaç, ve döngü düğümün diğer kollarını hiç
+görmüyor. Üstelik kapı araba uzaklaştıkça *kolaylaşıyor* (`dist(held)` büyüyor), yani 54,5 m ve
+81,8 m'lik ortalamalar kapının muhafazakârlığı değil: sunulan tek kolun kendisi arabadan o kadar
+uzak.
+
+**İki aday sınandı, ikisi de düştü.**
+
+| | waypoint | kursta süre | hiç bırakmayan | kavşak | furthest | tutulan=en yakın | tutulana ort. |
+|---|---|---|---|---|---|---|---|
+| **kalan** | **1.451** | **%74,3** | **14** | 1.665 | **5.923 m** | %59,7 | 38,7 m |
+| `NFS_WALKCAP=12` | 1.446 | %74,2 | 13 | 1.665 | 5.923 m | %59,4 | 39,0 m |
+| `NFS_ADVANCE=arms` | 1.359 | %68,9 | 11 | 1.900 | 5.793 m | **%69,7** | **32,9 m** |
+
+**Derinlik bağlayıcı değil.** Sıçrama üst sınırını 3'ten 12'ye çıkarmak 1.451 waypoint'in 5'ini,
+tek rotada oynatıyor — gürültü tabanının altıda biri. Yürüyüş sıçramadan bitmiyor, kapıda ilk
+adımda duruyor.
+
+**Ve "diğer kollara da bak" kuralı tam olarak yapması gerekeni yapıyor, araba yine de daha kötü
+sürüyor.** İşaretçi yakalanıyor: tutulan düğümün en yakın olma oranı %59,7 → %69,7, arabanın
+tuttuğu düğüme ortalama mesafesi 38,7 → 32,9 m, 4121'de 81,8 → 46,3 m ve 4002'de 54,5 → 31,9 m.
+Buna karşılık alan 92 waypoint, kursta süre 5,4 puan ve 3 araba kaybediyor — ve en çok gecikmenin
+en büyük olduğu yerde: **4121 158 → 72 waypoint**, furthest 787 → 380 m, gecikmesi yarıya inerken.
+Kavşak ve ayrık düğüm sayısındaki artış (1.665 → 1.900, 1.588 → 1.780) arabanın değil işaretçinin
+hareketi.
+
+**Yani işaretçinin geride kalması bir belirti, kusur değil.** Onu en yakın düğüme çekmek, *en yakın
+hangi yolsa* ona çekiyor — ki bu grafta düzenli olarak yarışılanın yanındaki şerit. `guide_to`'yu ve
+yürünmüş halkayı öldüren cümlenin aynısı: taahhüt edilmiş bir yakınlık, arabanın süremeyeceği
+bağlantılardan geçiyor.
+
+**Bulgudan geriye kalan, ve sınanmamış olan, aşağı akışta.** Nişan yürüyüşünün sayacı arabanın
+tuttuğu düğüme olan mesafesiyle tohumlanıyor ve `look` en fazla `LOOKAHEAD_MAX = 40 m`. Gecikme
+54,5 m veya 81,8 m olunca tohum tek başına `walked >= look`'u sağlıyor, yani o rotalarda
+**lookahead sabiti tamamen atıl** ve yürüyüşün tek kalan çıkışı "arabanın önündeki ilk düğüm" —
+kontrolsüz bir mesafede. Ölçülmesi gereken bir sonraki şey nişan mesafesinin kendi dağılımı.

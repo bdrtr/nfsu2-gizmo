@@ -1076,12 +1076,68 @@ impl Pilot {
         // runaway the paragraph above records, arrived at from the other side. A node behind the car
         // is usually replaced by another node behind the car, so the loop advances to its cap every
         // frame for the rest of the race. Whatever fixes the sticky node, it is not this.
+        //
+        // **What none of that explains is the marker falling behind and staying there.** Measured
+        // 2026-08-21 (`NFS_HELD=1`): the car is a mean **54.5 m** from the node it holds on
+        // `Paths4002` and **81.8 m** on `Paths4121`, while the graph's plan-nearest node is 12.6
+        // and 16.2 m away, and in 6.9-55.7 % of steps a node nearer by more than 5 m exists — on
+        // five routes of eight that nearer node is on the race line 88-100 % of the time. The gate
+        // below gets *easier* as the car strays, so this is not it being conservative: the one arm
+        // offered is itself that far away.
+        //
+        // Two knobs opened the two readings of why, and **both are refuted**; they are kept
+        // default-off because what they measure is worth being able to re-ask.
+        //
+        // **`NFS_WALKCAP=<n>` — the hop cap, and depth is not what binds.** At 12 instead of 3 the
+        // field moves by 5 waypoints of 1,451, on one route, which is a sixth of the noise floor.
+        // The walk is stopping on the gate at its first hop, not running out of hops.
+        //
+        // **`NFS_ADVANCE=arms` — look at the held node's other arms and take the one nearest the
+        // car, if one is strictly nearer.** The reasoning was that `step_avoiding` ranks arms by
+        // distance to `toward` while the gate ranks by distance to the car, so a single arm that is
+        // goal-optimal and not car-optimal ends the walk for a tick. It is not the refuted "near
+        // enough" (adoption still needs a strict improvement) and not the refuted "behind" (no such
+        // test), and it leaves `step_avoiding`'s own choice — the one that drives — alone.
+        //
+        // **It does exactly what it was built to do, and the car drives worse.** The marker caught
+        // up: held-is-nearest over the field **59.7 % → 69.7 %**, mean car-to-held **38.7 → 32.9 m**,
+        // `Paths4121` **81.8 → 46.3 m** and `Paths4002` 54.5 → 31.9. The driving:
+        //
+        // | | waypoint | kursta süre | hiç bırakmayan | junctions | furthest |
+        // |---|---|---|---|---|---|
+        // | kalan | **1 451** | **74.3 %** | **14** | 1 665 | **5 923 m** |
+        // | `arms` | 1 359 | 68.9 % | 11 | 1 900 | 5 793 m |
+        //
+        // and it loses hardest exactly where the lag was largest: `Paths4121` 158 → **72**
+        // waypoints and 787 → 380 m of furthest while its lag halves. The rise in junctions and
+        // distinct nodes is the marker moving, not the car — the ratio is the tell.
+        //
+        // So **the marker lagging is a symptom and not the defect.** Pulling it to the nearest node
+        // pulls it onto whatever road is nearest, which on this graph is regularly the carriageway
+        // beside the one being raced — the same sentence that killed `guide_to` and the walked
+        // ring. What is left of the finding is downstream and untested: with the lag this large the
+        // aim walk's odometer is seeded past `LOOKAHEAD_MAX` before it starts, so on those routes
+        // the lookahead constant is inert and the aim is "the first node that happens to be in
+        // front", at an uncontrolled distance.
         let dist = |i: u32| net.node(i).map_or(f32::MAX, |j| flat(j.at - at).length());
-        for _ in 0..3 {
-            let Some(next) = net.step_avoiding(self.at?, self.from, toward, &self.blocked) else { break };
-            if dist(next) >= dist(self.at?) {
-                break;
-            }
+        let cap: usize =
+            std::env::var("NFS_WALKCAP").ok().and_then(|v| v.parse().ok()).unwrap_or(3);
+        let arms = std::env::var("NFS_ADVANCE").is_ok_and(|v| v == "arms");
+        for _ in 0..cap {
+            let here_now = self.at?;
+            let step = net.step_avoiding(here_now, self.from, toward, &self.blocked);
+            let next = match step {
+                Some(n) if dist(n) < dist(here_now) => Some(n),
+                _ if arms => net
+                    .node(here_now)
+                    .into_iter()
+                    .flat_map(|n| n.links.iter().copied())
+                    .filter(|l| Some(*l) != self.from && !self.blocked.contains(l))
+                    .filter(|l| dist(*l) < dist(here_now))
+                    .min_by(|a, b| dist(*a).total_cmp(&dist(*b))),
+                _ => None,
+            };
+            let Some(next) = next else { break };
             self.from = self.at;
             self.at = Some(next);
             self.passed += 1;

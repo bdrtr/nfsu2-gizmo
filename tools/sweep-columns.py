@@ -24,8 +24,16 @@ Two readings that are easy to get wrong, both of them house rules:
   comparison line below prints the biggest single-route difference beside the margin and says
   TAŞINIYOR when the one exceeds the other. That verdict is the point of the tool.
 
-And one that is specific to the deck columns: `güverte max` is the single worst step of the run, so
-it moves on one sample; `güverte %adım` is the share of steps and is what an arm is judged on.
+And two that are specific to the deck and held-node columns:
+
+- `güverte max` is the single worst step of the run, so it moves on one sample; `güverte %adım` is
+  the share of steps and is what an arm is judged on. The `· araba düğümünde` variant restricts it
+  to the steps where the car is actually within `DECK_NEAR` of the node it holds, and that is the
+  honest one — the unrestricted figure also counts a car standing on a different road.
+- **The held-node columns are not a score.** `plan mesafesi`, `tutulan = en yakın` and
+  `daha yakını vardı` are defined against the held node, so any change to how the pilot advances
+  moves them by construction. `junctions` and distinct nodes inflate the same way. Judge such an
+  arm on `waypoint`, `kursta süre`, `fallen` and `away`, and read the rest as a side channel.
 """
 import os
 import re
@@ -39,6 +47,9 @@ NEVER = re.compile(r"kursu hiç bırakmadı")
 TIME = re.compile(r"kursta geçen süre: %([\d.]+)")
 DECK = re.compile(r"güverte: araba tuttuğu düğümün (-?[\d.]+) m üstüne kadar çıkıyor · "
                   r"adımların %([\d.]+)")
+NEAR = re.compile(r"m\): \d+ / \d+ · \d+ tanesinde, yani %([\d.]+)")
+PLAN = re.compile(r"plan mesafesi: ortalama ([\d.]+) m · %([\d.]+)'i 15 m'den, %([\d.]+)'i 30")
+HELD = re.compile(r"tutulan düğüm en yakını mı: adımların %([\d.]+)'inde evet · %([\d.]+)'inde")
 HAD = re.compile(r"o adımların %([\d.]+)'inde düğümün kendi XZ")
 SUMM = re.compile(r"SUMMARY held=(\d+) away=(\d+) junctions=(\d+) waypoint=(\d+) "
                   r"furthest=(\d+)\s+fallen=(\d+)")
@@ -56,6 +67,11 @@ COLUMNS = [
     ("furthest", "furthest m", sum),
     ("nodes", "distinct nodes", sum),
     ("deck_pct", "güverte %adım (>3 m)", lambda v: sum(v) / len(v)),
+    ("near_pct", "güverte %adım · araba düğümünde", lambda v: sum(v) / len(v)),
+    ("plan_mean", "tutulan düğüme plan mesafesi m", lambda v: sum(v) / len(v)),
+    ("plan_30", "düğüme 30 m'den uzak %adım", lambda v: sum(v) / len(v)),
+    ("held_is", "tutulan = en yakın %", lambda v: sum(v) / len(v)),
+    ("held_nearer", "daha yakını vardı %", lambda v: sum(v) / len(v)),
     ("deck_max", "güverte max m (tek adım)", max),
     ("had", "…o adımlarda yüzey VARDI %", lambda v: sum(v) / len(v)),
     ("steep", "1:1'den dik bağlantı", sum),
@@ -70,6 +86,7 @@ def one(text):
     """Every column of a single route's log, zero where the line is absent."""
     s, d, n, k = (SUMM.search(text), DECK.search(text), NET.search(text), SOLVE.search(text))
     t, h = TIME.search(text), HAD.search(text)
+    near, plan, held = NEAR.search(text), PLAN.search(text), HELD.search(text)
     # `deck_max` starts at f32::MIN, so a car that never held a node prints -3.4e38. Anything that
     # far down is "no sample", not a car under the road.
     worst = float(d.group(1)) if d else 0.0
@@ -90,6 +107,11 @@ def one(text):
         steep=int(n.group(4)) if n else 0,
         trees=int(k.group(1)) if k else 0,
         filled=int(k.group(2)) if k else 0,
+        near_pct=float(near.group(1)) if near else 0.0,
+        plan_mean=float(plan.group(1)) if plan else 0.0,
+        plan_30=float(plan.group(3)) if plan else 0.0,
+        held_is=float(held.group(1)) if held else 0.0,
+        held_nearer=float(held.group(2)) if held else 0.0,
     )
 
 
