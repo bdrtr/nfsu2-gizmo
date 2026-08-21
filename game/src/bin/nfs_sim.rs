@@ -488,6 +488,32 @@ async fn run() {
     // any least-climb rule outright. The drawn line has been built from this filtered ground since
     // it existed; the graph the pilot drives was handed the unfiltered one, which is the bug
     // `ROADMAP.md` records for 2026-08-21. Built once, given to both.
+    // **The race's own lane mask, loaded once.** `Routes####F.bin` sits beside the route file and
+    // carries `0x00034121` lane blocks: a per-race set of points along the roads the race uses,
+    // about six times as dense as the node table and with no height. It cannot say which road is
+    // the racing line, but it says where road *is*, which is the question the corridor answers
+    // badly — the corridor is the union of every path in the file, so it calls a car on the next
+    // carriageway along "on course".
+    let lane_pts: Vec<Vec3> = std::path::Path::new(&route)
+        .parent()
+        .map(|d| d.join(format!("Routes{event}F.bin")))
+        .and_then(|f| std::fs::read(f).ok())
+        .and_then(|b| gizmo_nfs::world::routes::lanes(&b).ok())
+        .map(|blocks| {
+            blocks
+                .iter()
+                .flat_map(|b| b.points.iter())
+                .map(|q| city::remap([q.at[0], q.at[1], 0.0]))
+                .collect()
+        })
+        .unwrap_or_default();
+    let lane_near = |p: Vec3| -> Option<(f32, Vec3)> {
+        lane_pts
+            .iter()
+            .map(|q| ((p.x - q.x).hypot(p.z - q.z), *q))
+            .min_by(|a, b| a.0.total_cmp(&b.0))
+    };
+
     let roads = city::road_ground(&objects);
     let corridor =
         city::Corridor::of(&city::build_route(&nodes, &roads), city::COURSE_HALF_WIDTH);
@@ -895,15 +921,31 @@ async fn run() {
         let mut worst = 0.0f32;
         let n = waypoints.len();
         let mut shift = vec![Vec3::ZERO; n];
+        // `NFS_PULLLANE=<m>`: pull towards the nearest **lane point** rather than towards the
+        // corridor's centre, and count a waypoint as needing it when it is more than `m` metres
+        // from one. Same shape, same count of waypoints, a better question — the corridor merges
+        // every path in the file and the lane mask does not. Off unless asked for.
+        let lane_pull: Option<f32> =
+            knob("NFS_PULLLANE").and_then(|v| v.parse().ok()).filter(|_| !lane_pts.is_empty());
         for (i, w) in waypoints.iter().enumerate() {
-            let Some(f) = corridor.locate(*w) else { continue };
-            if f.distance <= city::COURSE_HALF_WIDTH {
-                continue;
-            }
+            let (dist, onto) = match lane_pull {
+                Some(edge) => match lane_near(*w) {
+                    Some((d, q)) if d > edge => (d, q),
+                    _ => continue,
+                },
+                None => match corridor.locate(*w) {
+                    Some(f) if f.distance > city::COURSE_HALF_WIDTH => (f.distance, f.at),
+                    _ => continue,
+                },
+            };
             moved += 1;
-            worst = worst.max(f.distance);
-            let back = f.distance - city::COURSE_HALF_WIDTH * to;
-            let dir = Vec3::new(f.at.x - w.x, 0.0, f.at.z - w.z).normalize_or_zero();
+            worst = worst.max(dist);
+            let back = match lane_pull {
+                // Land on the lane, not short of it: a lane point is a place, not a boundary.
+                Some(_) => dist,
+                None => dist - city::COURSE_HALF_WIDTH * to,
+            };
+            let dir = Vec3::new(onto.x - w.x, 0.0, onto.z - w.z).normalize_or_zero();
             let d = dir * back;
             shift[i] += d;
             for k in 1..=spread {
@@ -919,13 +961,19 @@ async fn run() {
             .zip(&shift)
             .map(|(w, d)| {
                 let p = *w + *d;
-                match corridor.locate(p) {
-                    Some(f) if f.distance > city::COURSE_HALF_WIDTH => {
-                        let back = f.distance - city::COURSE_HALF_WIDTH * to;
-                        let dir = Vec3::new(f.at.x - p.x, 0.0, f.at.z - p.z).normalize_or_zero();
-                        p + dir * back
-                    }
-                    _ => p,
+                match lane_pull {
+                    Some(edge) => match lane_near(p) {
+                        Some((dd, q)) if dd > edge => q,
+                        _ => p,
+                    },
+                    None => match corridor.locate(p) {
+                        Some(f) if f.distance > city::COURSE_HALF_WIDTH => {
+                            let back = f.distance - city::COURSE_HALF_WIDTH * to;
+                            let dir = Vec3::new(f.at.x - p.x, 0.0, f.at.z - p.z).normalize_or_zero();
+                            p + dir * back
+                        }
+                        _ => p,
+                    },
                 }
             })
             .collect();

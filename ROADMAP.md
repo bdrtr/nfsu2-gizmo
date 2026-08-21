@@ -6753,3 +6753,51 @@ parser'da doğrulanmış). `route::along_roads` bunu denedi ve kaybetti, ama iki
 en-kısa-yolunu kullanıyordu (arabanın geçemeyeceği bağlantılardan geçen taahhütlü bir yol) ve
 şerit maskesi yoktu. Şerit dosyası artık okunuyor ve yolun nerede olduğunu %88-100 doğrulukla
 söylüyor. Üçüncü deneme bu ikisiyle yapılmalı.
+
+### Halkayı şeridin üstüne oturtmak: %100 yolda, ve daha kötü sürüyor — üçüncü kez (2026-08-21)
+
+Bir önceki kaydın işaret ettiği yön denendi, ve en ucuz biçimiyle: çekmenin *hedefini* değiştir.
+Bugüne kadar koridora çekiliyordu — ki koridor dosyadaki bütün hatların birleşimi ve yandaki şeritte
+duran arabaya "kursta" der. `NFS_PULLLANE=<m>`: bir waypoint en yakın **şerit noktasından** m
+metreden uzaksa oraya taşınır. Waypoint sayısı değişmiyor, yani her sütun karşılaştırılabilir
+kalıyor.
+
+**Halka ölçülebilir biçimde daha iyi oluyor.** `Paths4121`'de, aynı 130 waypoint'le:
+
+| | şerit noktasının 15 m içindeki waypoint | uzunluk | katlanma | 60 km/h altı viraj |
+|---|---|---|---|---|
+| koridora çekilmiş (kalan) | %84 | 5.207 m | 0 | 16 |
+| **şeride çekilmiş (15 m)** | **%100** | 5.153 m | 0 | **15** |
+
+**Ve alan kaybediyor.**
+
+| | waypoint | kursta süre | hiç bırakmayan | **ilerlemesi duran** | kursta kalanın araba başına ilerlemesi |
+|---|---|---|---|---|---|
+| **kalan** | **1.451** | **%74,3** | 14 | **30** | **18,7** |
+| `PULLLANE=15` | 1.162 | %69,8 | **17** | 35 | 16,5 |
+| `PULLLANE=10` | 1.115 | %71,4 | **18** | 44 | 16,0 |
+
+Kursta kalan araba artıyor (14 → 17/18) ama herkes daha az yol alıyor ve duran araba çoğalıyor —
+günün iki kez öğrenilen kuralı gereği ilerleme sütunları karar veriyor ve hayır diyorlar. Rota rota
+kayıp yoğun: 4021 186 → 53 waypoint, 4121 158 → 69.
+
+**Ve bu üçüncü kez.** Bugün üç ayrı yapı halkayı ölçülebilir biçimde daha çok yola benzetti ve
+üçü de daha kötü sürdü:
+
+| yapı | halkaya ne yaptı | sonuç |
+|---|---|---|
+| `route::along_roads` (2026-08-20) | bütün halkayı yollardan kurdu; koridor dışı 518 → 5 | kursta kalan 32 → 15 |
+| korumalı `NFS_WALKGAPS` | delikleri gerçek yolla doldurdu, katlanmayı giderdi | 4121 %66,2 → %45,4 |
+| **`NFS_PULLLANE`** | **halkanın %100'ünü şeridin üstüne oturttu** | **duran araba 30 → 35** |
+
+**Yani kayıttaki "en büyük kaldıraç kurs, sürücü değil" cümlesi yerinde duruyor ama yönü yanlış
+okunmuş.** Kurs kaldıraçtır; *daha doğru* kurs yardım etmiyor. Üç yapı da halkayı yolun üstüne
+taşıyor, ve bu pilotun sabitlerinin — `REACHED` 18, `PASSED_NEAR` 60, `LOOKAHEAD` 1,8 s, `GRIP` —
+hepsinin köşe kesen kiriş halkaya göre oturtulmuş olduğu bir dünyada, kursu değiştirmek pilotu da
+yeniden oturtmayı gerektiriyor. Kayıt bunu bir kez söylemişti (*"ve sabitler o zaman yeniden
+süpürülmeli, çünkü eski halkaya göre oturtulmuşlardı"*) ve bugünkü üç denemenin hiçbiri bunu
+yapmadı.
+
+**Sıradaki iş belli ve ilk kez birleşik:** halkayı şeridin üstüne oturt **ve** pilotun dört sabitini
+o halkaya göre yeniden süpür. Tek tek değiştirip ölçmek üç kez aynı duvara çarptı; değiştirilmesi
+gereken şey ikisinin bileşimi.
