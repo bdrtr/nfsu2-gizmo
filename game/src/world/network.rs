@@ -599,7 +599,7 @@ mod tests {
             nodes[*a as usize].links.push(*b);
             nodes[*b as usize].links.push(*a);
         }
-        Network { nodes, walled: 0, near_line: Vec::new() }
+        Network { nodes, walled: 0, climbed: 0, near_line: Vec::new() }
     }
 
     /// The short way round, not the first way found. A greedy walk down the long arm would answer
