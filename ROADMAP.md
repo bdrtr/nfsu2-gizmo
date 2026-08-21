@@ -6588,3 +6588,36 @@ yarışın yarısını ters yöne kilitlerdi. Ama kaydın *kullanılmayan* oldu�
 hattın neresinde olduğunu ve iki hattın uçlarının eşleşip eşleşmediğini **düğüm tablosunu
 taramadan** söyler. Bir önceki kaydın istediği ölçü (hat uçlarının ilerlemesi ne sıklıkta eşleşiyor)
 tam olarak bu dört alanla, tek dosya okumasıyla yapılabilir.
+
+### Kavşak tekrarlarını elemek de çürüdü — ve sebebi okumayı düzeltiyor (2026-08-21)
+
+Keşif turu kurulum genelinde ölçtü: 19.409 bağlantı yazımı 8.063 ayrı (hat, hedef hat) çiftine
+düşüyor, yani **yazımların %58,5'i başka bir yazımın yaptığı kavşağı tekrar ediyor**. Her çiftin en
+yakın üyesi medyan **2,7 m** — iki yolun fiilen değdiği yer — tekrarlar ise medyan 33,8 m ve
+%40,5'i 40 m'nin üstünde. Oyun her yazımdan ayrı bir yönsüz kenar kuruyor.
+
+`Paths4121` bunu tam gösteriyor: hat 2'nin 108, 109, 110 ve 111 düğümlerinin dördü de hat 1'in 294
+düğümünü **3, 27, 65 ve 118 m**'den adlandırıyor. Ve 118 m'lik olan, bütün gün "111'in ileri giden
+tek kolu hattı terk ediyor" diye okunan kol.
+
+`NFS_DEDUP=<m>` yazıldı: her çiftin en kısa yazımını **kümesi başına** koru, kısa bir komşusu olan
+yazımı at. 4121'de 122 yazım eleniyor ve 111'in 118 m'lik kolu tam da hedeflendiği gibi düşüyor.
+
+| | waypoint | kursta süre | hiç bırakmayan | onların araba başına ilerlemesi | ilerlemesi duran |
+|---|---|---|---|---|---|
+| **kalan** | **1.451** | %74,3 | **14** | **18,7** | **30** |
+| `NFS_DEDUP=60` | 1.285 | %74,2 | 11 | **9,9** | 30 |
+| `NFS_DEDUP=30` | 1.290 | %73,0 | 15 | 17,5 | 37 |
+
+**Ve neden kaybettiği okumayı düzeltiyor.** Bir tekrar, *okuyucu* için gereksizdir; *sürücü* için
+değil. 27, 65 ve 118 m'lik yazımlar, kavşağı çoktan geçmiş bir arabanın hâlâ öteki hatta
+geçebilmesinin yolu; 108'in 3 m'lik yazımı var diye onları silmek, 110'daki arabaya karşıya geçecek
+hiçbir şey bırakmıyor. Yelpaze, dört kez söylenmiş tek bir cümle değil, bir **rampa kümesi**.
+
+**Yani 111'in 118 m'lik kolu da bir kusur değildi.** Onu kusur gibi gösteren şey yine `mark_line`'ın
+112'yi "hat dışı" saymasıydı — ki o da halkanın 228 m'lik deliğinin sonucu.
+
+Bugün 4121'e nişan alan üç ayrı düzeltme denendi ve üçü de düştü: halkanın deliğini yolla doldurmak
+(`NFS_WALKGAPS`), işaretçiyi hatta sınırlamak (`NFS_ADVANCE=line`), ve kavşak tekrarlarını elemek
+(`NFS_DEDUP`). Üçünün de ortak noktası, **halkanın eksik tarifini bir graf ya da sürücü kusuru gibi
+ele almaları.**

@@ -154,13 +154,83 @@ impl Network {
                 }
             }
         };
+        // **`NFS_DEDUP=<m>`: one junction, one edge.**
+        //
+        // A cross-path link is the file saying "these two paths meet". Measured over the install's
+        // 19,409 present links: they fall into 8,063 distinct (path, target path) pairs, so **58.5 %
+        // of the writes restate a junction another write already made**. The nearest member of each
+        // pair sits a median **2.7 m** away — that is where the two roads physically touch — while
+        // the restatements run a median 33.8 m and **40.5 % of them are over 40 m**. Building an
+        // undirected edge per write, as this did, turns one junction into a fan of edges that
+        // teleport a walker up to a hundred metres sideways.
+        //
+        // `Paths4121` shows it whole. Nodes 108, 109, 110 and 111 of path 2 all name node 294 of
+        // path 1, at **3, 27, 65 and 118 m**. The junction is 108↔294; the other three are the same
+        // sentence said again from further away — and the 118 m one is the arm that has been read
+        // all day as "node 111's only forward arm leaves the race line".
+        //
+        // The filter keeps the shortest write of each pair **per cluster**, so two genuine meetings
+        // of the same two paths survive: writes are grouped by where they land, and only a write
+        // that has a shorter neighbour within `NFS_DEDUP` metres is dropped.
+        //
+        // **Refuted, and the reason corrects the reading above.** At 60 m it drops 122 writes on
+        // `Paths4121` — including node 111's 118 m arm, exactly as intended — and the field loses:
+        // 1 451 → 1 285 waypoints, and the cars that stay on course fall from 14 covering 18.7 each
+        // to 11 covering **9.9**. At 30 m it is 1 290 with seven more cars whose progress stops.
+        //
+        // A restatement is redundant to a *reader* and not to a *driver*. The writes at 27, 65 and
+        // 118 m are how a car already past the junction still gets onto the other path; deleting
+        // them because node 108 has a 3 m write leaves a car at node 110 with no way across at all.
+        // The fan is a set of on-ramps, not one sentence said four times.
+        //
+        // Off by default.
+        let dedup: f32 =
+            std::env::var("NFS_DEDUP").ok().and_then(|v| v.parse().ok()).unwrap_or(0.0);
+        let span = |a: usize, b: usize| (flat[a].x - flat[b].x).hypot(flat[a].z - flat[b].z);
+        // Every cross-path write, as (writer, target), longest first so a drop test only has to
+        // look at what it has already kept.
+        let mut cross: Vec<(usize, usize)> = Vec::new();
+        for i in 0..nodes.len() {
+            for l in nodes[i].linked() {
+                let j = l as usize;
+                if j < nodes.len() && nodes[j].path != nodes[i].path {
+                    cross.push((i, j));
+                }
+            }
+        }
+        cross.sort_by(|a, b| span(a.0, a.1).total_cmp(&span(b.0, b.1)));
+        let mut kept: Vec<(usize, usize)> = Vec::new();
+        let mut dropped = 0usize;
+        for (i, j) in cross {
+            let restates = dedup > 0.0
+                && kept.iter().any(|(a, b)| {
+                    (nodes[*a].path, nodes[*b].path) == (nodes[i].path, nodes[j].path)
+                        && span(*a, i).min(span(*b, i)) <= dedup
+                });
+            if restates {
+                dropped += 1;
+            } else {
+                kept.push((i, j));
+            }
+        }
+
         for i in 0..nodes.len() {
             if i + 1 < nodes.len() && nodes[i + 1].path == nodes[i].path {
                 join(i, i + 1, &mut adj);
             }
+            // Same-path links stay as written; only the junction writes are de-duplicated.
             for l in nodes[i].linked() {
-                join(i, l as usize, &mut adj);
+                let j = l as usize;
+                if j < nodes.len() && nodes[j].path == nodes[i].path {
+                    join(i, j, &mut adj);
+                }
             }
+        }
+        for (i, j) in &kept {
+            join(*i, *j, &mut adj);
+        }
+        if dedup > 0.0 {
+            eprintln!("kavşak tekrarları elendi: {dropped} bağlantı yazımı ({dedup:.0} m)");
         }
 
         // Where one path ends and the next begins, in file order. Both branches want it: the
