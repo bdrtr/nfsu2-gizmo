@@ -6842,3 +6842,35 @@ Varsayılan olmadan önce **4021'de ne olduğu anlaşılmalı**: orada kursta ka
 138 waypoint, beş arabanın 41'ine düşüyor.
 
 İki düğme de kapalı duruyor, ölçüleri yanlarında: `NFS_PULLLANE=<m>` ve `NFS_LOOK=<s>`.
+
+### 4021'in mekanizması bulundu, ama çaresi yine `AIMREACH` değil (2026-08-21)
+
+Bileşik kolun bozduğu tek rota olan `Paths4021` açıldı. İki şey birden oluyor:
+
+| | halkanın en büyük aralığı | 60 m'den geniş aralık | nişan mesafesi | nişan açısı | işaretçi gecikmesi |
+|---|---|---|---|---|---|
+| kalan | 141 m | 6 | 40,0 m | 35° | 30,7 m |
+| şerit + 0,7 | **164 m** | **8** | **75,5 m** | **50°** | 38,0 m |
+
+Şerit çekmesi *o rotada* halkanın aralığını büyütüyor (141 → 164 m), ve lookahead kısalınca nişan
+yürüyüşünün tohumu — arabanın tuttuğu düğüme mesafesi, 38 m — `look`'u (90 km/h'de 17,5 m) fazlasıyla
+aşıyor, yani yürüyüşün tek çıkışı yine "önümdeki ilk düğüm" oluyor ve nişan 40 → **75,5 m**'ye
+fırlıyor. Kısaltılan lookahead, tohum yüzünden tersine çalışıyor.
+
+**Bu tam olarak `NFS_AIMREACH`'in düzelttiği mekanizma, ve eklemek yine kaybettiriyor:**
+
+| | kursta kalan araba | onların waypoint'i | araba başına |
+|---|---|---|---|
+| kalan | 14 | 262 | 18,7 |
+| **şerit + 0,7 (ikili)** | **27** | **509** | **18,9** |
+| + `AIMREACH` (0,7) | 25 | 356 | 14,2 |
+| + `AIMREACH` (0,9) | 22 | 237 | 10,8 |
+
+`AIMREACH` bugün üçüncü kez ölçüldü ve üçünde de kaybetti: tek başına (kabul edilip geri alındı),
+tam-çember biçiminde (`=lerp`), ve şimdi kazanan ikilinin üstünde. Mekanizmayı doğru tarif ediyor ve
+düzeltmesi her seferinde bedelli.
+
+**İkili en iyi ölçülmüş kol olarak duruyor** ve 4021 hâlâ kapı: orada kursta kalan altı arabanın
+138 waypoint'i, beş arabanın 41'ine düşüyor, ve sebebi artık biliniyor — o rotada şerit çekmesi
+halkayı daha çok yırtıyor. Bir sonraki deneme oraya bakmalı: şerit çekmesi neden 4021'de aralık
+büyütüyor da 4081'de büyütmüyor.
