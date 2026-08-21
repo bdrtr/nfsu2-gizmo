@@ -6085,3 +6085,37 @@ Tabloların hepsi `tools/sweep-columns.py` çıktısı; nüfus ayrımı da artı
 
 **Sıradaki iş:** yürüyüş sıçrama sınırını tüketince nişanın arkada bırakılması. Sınırı büyütmek
 veya tükenince önde görülmüş son düğüme dönmek — ikisi de ölçülmedi, ve 4121 ikisinin de sınavı.
+
+### Sıçrama sınırı de çürüdü, ama yarısını düzeltmesi asıl bilgiyi verdi (2026-08-21)
+
+Bir önceki kaydın bıraktığı iki aday sınandı. Karar ölçüsü yine nüfus ayrımı:
+
+| | hiç bırakmayan araba | onların waypoint'i | araba başına | kursta süre |
+|---|---|---|---|---|
+| **kalan** | **33** | **768** | **23,3** | **%80,0** |
+| `NFS_AIMKEEP=1` | 31 | 686 | 22,1 | %79,8 |
+| `NFS_AIMHOPS=16` | 27 | 504 | 18,7 | %78,2 |
+
+**Sıçrama sınırını büyütmek düpedüz kaybettiriyor** — 8'den 16'ya çıkmak kursta kalan arabayı 33'ten
+27'ye, onların ilerlemesini 23,3'ten 18,7'ye indiriyor. Yürüyüş sıçramadan yoksun değil.
+
+**"Tükenirse önde görülmüş en iyi noktaya dön" kuralı hedefini kısmen tutuyor ve alanı yine de
+kaybediyor.** 4121'de waypoint 72 → 102 ve kursta süre %48,0 → %52,1 — yani yazıldığı rotada
+çalışıyor — ama 4061'de tersi oluyor (318 → 302 waypoint, %90,6 → %84,7, kursta kalan 5 → 3) ve
+alanda kursta kalan nüfus 33 → 31, ilerlemesi 23,3 → 22,1. Deponun kuralı gereği silinmiyor ama
+varsayılan da olmuyor.
+
+**Asıl bilgi kısmî olmasında.** Kural, yürüyüş önde bir düğüm *görmüşse* ateşleniyor. 4121'de nişanın
+arkada kalması %26,8 → **%13,7**'ye iniyor, sıfıra değil — ve kalan %13,7 tam olarak
+`front == None` hâli, yani:
+
+> `Paths4121`'de nişanın arkada kaldığı adımların **yarısında**, pilotun tuttuğu düğümden sekiz
+> sıçrama boyunca yürünen yol üzerinde **arabanın önünde tek bir düğüm yok**.
+
+Bu "yürüyüş erken pes etti" değil; nişan alınacak bir şey yok demek. Araba, üstünde yürüdüğü grafın
+gittiği yönün tersine bakıyor. 4121'in uzun süredir bilinen düğüm 110 → 111 sapması tam olarak bu
+şeklin adı, ve buradaki sayı ona ilk kez bir büyüklük veriyor.
+
+**Sıradaki iş:** o adımlarda pilotun tuttuğu düğüm nerede, arabanın burnu nereye bakıyor, ve grafın o
+noktadaki kolları nereye gidiyor. `NFS_ARM=<düğüm>` bunu tek bir kavşak için zaten yazdırıyor;
+eksik olan, bu adımların hangi düğümlerde yoğunlaştığı.

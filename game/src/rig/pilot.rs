@@ -1230,10 +1230,45 @@ impl Pilot {
         let how = std::env::var("NFS_AIMREACH").unwrap_or_else(|_| "1".to_string());
         let reach = how != "0";
         let reach_lerp = how == "lerp";
+        // **What the walk does when it runs out of hops.** Nothing: the aim is left wherever the
+        // last step put it, and that can be behind the car — which the block above measures at
+        // 26.8 % of `Paths4121`'s steps, the one route the reach rule loses on. Two knobs, both
+        // default-off, and 4121 is the exam for either.
+        //
+        // - `NFS_AIMHOPS=<n>` — the cap itself. Eight hops of ~30 m nodes is ~240 m of road, which
+        //   is generous against a 40 m lookahead *unless* the walk is spending its hops crossing
+        //   ground the car has already covered, which is exactly what a held node eighty metres
+        //   behind makes it do.
+        // - `NFS_AIMKEEP=1` — remember the best point the walk saw *in front of the car* (the one
+        //   whose distance is nearest `look`) and fall back to it if the walk ends with the aim
+        //   behind. Not the refuted "aim at the held node": the fallback is a node the walk
+        //   actually reached and that the car is actually approaching, and it only fires in the
+        //   case that is already a failure.
+        //
+        // **Both are refuted, and the second one's *partial* success is the finding.** Judged on
+        // the population that stays on course: 33 cars covering 23.3 waypoints each becomes 31 at
+        // 22.1 with `AIMKEEP` and **27 at 18.7** with sixteen hops. More hops is simply worse —
+        // the walk is not short of them.
+        //
+        // `AIMKEEP` does work where it was aimed: `Paths4121` goes 72 → 102 waypoints and 48.0 →
+        // 52.1 % of race time on the corridor. It loses the field on `Paths4061` instead (318 →
+        // 302, 90.6 → 84.7 %, five cars staying on course down to three).
+        //
+        // And it only halves what it was built to remove. The rule fires when the walk saw
+        // *anything* in front; on `Paths4121` the aim-behind share goes 26.8 % → 13.7 %, and that
+        // remainder is exactly the case where it saw nothing — **in half of that route's
+        // aim-behind steps there is not one node in front of the car anywhere along eight hops of
+        // the walk.** That is not a walk giving up early, it is a car facing away from the graph it
+        // is standing on: node 110's long-standing departure, with a size on it for the first
+        // time.
+        let hops: usize =
+            std::env::var("NFS_AIMHOPS").ok().and_then(|v| v.parse().ok()).unwrap_or(8);
+        let keep = std::env::var("NFS_AIMKEEP").is_ok_and(|v| !v.is_empty() && v != "0");
         let (mut cur, mut prev) = (self.at?, self.from);
         let mut aim = net.node(cur)?.at;
         let mut walked = flat(aim - at).length();
-        for _ in 0..8 {
+        let mut front: Option<(f32, Vec3)> = None;
+        for _ in 0..hops {
             let far = if reach { flat(aim - at).length() } else { walked };
             if far >= look && flat(aim - at).dot(f) > 0.0 {
                 break;
@@ -1326,6 +1361,22 @@ impl Pilot {
             aim = p;
             prev = Some(cur);
             cur = next;
+            if keep {
+                let d = flat(aim - at);
+                if d.dot(f) > 0.0 {
+                    let miss = (d.length() - look).abs();
+                    if front.is_none_or(|(best, _)| miss < best) {
+                        front = Some((miss, aim));
+                    }
+                }
+            }
+        }
+        // The walk ran out of hops with nothing in front to aim at. Pure pursuit at a point behind
+        // the car asks for full lock, and full lock held is a circle.
+        if keep && flat(aim - at).dot(f) <= 0.0 {
+            if let Some((_, fr)) = front {
+                aim = fr;
+            }
         }
 
         // Which way is sideways. Wanted by the two rules below that move the aim off the line, so
