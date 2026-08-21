@@ -5747,6 +5747,10 @@ olmadığı yerde kazanabiliyor, ve yolla çözülmüş komşuları onu hâlâ �
 | `strict`+duvarsız | 1.414 | %74,9 | %11,7 | 44 | 1.651 | 5.746 m | 19 | 0 |
 | **geri düşüşlü** (kalan) | **1.451** | **%74,3** | **%7,9** | **6** | **1.665** | **5.923 m** | 14 | 0 |
 
+Bu tabloların hepsi `tools/sweep-columns.py <log-dizini> <temel-kol> <kol>...` çıktısı —
+`sweep-table.py` yalnız waypoint sütununu okuyor, bu ise sürüş ve kot sütunlarının tamamını, her
+satırda alan farkının yanına en büyük tek-rota farkını koyarak.
+
 Rota rota güverte sapması (adımların yüzdesi, >3 m):
 
 | rota | 4001 | 4002 | 4021 | 4041 | 4061 | 4081 | 4102 | 4121 |
