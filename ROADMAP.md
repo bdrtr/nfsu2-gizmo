@@ -5508,3 +5508,21 @@ Geri almadan sonra ikisi de yeniden soruldu, bu kez sevk edilen halkada:
 Yani dünkü sonuç doğru, atfı yanlıştı. Bu iki sabiti gereksiz kılan şey halkanın **aralığı** değil,
 koridora **çekilmiş** olması: koridordaki bir waypoint arabanın kendi yoluna yeterince yakın
 olduğu için bırakma yarıçapı hiç bağlamıyor ve "hedef arkada" hâli neredeyse hiç doğmuyor.
+
+### Ders geriye dönük uygulandı: bugünkü iki kabul de ilerleme ölçüsünden geçti (2026-08-21)
+
+"Duran araba başarı sayılıyor" dersi, aynı gün kabul edilen iki değişikliğe de uygulandı — çünkü
+biri (doğrultma ağı) arabayı **durmuş hâlde** bırakıyor, yani şüpheliydi:
+
+| | ilerlemesi duran | duruş ort. | alan kavşağı | ayrık düğüm |
+|---|---|---|---|---|
+| ağ yok | 11 / 64 | %49 | 1.590 | 1.513 |
+| **rakiplere ağ** (kabul) | **5 / 64** | **%21** | **1.641** | **1.594** |
+| çekmesiz | 5 / 64 | %29 | 1.505 | 1.444 |
+| **çekmeli** (kabul) | 5 / 64 | **%21** | **1.641** | **1.594** |
+
+İkisi de temiz geçti: ağ takılan arabayı **yarıdan aza** indiriyor ve kavşağı artırıyor; çekme
+takılan sayısını değiştirmeden duruş oranını düşürüyor ve kavşağı 1.505 → 1.641 yapıyor.
+
+Yani günün yanlış kabulü yalnız boşluk doldurmaydı, ve o geri alındı. `BASELINE-SEKIZ-ROTA.md`'ye
+dördüncü tablo, uyarısıyla birlikte yazıldı.

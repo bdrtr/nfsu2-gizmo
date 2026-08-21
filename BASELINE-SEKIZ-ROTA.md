@@ -153,3 +153,40 @@ fazlasında. Karşılaştırmalar artık bu sütunla yapılmalı.
 değişirse (yürünmüş, kırpılmış) sayının ölçeği değişir. Çekilmiş halka waypoint'leri *taşıdığı*
 için sayıları kirişle karşılaştırılabilir, ama o karşılaştırma da halkayı arabaların sürdüğü yere
 yaklaştırdığı için hafif yanlıdır; bağımsız sütunlar `furthest`, `düşen` ve `kursta süre`.
+
+## Dördüncü tablo — 2026-08-21, rakip doğrultma ağından sonra
+
+Üçüncü tablodan beri iki şey değişti: rakipler artık oyuncunun `keep_in_world` ağını alıyor, ve
+motor pini `550a7df`'e taşındı (süpürme o taşımada bayt-birebir aynı çıktı). Halka tarafında
+denenip **geri alınan** üç şey var — tam yeniden sıklaştırma, boşluk doldurma, yumuşatma — üçü de
+kayıtta.
+
+| | |
+|---|---|
+| oyun commit'i | `1a5d664` (`roadmap`) |
+| motor pini | `550a7dfd` — *"renderer: an alpha cutoff the baked-lit path can reach"* |
+| halka | koridora çekilmiş (`PULL_TO = 0`), boşluk doldurma **kapalı** (`GAP_AT` çürütüldü) |
+| pilot | `LOOKAHEAD_PER_SPEED = 1.8` · `GRIP = 8` · `PASSED_NEAR = 60` (**atıl**) · `BEHIND = 170°` (**atıl**) · `ESCAPE_FULL = 2` |
+| ağ | rakipler oyuncunun `keep_in_world`'ünü alıyor |
+
+| rota | away | düşen | furthest | junctions | held | geçilen waypoint | kursta süre | yan yatarak |
+|---|---|---|---|---|---|---|---|---|
+| 4001 | 8 | 0 | 1.136 | 318 | 2 | 360 | %92,8 | %0,0 |
+| 4002 | 8 | 0 | 342 | 77 | 268 | 81 | %89,4 | %1,3 |
+| 4021 | 8 | 0 | 609 | 235 | 10 | 186 | %94,2 | %0,0 |
+| 4041 | 8 | 0 | 1.078 | 260 | 0 | 240 | %91,7 | %0,5 |
+| 4061 | 8 | 0 | 1.103 | 177 | 1 | 196 | %62,0 | %0,5 |
+| 4081 | 8 | 0 | 583 | 219 | 0 | 156 | %51,0 | %2,6 |
+| 4102 | 8 | 0 | 313 | 177 | 48 | 99 | %43,4 | %1,3 |
+| 4121 | 8 | 0 | 787 | 178 | 10 | 158 | %66,2 | %0,6 |
+| **toplam** | **64 / 64** | **0** | **5.951 m** | **1.641** | **339** | **1.476** | **%73,8** | **%0,8** |
+
+**İki gün öncesine göre:** geçilen waypoint 1.035 → **1.476**, düşen 6 → **0**, `furthest`
+5.305 → **5.951 m**, yan yatarak geçen süre %7,0 → **%0,8**, ve sekiz rotanın sekizinde bütün
+arabalar kavşak alıyor.
+
+**Okuma uyarısı — 2026-08-21'de bir yanlış kabule mal oldu.** *Kursta geçen süre* ve *hattı
+bırakma* sütunlarının ikisi de **duran arabayı başarı sayar**: yolda durmuş bir araba koridorun
+içindedir ve hattı hiç bırakmaz. Arabaları durdurabilecek bir değişiklik bu iki sütunla
+yargılanamaz; **kavşak · ayrık düğüm · ilerlemesi duran araba** ile birlikte bakılmalı. Bu tabloda
+ilerlemesi duran araba **5 / 64**, duranların ortalaması yarışın **%21**'i.
