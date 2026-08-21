@@ -6396,3 +6396,57 @@ takıldığında hedef **ortalama 13,9-24,4 saniyedir** aynı — 4001'de 2,7. S
 sorun (`pilot.rs`, "İlerletme kuralının iki kolu da ölü") ve bir çaresi (nearest'a resync) ölçülüp
 çürütülmüş; ama donmanın **ne kadar sürdüğü** ilk kez burada bir sayı. Zincirin başı orası:
 hedef donuyor → `toward` bayatlıyor → işaretçi geride kalıyor → nişan yana kayıyor → tam kilit.
+
+### DÜZELTME + başlatıcı sebep: donmuş hedef zincirin başı değil, sonucu (2026-08-21)
+
+Bir önceki kayıt zinciri "hedef donuyor → `toward` bayatlıyor → işaretçi geride kalıyor" diye
+sıralamıştı. **Sıra ölçüldü ve üç rotada tersi çıktı.**
+
+**Önce: hedef neden donuyor.** Donmuş adımların %71-99,9'unda hedef bırakma yarıçapının (60 m)
+*içinde* ve araba onu geçmemiş — yani kural doğru olanı yapıyor. Ve o adımlarda araba çoğu zaman
+**duruyor**:
+
+| rota | donmuş adım | hedefe / yanal | ortalama hız | araba duruyor |
+|---|---|---|---|---|
+| 4001 | 6.063 | 33 m / 17 m | 22 km/h | %17,4 |
+| 4002 | 128.871 | 58 m / 20 m | **7 km/h** | **%63,2** |
+| 4081 | 76.262 | 44 m / 33 m | **3 km/h** | **%64,8** |
+| 4102 | 98.811 | **90 m / 48 m** | 22 km/h | %40,2 |
+
+Yani donmuş hedef, duran arabanın sonucu. (4102 ayrı bir durum: araba hareket hâlinde ama hedef
+90 m ötede ve 48 m yanda — halka başka bir yolun üstünde.)
+
+**Sonra: sıra.** Her arabanın işaretçisinin **ilk kez** 30 m geride kaldığı an kaydedildi:
+
+| rota | o an hız | hareket hâlinde | hedef o an kaç sn'dir donmuş | **o an sebep** |
+|---|---|---|---|---|
+| 4001 | 57 km/h | %75 | 1,7 s | hiçbiri 6 · geldiği 2 |
+| **4002** | **−0 km/h** | **%0** | **14,7 s** | uygun 4 · kara liste 4 |
+| 4021 | 82 km/h | %100 | 3,6 s | **uygun 8** |
+| 4041 | 81 km/h | %100 | 1,1 s | **uygun 8** |
+| 4061 | 32 km/h | %100 | 4,1 s | hiçbiri 8 |
+| 4081 | 53 km/h | %100 | 1,2 s | **uygun 8** |
+| 4102 | 42 km/h | %100 | 7,1 s | hiçbiri 6 · geldiği 2 |
+| 4121 | 47 km/h | %100 | 1,5 s | **uygun 8** |
+
+**Düzeltme:** 4002 dışında hiçbir rotada hedef, işaretçiden önce donmuyor — arabalar 47-82 km/h ile
+giderken ve hedef **1,1-4,1 saniyelik tazeyken** işaretçi geride kalıyor. Zincirin başı hedef değil.
+4002 tersi: araba işaretçi geride kalmadan önce zaten durmuş, hedef 14,7 saniyedir donuk. O rota bir
+seyir sorunu değil.
+
+**Ve başlatıcı sebep, bir önceki kaydın sebebi değil.** Dört rotada (4021, 4041, 4081, 4121) **sekiz
+arabanın sekizinde** o an arabaya daha yakın **uygun** bir kol var — yani kapı açılabilirdi ve
+`step_avoiding`'in hedefe göre seçtiği tek kol o değildi. Amaç uyuşmazlığı. Üç rotada (4001, 4061,
+4102) sebep "hiçbir kol daha yakın değil": işaretçi yerel bir minimumda, araba grafın izlemediği bir
+yere gidiyor.
+
+Kara liste onset'te yalnız 4002'de görünüyor — yani bir önceki kaydın "kara liste %76" tablosu
+**sonrasını** ölçüyor, sebebi değil: araba kaybolduktan sonra liste doluyor ve steady-state'i o
+yönetiyor. İkisi farklı sorular ve ben ilkini ikincisiyle cevaplamıştım.
+
+**Sıradaki iş, ve neden bugünkü çürütmeler onu kapatmıyor.** Amaç uyuşmazlığını düzelten kural
+`NFS_ADVANCE=arms` ve o alanı kaybetti — ama *her* adımda ateşleniyor, yani araba çoktan kaybolduktan
+sonra da, ki orada en yakın kol düzenli olarak paralel şerit. Aranan şey aynı düzeltmenin yalnız
+**onset'te** — araba hâlâ kursun üstündeyken — geçerli olan biçimi. `line` bunu `mark_line` ile
+denedi ve kaybetti çünkü en kötü yerlerde tutulan düğüm zaten hattın dışında; koridorun kendisi
+(`Corridor`) pilota hiç verilmiyor, ve "araba koridordayken" bu ayrımın doğru tarafı olabilir.

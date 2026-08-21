@@ -1577,6 +1577,25 @@ async fn run() {
     // And how stale the goal is when that happens, in simulated seconds.
     let mut goal_at: Vec<(usize, f32)> = vec![(usize::MAX, 0.0); field.len()];
     let (mut goal_age, mut goal_n) = (0.0f64, 0usize);
+    // **And why the goal itself is frozen.** Its advance has three arms (`pilot.rs`): the next
+    // waypoint is nearer, or the goal is within `REACHED` = 18 m, or it is within
+    // `PASSED_NEAR` = 60 m *and* the car is past it along the ring's own direction. A frozen goal
+    // means all three are false at once, so the question is which one is furthest from flipping.
+    // Sampled only where the goal has not moved for five seconds, which is well past the couple of
+    // seconds a healthy route sits on one.
+    let (mut froz, mut froz_far, mut froz_notpast) = (0usize, 0usize, 0usize);
+    let (mut froz_dg, mut froz_dn, mut froz_side) = (0.0f64, 0.0f64, 0.0f64);
+    // Moving or stopped, at those steps. A car that is driving and still cannot
+    // release its goal is being told to go somewhere it cannot reach; a car that is
+    // standing still has a frozen goal for the honest reason.
+    let (mut froz_speed, mut froz_still) = (0.0f64, 0usize);
+    // **Which came first.** Everything above co-occurs — stopped car, frozen goal, marker behind,
+    // aim sideways — and co-occurrence is not a chain. This records the *onset*: the first moment
+    // each car's marker falls a node's spacing behind, and what was already true then.
+    let mut onset: Vec<bool> = vec![false; field.len()];
+    let (mut on_n, mut on_moving, mut on_goal_fresh) = (0usize, 0usize, 0usize);
+    let (mut on_speed, mut on_age) = (0.0f64, 0.0f64);
+    let mut on_why = [0usize; 4];
     let mut aim_off = 0usize;
     let mut still = vec![0usize; field.len()];
     let mut rolled = vec![0usize; field.len()];
@@ -1988,7 +2007,7 @@ async fn run() {
                             // The two prunes are different things and want different work: the
                             // blacklist is permanent and load-bearing, `came_from` is one step of
                             // memory that stops a walk turning round at a junction.
-                            why[if ok {
+                            let cls = if ok {
                                 0
                             } else if listed {
                                 1
@@ -1996,12 +2015,40 @@ async fn run() {
                                 2
                             } else {
                                 3
-                            }] += 1;
+                            };
+                            why[cls] += 1;
+                            if !onset[k] {
+                                onset[k] = true;
+                                on_n += 1;
+                                on_speed += f64::from(p.speed);
+                                on_moving += usize::from(p.speed >= STILL_SPEED);
+                                let age = now - goal_at[k].1;
+                                on_age += f64::from(age);
+                                on_goal_fresh += usize::from(age < 5.0);
+                                on_why[cls] += 1;
+                            }
                             goal_age += f64::from(now - goal_at[k].1);
                             goal_n += 1;
                         }
                         if goal_at[k].0 != pilot.goal() {
                             goal_at[k] = (pilot.goal(), now);
+                        } else if now - goal_at[k].1 > 5.0 && !waypoints.is_empty() {
+                            let g = pilot.goal() % waypoints.len();
+                            let nx = (g + 1) % waypoints.len();
+                            let (wg, wn) = (waypoints[g], waypoints[nx]);
+                            let dg = (p.position.x - wg.x).hypot(p.position.z - wg.z);
+                            let dn = (p.position.x - wn.x).hypot(p.position.z - wn.z);
+                            let seg = Vec3::new(wn.x - wg.x, 0.0, wn.z - wg.z).normalize_or_zero();
+                            let rel = Vec3::new(p.position.x - wg.x, 0.0, p.position.z - wg.z);
+                            let along = rel.dot(seg);
+                            froz += 1;
+                            froz_far += usize::from(dg > 60.0);
+                            froz_notpast += usize::from(dg <= 60.0 && along <= 0.0);
+                            froz_dg += f64::from(dg);
+                            froz_dn += f64::from(dn);
+                            froz_side += f64::from((rel - seg * along).length());
+                            froz_speed += f64::from(p.speed);
+                            froz_still += usize::from(p.speed < STILL_SPEED);
                         }
                         let box_ = if plan <= DECK_NEAR { &mut ang_near } else { &mut ang_far };
                         box_.0 += f64::from(deg);
@@ -3707,6 +3754,37 @@ async fn run() {
             100.0 * aim_on_node as f32 / aim_steps as f32,
             100.0 * aim_behind as f32 / aim_steps as f32
         );
+        if on_n > 0 {
+            println!(
+                "   işaretçi ilk kez 30 m geride kaldığı an ({on_n} araba): ortalama hız {:.0} \
+                 km/h · %{:.0}'i HAREKET HÂLİNDE · hedef o an ortalama {:.1} s'dir donmuş, \
+                 %{:.0}'inde 5 sn'den taze · o an sebep: uygun {} · kara liste {} · geldiği {} \
+                 · hiçbiri {}",
+                3.6 * on_speed / on_n as f64,
+                100.0 * on_moving as f32 / on_n as f32,
+                on_age / on_n as f64,
+                100.0 * on_goal_fresh as f32 / on_n as f32,
+                on_why[0],
+                on_why[1],
+                on_why[2],
+                on_why[3]
+            );
+        }
+        if froz > 0 {
+            println!(
+                "   hedef 5 sn'den fazla donmuş {froz} adım: hedefe ortalama {:.0} m (yanal \
+                 {:.0} m), sıradakine {:.0} m · %{:.1}'inde hedef bırakma yarıçapının (60 m) \
+                 DIŞINDA · %{:.1}'inde içinde ama araba onu geçmemiş · o adımlarda \
+                 ortalama hız {:.0} km/h, %{:.1}'inde araba DURUYOR",
+                froz_dg / froz as f64,
+                froz_side / froz as f64,
+                froz_dn / froz as f64,
+                100.0 * froz_far as f32 / froz as f32,
+                100.0 * froz_notpast as f32 / froz as f32,
+                3.6 * froz_speed / froz as f64,
+                100.0 * froz_still as f32 / froz as f32
+            );
+        }
         if why_steps > 0 {
             println!(
                 "   işaretçi 30 m'den geride kaldığı {why_steps} adımda sebep: \
