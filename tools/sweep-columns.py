@@ -30,6 +30,11 @@ And two that are specific to the deck and held-node columns:
   the share of steps and is what an arm is judged on. The `· araba düğümünde` variant restricts it
   to the steps where the car is actually within `DECK_NEAR` of the node it holds, and that is the
   honest one — the unrestricted figure also counts a car standing on a different road.
+- **An arm that changes the ring's *length* disqualifies two columns outright.** `waypoint` and
+  `ilerlemesi duran` are both counted against the ring — more waypoints means more to drive past and
+  more chances to gain one, so a re-sampled ring scores higher without a metre of extra driving.
+  Compare such arms on the columns the ring cannot touch: `furthest`, `junctions`, distinct nodes,
+  `kursta süre` (the corridor comes from `build_route`, not from the ring), `away` and `fallen`.
 - **The held-node columns are not a score.** `plan mesafesi`, `tutulan = en yakın` and
   `daha yakını vardı` are defined against the held node, so any change to how the pilot advances
   moves them by construction. `junctions` and distinct nodes inflate the same way. Judge such an

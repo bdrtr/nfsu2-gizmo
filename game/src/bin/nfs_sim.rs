@@ -934,7 +934,69 @@ async fn run() {
         // The width a segment has to exceed before it is split, as a multiple of the step.
         let gap_at: f32 =
             knob("NFS_FILLGAPS").and_then(|v| v.parse().ok()).unwrap_or(GAP_AT).max(1.0);
-        let ring = if knob("NFS_FILLGAPS").is_some_and(|v| v != "0") {
+        // **`NFS_WALKGAPS=<oran>`: bridge only the holes, and bridge them along the roads.**
+        //
+        // The two forms already measured both lerp: `NFS_REDENSIFY` re-samples the whole ring and
+        // `NFS_FILLGAPS` re-samples the wide segments, and both draw a straight line across ground
+        // the pull knew nothing about. Walking instead has been measured once, as a replacement for
+        // the *entire* ring (`route::along_roads`), and it lost — a committed shortest path over a
+        // graph that joins parallel carriageways crosses joins a car cannot take.
+        //
+        // Neither of those is this. Asked of the holes alone, the graph answers well: over the
+        // eight routes every wide gap has a network path between its ends, and the road it costs is
+        // a median ~1.2 times the straight line — `Paths4102`'s seven gaps are all 0.9-1.5×, and
+        // `Paths4121`'s 228 m hole, the one where a fifth of that route's steps are spent stuck, is
+        // **373 m by road, ×1.6, eight nodes**. That is a road the ring skipped, not a detour.
+        //
+        // The ratio is the guard, and it is the same guard `along_roads` needed: a leg whose road
+        // is many times its chord is the graph going round the houses, so above `NFS_WALKGAPS` the
+        // hole is left exactly as it was rather than filled with a detour.
+        let ring = if let Some(max_ratio) =
+            knob("NFS_WALKGAPS").and_then(|v| v.parse::<f32>().ok()).filter(|v| *v > 0.0)
+        {
+            let mut out: Vec<Vec3> = Vec::with_capacity(pulled.len());
+            let (mut filled, mut skipped) = (0usize, 0usize);
+            for pair in pulled.windows(2) {
+                out.push(pair[0]);
+                let chord = (pair[1].x - pair[0].x).hypot(pair[1].z - pair[0].z);
+                if chord <= step * gap_at {
+                    continue;
+                }
+                let walk = net
+                    .nearest(pair[0])
+                    .zip(net.nearest(pair[1]))
+                    .and_then(|(a, b)| net.path(a, b))
+                    .map(|ids| {
+                        let pts: Vec<Vec3> =
+                            ids.iter().filter_map(|j| net.node(*j)).map(|n| n.at).collect();
+                        let road: f32 = pts
+                            .windows(2)
+                            .map(|q| (q[0].x - q[1].x).hypot(q[0].z - q[1].z))
+                            .sum();
+                        (pts, road)
+                    });
+                match walk {
+                    Some((pts, road)) if road <= chord * max_ratio && pts.len() > 2 => {
+                        filled += 1;
+                        // The ends are already in the ring; only what lies between them is new.
+                        out.extend(pts.iter().skip(1).take(pts.len() - 2).copied());
+                    }
+                    _ => skipped += 1,
+                }
+            }
+            if let Some(last) = pulled.last() {
+                out.push(*last);
+            }
+            println!(
+                "   boşluklar yol yürünerek dolduruldu: {filled} aralık · {skipped} aralık \
+                 ×{max_ratio:.1}'i aştığı için bırakıldı · {} waypoint · en geniş {:.0} m",
+                out.len(),
+                out.windows(2)
+                    .map(|q| (q[0].x - q[1].x).hypot(q[0].z - q[1].z))
+                    .fold(0.0f32, f32::max)
+            );
+            out
+        } else if knob("NFS_FILLGAPS").is_some_and(|v| v != "0") {
             let mut w = pulled;
             for _ in 0..8 {
                 let mut out: Vec<Vec3> = Vec::with_capacity(w.len());
@@ -1166,6 +1228,50 @@ async fn run() {
                 None => println!("   w{i:>3} → graf boş"),
             }
         }
+        // **And what the graph says about the holes the pull left.** A gap in the ring is either a
+        // stretch of road nobody described or a place the road does not go, and only the network
+        // can tell those apart: walk it between the two ends and compare what it costs with the
+        // straight line across. A ratio near one is a road the ring simply skipped; a ratio of
+        // twenty is the trap `along_roads` fell into, where a committed shortest path crosses
+        // joins a car cannot take.
+        let mut gaps = 0usize;
+        for (i, pair) in waypoints.windows(2).enumerate() {
+            let chord = (pair[1].x - pair[0].x).hypot(pair[1].z - pair[0].z);
+            if chord <= step * 1.5 {
+                continue;
+            }
+            gaps += 1;
+            let ends = net.nearest(pair[0]).zip(net.nearest(pair[1]));
+            let walk = ends.and_then(|(a, b)| net.path(a, b)).map(|ids| {
+                let road: f32 = ids
+                    .windows(2)
+                    .filter_map(|q| {
+                        let (x, y) = (net.node(q[0])?, net.node(q[1])?);
+                        Some((x.at.x - y.at.x).hypot(x.at.z - y.at.z))
+                    })
+                    .sum();
+                // How far the walked road strays from the course while bridging the hole.
+                let off = ids
+                    .iter()
+                    .filter_map(|j| net.node(*j))
+                    .map(|n| corridor.locate(n.at).map_or(f32::INFINITY, |f| f.distance))
+                    .fold(0.0f32, f32::max);
+                (ids.len(), road, off)
+            });
+            match walk {
+                Some((hops, road, off)) => println!(
+                    "   aralık w{i}→w{} · kiriş {chord:>5.0} m · yolla {road:>6.0} m (×{:.1}) · \
+                     {hops} düğüm · koridordan en fazla {off:>5.0} m",
+                    i + 1,
+                    road / chord.max(1.0)
+                ),
+                None => println!(
+                    "   aralık w{i}→w{} · kiriş {chord:>5.0} m · graf bu iki ucu BAĞLAMIYOR",
+                    i + 1
+                ),
+            }
+        }
+        println!("   yarım adımdan geniş aralık: {gaps}");
         let total: usize = by_path.values().sum();
         println!(
             "   halkanın hangi hattın üstünde: {}",

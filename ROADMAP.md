@@ -6195,3 +6195,46 @@ sayısı ters yöne bakıyor, ve bir rota hepsinde birden çöküyor. Bu bir var
 **Ve alet düzeltildi ki bu bir daha unutulmasın:** `tools/sweep-columns.py` artık *ilerlemesi duran
 araba* ve *duruş payı* sütunlarını da basıyor. Bu ders bu dosyada iki kez öğrenildi — ikisi de bir
 kabulü geri almaya mal oldu — ve ikisinde de eksik olan şey ölçünün elde olmamasıydı.
+
+### Halkanın delikleri gerçekten yol, ama yürüyerek doldurmak çürüdü — hem de kendi rotasında (2026-08-21)
+
+**Önce olgu.** `NFS_RING` artık her geniş aralık için grafın iki ucu bağlayıp bağlamadığını da
+soruyor. Bağlıyor, ve ucuz bağlıyor:
+
+| rota | geniş aralık | yolla / kiriş oranları |
+|---|---|---|
+| 4102 | 7 | 0,9 · 1,0 · 1,2 · 1,2 · 1,3 · 1,4 · 1,5 — **hepsi ≤1,5** |
+| 4002 | 11 | 0,8 · 1,0 · 1,0 · 1,1 · 1,2 · 1,2 · 1,2 · 1,2 · **3,9 · 5,8** |
+| 4121 | 8 | 0,9 · 1,2 · **1,6** · 2,0 · 2,1 · 2,3 · 4,3 · 4,6 |
+
+4121'in kritik deliği — rotanın adımlarının beşte birinin harcandığı yer — **228 m kiriş, 373 m
+yolla, ×1,6, sekiz düğüm**. Yani halkanın delikleri, yolun gitmediği yerler değil; halkanın tarif
+etmediği yollar. Bu, çekmenin bir yan etkisi olarak zaten biliniyordu; şimdi grafın o yolları
+bildiği de ölçülü.
+
+**Sonra çürütme.** `NFS_WALKGAPS=<oran>`: yalnız geniş aralıkları, grafı yürüyerek doldur; oranı
+aşan aralığı olduğu gibi bırak. Bu ne `along_roads` (bütün halkayı yürüyordu, çürüdü) ne
+`NFS_FILLGAPS` (aralıkları düz lerp'liyordu, geri alındı) — üçüncü biçim, ve denenmemişti.
+
+**Ve tam da yazıldığı rotada kaybediyor:**
+
+| rota | 4001 | 4002 | 4021 | 4041 | 4061 | 4081 | 4102 | **4121** |
+|---|---|---|---|---|---|---|---|---|
+| kursta süre | = | = | −9,0 | −3,3 | **+10,9** | = | −0,2 | **−10,5** |
+| furthest | +2 | 0 | −1 | −51 | +8 | 0 | +29 | **−214 m** |
+
+4061 ve 4102'de kazanıyor, 4021/4041/4121'de kaybediyor, ve 4121'in kursta süresi %66,2 → %55,7.
+Deliği kapatmak o rotayı düzeltmiyor, kötüleştiriyor. `×2` ile `×3` birbirinin aynı çıkıyor, yani
+eşik de bir kaldıraç değil.
+
+**Ve bir okuma tuzağı daha, bu sefer benim yeni eklediğim sütunu da vuruyor.** Bu kol halkanın
+**boyunu** değiştiriyor (4021: 65 → 92, 4102: 104 → 138, 4121: 130 → 170 waypoint). Hem "geçilen
+waypoint" hem de "ilerlemesi duran araba" halkaya karşı sayılıyor — daha çok waypoint, hem geçilecek
+daha çok şey hem de kazanma fırsatı demek. Yani bu kolun +82 waypoint'i ve −5 duran arabası
+**kanıt değil**. ROADMAP bunu `NFS_REDENSIFY` için zaten yazmıştı ("waypoint sayısı burada hakemlik
+edemez"); yeni durma sütunu aynı kusuru miras alıyor ve `tools/sweep-columns.py` artık ikisini de
+söylüyor.
+
+Halkanın boyunu değiştiren bir kol yalnız şunlarla yargılanır: `furthest`, kavşak, ayrık düğüm,
+kursta süre (koridor `build_route`'tan gelir, halkadan değil), `away`, `fallen`. Hepsi bu kolda ya
+düz ya aşağı.
