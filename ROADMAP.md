@@ -5920,3 +5920,40 @@ duruyor: kavşak sayımı, `strayed`, güverte, hepsi "tutulan düğüm" üzerin
 Bir sonraki ölçüm bu olmalı — ve dikkat: mesafe büyük olduğunda arabanın *daha yakın* bir düğüm
 olup olmadığı ayrıca sorulmalı, çünkü "yanlış düğümü tutuyor" ile "orada düğüm yok" farklı
 şeyler ve bu tablo ikisini ayırmıyor.
+
+### Ölçüldü: pilot yanlış düğümü tutuyor, ve daha yakını genelde yarış hattında (2026-08-21)
+
+Bir önceki kaydın sorduğu ayrım — "yanlış düğümü tutuyor" mu, "orada düğüm yok" mu — `NFS_HELD=1`
+ile ölçüldü. Her adımda grafın planda en yakın düğümü aranıyor ve tutulanla karşılaştırılıyor:
+
+| rota | tutulan = en yakın | 5 m'den daha yakını VARDI | onun yarış hattında olma oranı | tutulana ort. | en yakına ort. |
+|---|---|---|---|---|---|
+| 4001 | %88,0 | %6,9 | **%100,0** | 14,5 m | 13,3 m |
+| 4002 | %31,7 | **%55,7** | %77,9 | **54,5 m** | **12,6 m** |
+| 4021 | %57,5 | %34,3 | %88,1 | 30,7 m | 10,9 m |
+| 4041 | %65,0 | %22,9 | %87,9 | 15,5 m | 10,3 m |
+| 4061 | %77,4 | %17,2 | %93,5 | 32,0 m | 19,0 m |
+| 4081 | %46,3 | **%46,3** | %20,6 | 33,5 m | 16,5 m |
+| 4102 | %67,4 | %28,6 | **%100,0** | 47,1 m | 36,5 m |
+| 4121 | %44,2 | **%49,0** | %24,9 | **81,8 m** | 16,2 m |
+
+**Cevap birinci okuma.** Graf orada düğüm sunuyor: 4002'de araba tuttuğu düğümden ortalama 54,5 m
+uzaktayken en yakın düğüm 12,6 m'de, 4121'de 81,8 m'ye karşı 16,2 m. Ve adımların yarıya yakınında
+5 m'den daha yakın bir düğüm var.
+
+**Üstelik o düğüm genelde doğru olanı.** 4001, 4021, 4041, 4061 ve 4102'de daha yakın düğümün
+**%88-100'ü yarış hattında** (`mark_line`, 40 m). Yani mesele paralel şeride kayma değil; pilot
+hattın üstündeki daha yakın bir düğümü görmezden geliyor ve geride kalmış birini tutmaya devam
+ediyor.
+
+4081 ve 4121 ayrı duruyor: orada daha yakın düğümün yalnız %21-25'i hatta, yani o iki rotada araba
+gerçekten yarışın hattından çıkmış — ki 4121 için bu zaten biliniyordu (düğüm 110→111, 21 sapmanın
+21'inde hatta kalan bir kol vardı ve alınmadı).
+
+**Neden önemli:** ölçülen hemen her şey "tutulan düğüm" üzerinden tanımlı — kavşak sayısı,
+`strayed`, güverte sapması, `step_avoiding`'in maliyeti. Pilot yarışın ortalama yarım şehir bloğu
+gerisindeki bir düğümü tutuyorsa, o sayıların hepsi kaymış bir referansa göre okunuyor.
+
+**Sıradaki iş:** pilotun düğüm ilerletme kuralı. Dikkat: "en yakın düğüme atla" diye bir kural
+denenmemeli — grafın kendi başlığı paralel şeritleri birbirine bağladığını söylüyor, ve `guide_to`
+ile `along_roads` tam olarak o yüzden kaybetti. Ölçülecek şey, ilerletmenin neden geride kaldığı.

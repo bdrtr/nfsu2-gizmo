@@ -1357,6 +1357,15 @@ async fn run() {
     // node it holds and never beyond 30 unless it is holding the wrong one.
     let mut plan_far = [0usize; 3];
     let mut plan_sum = 0.0f64;
+    // **`NFS_HELD=1`: is the pilot holding the wrong node, or is there no nearer one?**
+    //
+    // "The car is 80 m from the node it holds" has two readings and they want opposite work. If a
+    // nearer node exists the pilot is holding the wrong one and the walk is the thing to fix; if
+    // none does, the graph simply has no node there and the distance is a fact about the file.
+    // Costs a scan of the graph per step, so it is asked when asked for.
+    let held_ask = knob("NFS_HELD").is_some();
+    let (mut held_nearer, mut held_nearer_online, mut held_is_nearest) = (0usize, 0usize, 0usize);
+    let mut nearest_sum = 0.0f64;
     // Which node was being held when it went wrong. A field percentage says how much; this says
     // where, and a residue concentrated on a handful of nodes is a different finding from one
     // spread over the whole route.
@@ -1825,6 +1834,27 @@ async fn run() {
                 if plan <= DECK_NEAR {
                     near_steps += 1;
                     near_out += usize::from(dy > DECK_OUT);
+                }
+                if held_ask {
+                    // Plan view, because everything the pilot does is: `step_avoiding`'s cost, the
+                    // node advance, `Corridor::locate`. A 3-D nearest would answer a question
+                    // nobody in this loop is asking.
+                    let mut best = (f32::INFINITY, u32::MAX);
+                    for j in 0..net.len() as u32 {
+                        if let Some(m) = net.node(j) {
+                            let d = (p.position.x - m.at.x).hypot(p.position.z - m.at.z);
+                            if d < best.0 {
+                                best = (d, j);
+                            }
+                        }
+                    }
+                    nearest_sum += f64::from(best.0);
+                    if best.1 == pilot.node().unwrap_or(u32::MAX) {
+                        held_is_nearest += 1;
+                    } else if best.0 + 5.0 < plan {
+                        held_nearer += 1;
+                        held_nearer_online += usize::from(net.on_line_at(best.1));
+                    }
                 }
                 if dy > DECK_OUT {
                     deck_out += 1;
@@ -3375,6 +3405,17 @@ async fn run() {
             100.0 * plan_far[1] as f32 / deck_steps.max(1) as f32,
             100.0 * plan_far[2] as f32 / deck_steps.max(1) as f32
         );
+        if held_ask {
+            println!(
+                "   tutulan düğüm en yakını mı: adımların %{:.1}'inde evet · %{:.1}'inde 5 m'den \
+                 daha yakın bir düğüm VARDI ve onun %{:.1}'i yarış hattında · en yakın düğüme \
+                 ortalama {:.1} m",
+                100.0 * held_is_nearest as f32 / deck_steps.max(1) as f32,
+                100.0 * held_nearer as f32 / deck_steps.max(1) as f32,
+                100.0 * held_nearer_online as f32 / held_nearer.max(1) as f32,
+                nearest_sum / deck_steps.max(1) as f64
+            );
+        }
         // The nodes the residue sits on, worst first, with what the city offers at each: the road
         // candidates the solve chose from and the drivable ones it could not see.
         let mut worst_nodes: Vec<_> = deck_by_node.into_iter().collect();
