@@ -1522,11 +1522,32 @@ async fn run() {
             // median distance to the nearest waypoint is **28 m** and only 2 of 49 are within the
             // corridor's own half-width. So the corridor departure is when it became visible; this
             // is when it happened. Same three-second rule, asked of the line instead.
+            //
+            // **To the line's SEGMENTS, not to its vertices** — the first version asked the
+            // distance to the nearest waypoint and that is a different question wherever the ring
+            // is coarse. The pull stretches it: 231 m between two waypoints on `Paths4121`, 97 m
+            // on `Paths4061`. A car driving perfectly down the middle of a 231 m leg is 115 m from
+            // both of its ends and none of that is straying. Measured with the vertex test, three
+            // of the field's five worst "places" turned out to be the 25 m circle around one
+            // waypoint rather than anywhere a car did anything: on `Paths4121` all eight cars
+            // recorded the loss on the same metre while doing 60, 60, 61, 63, 66, 76, 80 and
+            // 81 km/h, spread over 11.7 s. The instrument was drawing the map.
             {
                 let here = Vec3::new(p.position.x, 0.0, p.position.z);
+                let flat2 = |w: &Vec3| Vec3::new(w.x, 0.0, w.z);
                 let d = waypoints
-                    .iter()
-                    .map(|w| (Vec3::new(w.x, 0.0, w.z) - here).length())
+                    .windows(2)
+                    .map(|seg| {
+                        let (a, b) = (flat2(&seg[0]), flat2(&seg[1]));
+                        let ab = b - a;
+                        let len2 = ab.length_squared();
+                        let t = if len2 <= f32::EPSILON {
+                            0.0
+                        } else {
+                            ((here - a).dot(ab) / len2).clamp(0.0, 1.0)
+                        };
+                        (here - (a + ab * t)).length()
+                    })
                     .fold(f32::INFINITY, f32::min);
                 if d > OFF_LINE {
                     off_line_for[k] += FIXED_DT;

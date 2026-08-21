@@ -5526,3 +5526,50 @@ takılan sayısını değiştirmeden duruş oranını düşürüyor ve kavşağ�
 
 Yani günün yanlış kabulü yalnız boşluk doldurmaydı, ve o geri alındı. `BASELINE-SEKIZ-ROTA.md`'ye
 dördüncü tablo, uyarısıyla birlikte yazıldı.
+
+### Beş yer paralel olarak izlendi — ve ölçüm aletim haritayı kendisi çiziyormuş (2026-08-21)
+
+Beş yerin her biri için bir izci ve arkasından o izciyi **çürütmekle görevli** bir şüpheci
+çalıştırıldı (on ajan). Üç mekanizma doğrulamayı geçti, ikisi düştü ve yerine düzeltilmiş
+mekanizma kondu. İki gerçek kusur çıktı, biri benim aletimde.
+
+**1. `OFF_LINE` mesafeyi halkanın KÖŞELERİNE ölçüyordu, kenarlarına değil.**
+
+Çekme halkayı esnetiyor (4121'de iki waypoint arası **231 m**, 4061'de 97 m, adım 40 m). 231 m'lik
+bir bacağın tam ortasından kusursuz süren araba iki ucundan da 115 m uzaktır — ve bunun hiçbiri
+sapma değildir. Sonuç: dünkü "beş yer" haritasının üçü, bir waypoint'in çevresindeki **25 m'lik
+çember**ti. `Paths4121`'de sekiz arabanın sekizi aynı metrede kaydedilmişti — 60, 60, 61, 63, 66,
+76, 80 ve 81 km/h'de ve 11,7 saniyeye yayılmış hâlde. Aynı yerde olan tek şey daireydi.
+
+Düzeltildi: mesafe artık halkanın **kenar parçalarına** ölçülüyor. Harita hemen oynadı —
+`Paths4061` 6 arabadan 3'e indi ve yeri **50 m öteye, ajanın işaret ettiği dirseğe** taşındı
+(düğüm 40'ta 52,7°'lik bir dirsek, 52 m yarıçapında hiç waypoint yok). `Paths4102` 13 m,
+`Paths4081` 7 m oynadı. `Paths4121` yerinde kaldı, ve bu da bir cevap: orada araba gerçekten
+hattan 25 m uzakta, çünkü 231 m'lik kiriş yolu takip etmiyor.
+
+**2. `Network::of` düğüm kotlarını HAT HAT çözüyor, ve hatlar arası bağlantı iki güverteyi
+sessizce birleştirebiliyor.**
+
+`Paths4081`'de arabalar **bir güverte yukarıda** sürüyor, hem de 1,5 km boyunca. Kendi koşumla
+doğrulandı (`NFS_WATCH=0 NFS_TRACE=2`), arabanın kotu ile tuttuğu düğümün kotu:
+
+| t | araba y | tutulan düğüm | düğüm y | fark |
+|---|---|---|---|---|
+| 18,0 | 25,78 | 53 | 25,77 | **+0,01** |
+| 22,0 | 17,54 | 233 | 14,26 | +3,28 |
+| 28,0 | 9,18 | **55** | 5,71 | **+3,47** |
+| 34,0 | 12,71 | 239 | 5,23 | +7,48 |
+| 36,0 | 15,25 | 205 | 5,38 | **+9,87** |
+| 42,0 | 17,16 | 241 | 5,39 | **+11,77** |
+
+`under [5,36 · 11,22 · 14,60]` — üç güverte, araba en üstünde, düğüm en altında. Sapma **hat
+sınırlarında** başlıyor (düğüm 55, +3,47) ve bir daha kapanmıyor; koşu boyunca arabanın bastığı
+yüzeyle altındaki yüzey arasındaki en küçük mesafe **2,66 m**, yani inecek rampa yok.
+
+**Ve hiçbir şey fark etmiyor, çünkü pilotun kullandığı her test plan görünümünde:**
+`step_avoiding`'in maliyeti `(x,z)` farkı, düğüm ilerlemesi `flat(...)`, `Corridor::locate`
+bilerek kotsuz. Araba bir üst geçitte, koridorun *üstünde* uçarken iz "koridora 2,6 m" basıyor.
+Kavşak 205'in dört kolu da y = 3,8-5,6'da; araba 15,25'te.
+
+Bu, yarışın kendi hattının **hangi güvertede** olduğu sorusunu açıyor: `route::follow` her hat
+için "en az tırmanan diziyi" seçiyor, ama hatlar arası bağlantıya kimse bakmıyor.
