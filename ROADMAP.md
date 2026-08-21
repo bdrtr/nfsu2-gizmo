@@ -6664,3 +6664,47 @@ olduğunu söylüyor, ve halkanın kirişi 103 m'ye kadar hiçbir şeyin üstün
 İkisi çelişmiyor: doldurma halkanın boyunu değiştiriyor (iki sütunu diskalifiye ediyor) ve
 yoğunluktan bağımsız sütunlar da düştü. Sıradaki soru artık "delik gerçek mi" değil — o kapandı —
 **"neden doğru yolu koyduğumuzda araba daha kötü sürüyor"**.
+
+### Halkanın geometrisini düzeltmek onu daha kötü sürdürüyor — ikinci kez, başka bir yapıyla (2026-08-21)
+
+Bir önceki kayıt açık soruyu şöyle bırakmıştı: delik gerçek, yolu da biliyoruz, **neden doğru yolu
+koyunca araba daha kötü sürüyor?** İlk şüphe ölçüldü ve doğru çıktı — sonra çaresi de ölçüldü ve
+işe yaramadı.
+
+**Şüphe doğruydu: ham doldurma halkayı bozuyor.** `Paths4121`'de graf düğümlerini oldukları gibi
+basmak —
+
+| | waypoint | uzunluk | **kendi üstüne katlanma** | 40 km/h altı | **60 altı** |
+|---|---|---|---|---|---|
+| **kalan** | 130 | 5.207 m | **0** | 3 | **16** |
+| ham doldurma | 170 | 5.780 m | **1** | 6 | **31** |
+| **yeniden örneklenmiş + korumalı** | 156 | 5.730 m | **0** | 3 | **24** |
+
+Düğümler bir yolun *tarifi*, sürüş çizgisi değil: yolun üstünde salınıyorlar ve halkanın adımı 40 m
+iken 30 m aralıklılar. Eklenen parça adıma göre yeniden örneklendi ve geri dönen bir doldurma
+reddedildi (`route::along_roads`'un ihtiyaç duyduğu korumanın aynısı). Katlanma gitti, 40 km/h altı
+viraj yarıya indi, 60 altı 31'den 24'e.
+
+**Ve daha kötü sürdü.**
+
+| rota | kursta süre: kalan → ham → korumalı | furthest |
+|---|---|---|
+| **4121** | %66,2 → %55,7 → **%45,4** | 787 → 573 → **368 m** |
+| 4021 | %94,2 → %85,2 → %77,8 | 609 → 608 → 615 |
+| 4061 | %62,0 → **%72,9** → %62,0 | 1.103 → 1.111 → 1.103 |
+| **ALAN** | **%74,3** → %72,8 → **%70,0** | 5.923 → 5.696 → **5.525** |
+
+Kursu hiç bırakmayan 14 → 11, kavşak 1.665 → 1.493. Geometriyi düzeltmek, hedeflediği rotada
+sonucu **daha da** kötüleştirdi.
+
+**Bu ikinci kez oluyor ve ilki kayıtta duruyor.** `route::along_roads` için yazılmıştı: *"Ring it
+draws is very nearly perfect as geometry … The driving is worse anyway."* O zaman sebep, taahhüt
+edilmiş bir en-kısa-yolun arabanın geçemeyeceği bağlantılardan geçmesiydi. Burada o açıklama
+geçerli değil — doldurulan yol şerit dosyasının %98'inde onaylı gerçek yol, ve halkanın şekli
+ölçülerek düzeltildi.
+
+**Yani halkanın *şekli* de kaldıraç değil.** Bugün üç aile kapandı: işaretçinin kol seçimi (dört
+varyant), grafın kenarları (`drop_climbing`, `NFS_DEDUP`), ve şimdi halkanın onarımı (`REDENSIFY`,
+ham `WALKGAPS`, yeniden örneklenmiş `WALKGAPS`). Üçü de aynı şeyi söylüyor: **`Paths4121`'de
+arabaların kursta kalmamasının sebebi ne tarifin geometrisi, ne grafın kenarları, ne de pilotun
+işaretçisi.** Geriye bakılmamış tek yer, halkanın *nereden geldiği*: olay anahatı, 6 km'de 17 köşe.

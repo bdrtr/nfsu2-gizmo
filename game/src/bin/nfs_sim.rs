@@ -1007,9 +1007,62 @@ async fn run() {
                     });
                 match walk {
                     Some((pts, road)) if road <= chord * max_ratio && pts.len() > 2 => {
-                        filled += 1;
-                        // The ends are already in the ring; only what lies between them is new.
-                        out.extend(pts.iter().skip(1).take(pts.len() - 2).copied());
+                        // **Raw graph nodes make a worse ring than the hole they fill.** Measured on
+                        // `Paths4121`: inserting them as they come takes the ring's sub-60 km/h
+                        // corners from **16 to 31** and its sub-40 from 3 to 6, and folds the ring
+                        // back on itself once where it folded nowhere before. Nodes are a road's
+                        // description, not a driving line — they wander across it and they are 30 m
+                        // apart where the ring's own step is 40.
+                        //
+                        // So the inserted stretch is resampled to the step, and a fill that doubles
+                        // back is refused outright — the same guard `route::along_roads` needed when
+                        // a leg turned straight back out of where the last one arrived.
+                        // `NFS_WALKRAW=1` puts the raw nodes back, which is the arm that was
+                        // measured and lost.
+                        let raw = knob("NFS_WALKRAW").is_some_and(|v| v != "0");
+                        let inner: Vec<Vec3> = if raw {
+                            pts.iter().skip(1).take(pts.len() - 2).copied().collect()
+                        } else {
+                            // Walk the polyline and drop a point every `step` metres along it.
+                            let (mut acc, mut fit) = (0.0f32, Vec::new());
+                            for q in pts.windows(2) {
+                                let d = (q[1].x - q[0].x).hypot(q[1].z - q[0].z);
+                                let mut t = 0.0;
+                                while acc + (d - t) >= step {
+                                    t += step - acc;
+                                    acc = 0.0;
+                                    fit.push(q[0].lerp(q[1], (t / d).clamp(0.0, 1.0)));
+                                }
+                                acc += d - t;
+                            }
+                            // Never end within half a step of the far end: that is the kink.
+                            while fit.last().is_some_and(|p: &Vec3| {
+                                (p.x - pair[1].x).hypot(p.z - pair[1].z) < step * 0.5
+                            }) {
+                                fit.pop();
+                            }
+                            fit
+                        };
+                        // A fill that turns back on itself is worse than the hole. Reject on the
+                        // sharpest turn the inserted run makes, ends included.
+                        let mut run: Vec<Vec3> = vec![pair[0]];
+                        run.extend(inner.iter().copied());
+                        run.push(pair[1]);
+                        let folds = run.windows(3).any(|w| {
+                            let (u, v) = (
+                                Vec3::new(w[1].x - w[0].x, 0.0, w[1].z - w[0].z),
+                                Vec3::new(w[2].x - w[1].x, 0.0, w[2].z - w[1].z),
+                            );
+                            u.length() > 1.0
+                                && v.length() > 1.0
+                                && u.normalize().dot(v.normalize()) < -0.5
+                        });
+                        if folds && !raw {
+                            skipped += 1;
+                        } else {
+                            filled += 1;
+                            out.extend(inner);
+                        }
                     }
                     _ => skipped += 1,
                 }
