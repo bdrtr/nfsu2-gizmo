@@ -6946,3 +6946,42 @@ halka onu artırıyor.
 **Alan sütunları karar veremiyor:** kavşak +41, `furthest` −142, ayrık düğüm +51 — üçü de tek rota
 tarafından taşınıyor. Waypoint ve durma sütunları halkanın boyu değiştiği için diskalifiye
 (215'e karşı 130). Geriye kursta süre (+2,0) ve kursu hiç bırakmayan (+5) kalıyor, ikisi de karışık.
+
+### Yürünmüş halka adıma göre aralanınca günün en iyi kolu oluyor (2026-08-21)
+
+Yürünmüş halkanın neden `Paths4021`'i öldürdüğü soruldu. Uzunluk değil (2.562 → 2.656 m, %3,7), ve
+yer de değil — **aralık.** `along_roads` grafın kendi düğümlerini döndürüyor, ve bir yolun düğümleri
+sürüş çizgisi değil: medyan 30 m aralıklılar ama kavşakta yığılıyorlar, halkada **1-2 m aralıklı
+ardışık noktalar** kalıyor. İki metre içindeki üç nokta keyfi bir keskin açı yapıyor ve kursun kendi
+hız sınırı onu firkete okuyor:
+
+| | en dar aralık | 40 km/h altı | 60 altı | 80 altı |
+|---|---|---|---|---|
+| 4021 koridor halkası | 0 m | **0** | 12 | 15 |
+| 4021 yürünmüş | **1 m** | **10** | 20 | 36 |
+| **4021 yürünmüş + adıma aralanmış** | **25 m** | **0** | **9** | **14** |
+| 4081 yürünmüş | 2 m | 7 | 13 | 36 |
+| **4081 yürünmüş + aralanmış** | 6 m | **0** | **5** | **14** |
+
+`NFS_WALKFIT=1` yay uzunluğuna göre yeniden aralıyor: şekli ve uzunluğu koruyor, yalnız yığılmayı
+atıyor. Sonuç, koridor halkasından **da** düzgün bir halka — ve waypoint sayısı koridor halkasınınkiyle
+neredeyse aynı (rota başına −1 ile +14 arası), yani hiçbir sütun diskalifiye değil.
+
+| | waypoint | kursta süre | hiç bırakmayan | ilerlemesi duran | duruş payı | **kursta kalan nüfus** |
+|---|---|---|---|---|---|---|
+| **kalan** | 1.451 | %74,3 | 14 | 30 | %31,6 | 14 / 262 / **18,7** |
+| yürünmüş + aralanmış, 1,8 | 1.454 | **%77,8** | 19 | 22 | %26,2 | 19 / 422 / 22,2 |
+| **yürünmüş + aralanmış, 0,9** | **1.643** | %74,1 | **23** | **25** | **%22,5** | **23 / 752 / 32,7** |
+
+**0,9'da her sütun doğru yönde:** alan waypoint'i **+192** (tek rota taşımıyor), kursta kalan araba
+**+9** (tek rota taşımıyor), duran araba 30 → 25, duruş payı %31,6 → %22,5, ve kursta kalan nüfusun
+araba başına ilerlemesi 18,7 → **32,7**. Rota rota: `Paths4001` 1 → **8** araba, `Paths4081` 0 → **8**
+ve koridorda geçen süresi **%100,0**, 4061 +48 waypoint, 4002 +63, 4102 +29.
+
+**Ve `Paths4021` yine düşüyor** — 6 araba → 0, kursta süre %94,2 → %58,8 — firketeleri sıfıra
+indirildiği hâlde. Yani o rotanın sebebi ne aralık, ne katlanma, ne yığılma, ne karşı şerit, ne de
+firkete yoğunluğu. Beş hipotez, beşi de ölçülüp elendi. `Paths4121` de kaybediyor (%66,2 → %50,9).
+
+Varsayılan yapılmadı. Ama bu kol, günün ilk kez **waypoint, kursta kalan araba, duran araba ve nüfus
+ilerlemesinin dördünde birden** kazanan kolu, ve halkanın boyu değişmediği için sayıları
+tartışmasız.

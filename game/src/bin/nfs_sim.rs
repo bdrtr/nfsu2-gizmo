@@ -822,6 +822,41 @@ async fn run() {
         let (w, chords) = city::along_roads(&net, &coarse, step, detour, |a, b| {
             !blocked.contains(&(a, b)) && (!only || (on_course(a) && on_course(b)))
         });
+        // **`NFS_WALKFIT=1`: re-space the walked ring at the step.**
+        //
+        // The walk returns the graph's own nodes, and a road's nodes are not a driving line: they
+        // sit a median 30 m apart but at a junction they crowd, and the ring comes out with
+        // **consecutive points 1-2 m apart**. Three points inside two metres make an arbitrary
+        // angle, and the course's own speed limit reads it as a hairpin — on `Paths4021` the walked
+        // ring imposes a sub-40 km/h limit at **ten** waypoints where the chord ring imposes it at
+        // **none**, on a 2.5 km course. That is the route the walked ring loses hardest, and this
+        // is the difference the numbers point at.
+        //
+        // Re-spacing by arc length keeps the ring's shape and its length and throws away only the
+        // crowding. Off by default.
+        let w = if knob("NFS_WALKFIT").is_some_and(|v| v != "0") && w.len() > 2 {
+            let (mut out, mut acc) = (vec![w[0]], 0.0f32);
+            for q in w.windows(2) {
+                let d = (q[1].x - q[0].x).hypot(q[1].z - q[0].z);
+                if d < 1e-3 {
+                    continue;
+                }
+                let mut t = 0.0;
+                while acc + (d - t) >= step {
+                    t += step - acc;
+                    acc = 0.0;
+                    out.push(q[0].lerp(q[1], (t / d).clamp(0.0, 1.0)));
+                }
+                acc += d - t;
+            }
+            if let Some(last) = w.last() {
+                out.push(*last);
+            }
+            println!("yürünmüş halka adıma göre yeniden aralandı: {} → {} waypoint", w.len(), out.len());
+            out
+        } else {
+            w
+        };
         // **The caution this inherits, measured rather than assumed.** A committed shortest path
         // over this graph crosses joins a car cannot take — the graph links carriageways that
         // merely run beside each other, which is why `guide_to` was refuted in the driving role
