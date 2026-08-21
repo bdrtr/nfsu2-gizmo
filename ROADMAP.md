@@ -6908,3 +6908,41 @@ yapışmıyor; doğru şeride yapışıyor ve arabalar yine de geride kalıyor.
 kursta kalan 14 → 27 araba, toplamları 262 → 509 waypoint, araba başına 18,7 → 18,9, duran araba
 30 → 31. Varsayılan değil, çünkü 4021 orada 6/138'den 5/41'e düşüyor — ve artık sebebinin ne
 *halkanın aralığı* ne de *karşı şerit* olduğu biliniyor.
+
+### İki yol-türevli halka yan yana: yürünmüş halka geri dönüyor, ve aynı kapıya çarpıyor (2026-08-21)
+
+`NFS_WALKLINE=1` — halkayı anahat köşeleri arasında **ağda yürüyerek** kuran, 2026-08-20'de
+çürütülmüş `route::along_roads` — bugünkü çekmeyle birlikte ölçüldüğünde **deliksiz** bir halka
+üretiyor: `Paths4121`'de 215 waypoint, en büyük aralık **43 m** (adım 40), 60 m'den geniş **sıfır**
+aralık, ve çekmenin taşıdığı yalnız 2 waypoint (en fazla 14 m). O gün çürütülürken sabitler yeniden
+süpürülmemişti — bugünün dersi tam olarak buydu, o yüzden yeniden soruldu.
+
+**Ve lookahead bu halkada ters yöne gidiyor.** Şerit halkasında 1,8 → 0,7 kazandırıyordu; yürünmüş
+halkada tam tersi: kursta kalan araba 1,8'de **19**, 0,9'da 15, 0,7'de 13. Kayıttaki
+*"`LOOKAHEAD_PER_SPEED` tersine döndü"* gözlemi üçüncü halkada da geçerli — sabit halkaya bağlı, ve
+her yeni halka kendi süpürmesini istiyor.
+
+**İki halka, aynı iki rotada karşıt sonuç:**
+
+| kol | 4001 | **4021** | **4081** | kursta süre | hiç bırakmayan |
+|---|---|---|---|---|---|
+| **kalan** (koridor halkası) | 1 / 42 | **6 / 138** | 0 / 0 | %74,3 | 14 |
+| **yürünmüş** (`WALKLINE`, 1,8) | 0 / 0 | **0 / 0** | **8 / 434** | %76,3 | 19 |
+| **şerit ikili** (`PULLLANE` + 0,7) | **7 / 231** | 5 / 41 | **8 / 152** | %78,0 | 27 |
+
+*(kursu hiç bırakmayan araba / o arabaların topladığı waypoint)*
+
+Yürünmüş halka `Paths4081`'i günün en iyi tek-rota sonucuna taşıyor — sıfırdan sekiz arabaya,
+kursta süre %53,9 → **%99,7**, o sekizin topladığı **434 waypoint** — ve `Paths4021` ile
+`Paths4001`'i sıfıra indiriyor. Şerit ikilisi daha dengeli: üç rotanın üçünde de kazanıyor ya da
+tutuyor.
+
+**Yani kapı tek ve iki halkada da aynı:** `Paths4021`, yoldan türetilmiş **her** halkayı
+cezalandıran rota, ve koridor halkasında alanın en iyi sonuçlarından birini veriyor (%94,2, 6
+araba). Bugünün geri kalanı gibi, sebebi geometride değil — ne aralık, ne katlanma, ne yığılma, ne
+karşı şerit ayırt ediyor. Ayırt eden tek ölçü işaretçinin gecikmesi, ve 4021'de yoldan türetilmiş
+halka onu artırıyor.
+
+**Alan sütunları karar veremiyor:** kavşak +41, `furthest` −142, ayrık düğüm +51 — üçü de tek rota
+tarafından taşınıyor. Waypoint ve durma sütunları halkanın boyu değiştiği için diskalifiye
+(215'e karşı 130). Geriye kursta süre (+2,0) ve kursu hiç bırakmayan (+5) kalıyor, ikisi de karışık.

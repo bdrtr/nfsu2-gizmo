@@ -987,14 +987,40 @@ async fn run() {
         }
         // A neighbour that was inside can be pushed out by someone else's displacement; one
         // correction pass, applied the old way, puts it back without re-opening the spreading.
+        // **`NFS_LANEMIN=<m>`: refuse a snap that bunches the ring.**
+        //
+        // Snapping each waypoint to its nearest lane point moves them independently, and where a
+        // lane runs close to several of them they land on top of each other: measured, the lane
+        // pull takes the ring's narrowest gap to **0 m on every one of the eight routes** and the
+        // number of consecutive pairs under 10 m from 0-4 to 1-7. That breaks the same assumption
+        // `GAP_AT` was written to protect from the other side — `PASSED_NEAR` releases a waypoint
+        // driven past within 60 m and `REACHED` at 18, and both take for granted that waypoints are
+        // about a step apart. Four of them inside fifteen metres is a goal that advances four times
+        // in one car length.
+        //
+        // So a snap that would land within `m` of the waypoint before it is refused and the point
+        // stays where the corridor pull left it. The ring keeps its length, so every column stays
+        // comparable.
+        let lane_min: f32 = knob("NFS_LANEMIN").and_then(|v| v.parse().ok()).unwrap_or(0.0);
+        let mut prev_at: Option<Vec3> = None;
         let pulled: Vec<Vec3> = waypoints
             .iter()
             .zip(&shift)
             .map(|(w, d)| {
                 let p = *w + *d;
-                match lane_pull {
+                let out = match lane_pull {
                     Some(edge) => match lane_near(p) {
-                        Some((dd, q)) if dd > edge => q,
+                        Some((dd, q)) if dd > edge => {
+                            match prev_at {
+                                Some(b)
+                                    if lane_min > 0.0
+                                        && (q.x - b.x).hypot(q.z - b.z) < lane_min =>
+                                {
+                                    p
+                                }
+                                _ => q,
+                            }
+                        }
                         _ => p,
                     },
                     None => match corridor.locate(p) {
@@ -1005,7 +1031,9 @@ async fn run() {
                         }
                         _ => p,
                     },
-                }
+                };
+                prev_at = Some(out);
+                out
             })
             .collect();
         // **And what the pull did to the spacing.** Moving points one at a time can stretch the
@@ -3176,10 +3204,21 @@ async fn run() {
                         .any(|(j, o)| j + 5 < *i && plan(**w, *o).length() < 10.0)
                 })
                 .count();
+            // **And the narrowest gap, which nothing has ever printed.** The widest one is the
+            // stranded-goal failure; the narrowest is its mirror. `PASSED_NEAR` and `REACHED` both
+            // assume waypoints are about a step apart, so four of them bunched into fifteen metres
+            // is a goal that advances four times in one car length — or cycles.
+            let tight: Vec<f32> = waypoints
+                .windows(2)
+                .map(|q| (q[0].x - q[1].x).hypot(q[0].z - q[1].z))
+                .collect();
             println!(
                 "   halkanın şekli: {:.0} m uzunluk · {folds} yerde kendi üstüne katlanıyor \
-                 · {revisits} waypoint daha önce geçilmiş bir yere dönüyor",
-                total
+                 · {revisits} waypoint daha önce geçilmiş bir yere dönüyor · en dar aralık \
+                 {:.0} m, {} ardışık çift 10 m'den yakın",
+                total,
+                tight.iter().copied().fold(f32::MAX, f32::min),
+                tight.iter().filter(|d| **d < 10.0).count()
             );
         }
         let under = |kmh: f32| {
