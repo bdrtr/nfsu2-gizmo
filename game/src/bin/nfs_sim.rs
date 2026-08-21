@@ -1558,6 +1558,12 @@ async fn run() {
     // so the question is no longer the walk but the place. Keyed by the node the pilot holds,
     // because that is where the walk starts.
     let mut behind_at: std::collections::HashMap<u32, usize> = Default::default();
+    // **The aim angle split by whether the car is at the node its walk starts from.** The angle is
+    // the steering command, and on `Paths4102` it averages 56° — the pilot is pointed sideways for
+    // half the race. The walk begins at the held node, so if the angle is calm when the car is on
+    // that node and wild when it is fifty metres past it, the chain is lag → sideways aim → full
+    // lock, and the thing to fix is not the steering.
+    let (mut ang_near, mut ang_far) = ((0.0f64, 0usize), (0.0f64, 0usize));
     let mut aim_off = 0usize;
     let mut still = vec![0usize; field.len()];
     let mut rolled = vec![0usize; field.len()];
@@ -1943,6 +1949,12 @@ async fn run() {
                         aim_far[t] += usize::from(reach > *edge);
                     }
                     aim_behind += usize::from(d.dot(fwd) <= 0.0);
+                    if let Some(n) = pilot.node().and_then(|i| net.node(i)) {
+                        let plan = (p.position.x - n.at.x).hypot(p.position.z - n.at.z);
+                        let box_ = if plan <= DECK_NEAR { &mut ang_near } else { &mut ang_far };
+                        box_.0 += f64::from(deg);
+                        box_.1 += 1;
+                    }
                     if d.dot(fwd) <= 0.0 {
                         if let Some(i) = pilot.node() {
                             *behind_at.entry(i).or_default() += 1;
@@ -3642,6 +3654,14 @@ async fn run() {
             100.0 * aim_far[2] as f32 / aim_steps as f32,
             100.0 * aim_on_node as f32 / aim_steps as f32,
             100.0 * aim_behind as f32 / aim_steps as f32
+        );
+        println!(
+            "   nişan açısı, arabanın düğümüne uzaklığına göre: {DECK_NEAR:.0} m içinde \
+             ortalama {:.0}° ({} örnek) · dışında {:.0}° ({} örnek)",
+            ang_near.0 / ang_near.1.max(1) as f64,
+            ang_near.1,
+            ang_far.0 / ang_far.1.max(1) as f64,
+            ang_far.1
         );
         // The places, not the count. A node that carries a fifth of a route's aim-behind steps is a
         // junction to go and look at; a residue spread over eighty nodes is a driver problem.

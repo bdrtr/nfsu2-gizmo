@@ -6287,8 +6287,40 @@ eski zeminde ispatlı biçimde atıl.
 
 - **4121 ve 4102'de kursu hiç bırakmayan araba sıfır**, her kolda. 4121'in sebebi bilinen: düğüm
   111'in ileri giden tek kolu hattı terk ediyor, ve varılan yer (274, hattan 156 m) bir çukur —
-  grafın oradan dönen kolu yok. 4102'de nişan açısı ortalama **56°**, yani pilot sürekli yana
-  bakıyor; sebebi henüz daraltılmadı.
+  grafın oradan dönen kolu yok.
 - **4001'in kalan güverte sapması** dört düğümde (292-295) ve dördünün de altında yol nesnesi yok.
 - **Nişan mesafesini denetleyen kural** (`NFS_AIMREACH`) gerçek bir mekanizmayı düzeltiyor ama
   ilerleme sütunlarında bedelli. Takas 4121'de çözülür.
+
+### Ve 4102'nin 56°'si daraltıldı: açı gecikmenin kendisi (2026-08-21)
+
+Nişan açısı direksiyon komutudur, ve `Paths4102`'de ortalaması **56°** — pilot yarışın yarısında
+yana bakıyor. Açı, arabanın *yürüyüşün başladığı düğüme* uzaklığına göre ayrıldı:
+
+| rota | genel | araba düğümünde (≤15 m) | düğümünden uzakta (>15 m) |
+|---|---|---|---|
+| **4001** | 10° | **9°** | **10°** |
+| 4002 | 59° | 44° | 65° |
+| 4021 | 35° | **18°** | 50° |
+| 4041 | 26° | **15°** | 42° |
+| 4061 | 35° | **16°** | 44° |
+| 4081 | 47° | **12°** | 63° |
+| 4102 | 56° | **17°** | 76° |
+| 4121 | 32° | **9°** | 43° |
+
+**Sekiz rotanın yedisinde, araba tuttuğu düğümün üstündeyken nişan 9-18°'dir.** Aynı arabalar,
+aynı pilot, aynı sabitler. On beş metreden uzaklaştığında açı 42-76°'ye çıkıyor. 4001 kontrol
+grubu: gecikmesi en küçük olan rota (ortalama 14,5 m) ve tek fark etmeyen rota (9° / 10°).
+
+**Zincir kapandı:** işaretçi geride kalıyor → nişan yana kayıyor → pilot tam kilit istiyor. Bugün
+"pilot çok sert direksiyon kırıyor" diye bakılan her şey — ve dünlerde direksiyon tepkisini
+yumuşatan her refütasyon — bu tek olgunun aşağı akışı. Direksiyon kuralında yanlış bir şey yok;
+ona söylenen şey yanlış.
+
+**Ve bu, bugünün iki refütasyonunu birlikte okumayı gerektiriyor.** Gecikmeyi kapatan iki kural da
+(`NFS_ADVANCE=arms`, `NFS_AIMREACH`) alanı kaybetti — ama ikisi de işaretçiyi *en yakın yola*
+çekerek kapatıyordu, ki bu grafta düzenli olarak yarışılanın yanındaki şerit. Bir sonraki soru
+artık dar ve doğru biçimde sorulmuş durumda: **işaretçi, paralel şeride atlamadan arabayla nasıl
+birlikte tutulur.** `mark_line` hangi düğümlerin yarışın hattında olduğunu zaten biliyor ve
+ilerletme döngüsü ona hiç bakmıyor — hattı *kol seçiminde* kullanmak çürüdü, *işaretçiyi
+sınırlamakta* kullanmak denenmedi.
