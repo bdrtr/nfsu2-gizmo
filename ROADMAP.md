@@ -6162,3 +6162,36 @@ kuraldan çıkarılan sonuç yanlıştı, ve neden yanlış olduğu artık tek b
 - 274 ve 112/113, `Paths4121`'in kendi dosyasında hangi hatta ait? 274 hat 3, 112-113 hat 2, 294
   hat 1. Rota dosyası bu üç hattı birbirine bağlıyor ve yarış yalnız birinden geçiyor; hangisi
   olduğunu söyleyen tek şey outline, ve outline 40 m'lik bir bantla soruluyor.
+
+### DÜZELTME — `NFS_AIMREACH` varsayılanı geri alındı: aynı tuzağa aynı gün ikinci kez düşüldü (2026-08-21)
+
+Yukarıdaki kabul **koridorda geçen süre** (%74,3 → %80,0) ve **kursu hiç bırakmayan araba**
+(14 → 33) sütunlarına dayanıyordu. Bu dosyada, aynı gün, birkaç bölüm yukarıda yazıyor:
+
+> *koridorda geçen süre* ve *hattı bırakma* ölçülerinin ikisi de **duran arabayı başarı sayıyor**.
+> Arabaları durdurabilecek her değişiklik, kavşak · ayrık düğüm · takılma sayısıyla **birlikte**
+> yargılanmalı.
+
+Ders kendi kabulüme uygulandı ve kabul geçmiyor. İlerleme ölçüsü — son üçte birinde tek waypoint
+kazanmayan araba:
+
+| rota | 4001 | 4002 | 4021 | 4041 | 4061 | 4081 | 4102 | 4121 | ALAN |
+|---|---|---|---|---|---|---|---|---|---|
+| eski | 0 | 5 | 3 | 4 | 3 | 5 | 6 | 4 | **30 / 64** |
+| `reach` | 2 | 5 | **6** | **0** | **1** | 6 | 6 | **8** | **34 / 64** |
+
+Dört rotada kötüleşiyor, ikisinde düzeliyor, ikisinde aynı — ve `Paths4121`'de **sekiz arabanın
+sekizi** duruyor. Aynı yöne bakan diğer sütunlar: kavşak 1.665 → 1.454, ayrık düğüm 1.588 → 1.406,
+`furthest` 5.923 → 5.432 m.
+
+**Ne ayakta kalıyor, ne kalmıyor.** Nişan sayımı bir olgu ve mekanizma gerçek: nişanın mesafesini
+hiçbir şey belirlemiyordu, bu kural belirliyor. Nüfus okuması da gerçek: kursta kalan araba ikiye
+katlanıyor **ve** araba başına 18,7 → 23,3 waypoint kat ediyor. Ama üç ilerleme sütunu ve durma
+sayısı ters yöne bakıyor, ve bir rota hepsinde birden çöküyor. Bu bir varsayılan değil, `Paths4121`'de
+çözülecek bir takas.
+
+`NFS_AIMREACH=1` artık opt-in; varsayılan, 2026-08-21 öncesi her sayının alındığı yol-sayacı.
+
+**Ve alet düzeltildi ki bu bir daha unutulmasın:** `tools/sweep-columns.py` artık *ilerlemesi duran
+araba* ve *duruş payı* sütunlarını da basıyor. Bu ders bu dosyada iki kez öğrenildi — ikisi de bir
+kabulü geri almaya mal oldu — ve ikisinde de eksik olan şey ölçünün elde olmamasıydı.

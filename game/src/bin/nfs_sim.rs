@@ -1130,6 +1130,57 @@ async fn run() {
         }
     }
 
+    // **`NFS_RING=1`: the course ring, waypoint by waypoint, against the graph.**
+    //
+    // Two questions the route files do not answer directly and that a single table settles. Which
+    // **path** of the file the race actually runs on — a route file links parallel carriageways and
+    // only the event outline says which one is the race — and whether the ring ever runs somewhere
+    // the graph has no node, which is the driving-side form of the coverage question `is_road`
+    // raised. Both come out of "for every waypoint, the nearest node, its path, and how far".
+    if knob("NFS_RING").is_some() {
+        let mut by_path: std::collections::BTreeMap<u16, usize> = Default::default();
+        let (mut far, mut worst) = (0usize, 0.0f32);
+        println!("halka · {} waypoint:", waypoints.len());
+        for (i, w) in waypoints.iter().enumerate() {
+            let near = (0..net.len() as u32)
+                .filter_map(|j| {
+                    let n = net.node(j)?;
+                    Some((j, n.path, (w.x - n.at.x).hypot(w.z - n.at.z)))
+                })
+                .min_by(|a, b| a.2.total_cmp(&b.2));
+            match near {
+                Some((j, path, d)) => {
+                    *by_path.entry(path).or_default() += 1;
+                    far += usize::from(d > 40.0);
+                    worst = worst.max(d);
+                    // Printed sparsely by default; every waypoint with `NFS_RING=all`.
+                    if knob("NFS_RING").is_some_and(|v| v == "all") || d > 40.0 {
+                        println!(
+                            "   w{i:>3} ({:>7.0},{:>7.0}) → düğüm {j:>4} hat {path} · {d:>5.1} m{}",
+                            w.x,
+                            w.z,
+                            if d > 40.0 { "   ← grafta karşılığı yok" } else { "" }
+                        );
+                    }
+                }
+                None => println!("   w{i:>3} → graf boş"),
+            }
+        }
+        let total: usize = by_path.values().sum();
+        println!(
+            "   halkanın hangi hattın üstünde: {}",
+            by_path
+                .iter()
+                .map(|(p, n)| format!("hat {p}: {n} (%{:.0})", 100.0 * *n as f32 / total.max(1) as f32))
+                .collect::<Vec<_>>()
+                .join(" · ")
+        );
+        println!(
+            "   en yakın düğüme 40 m'den uzak waypoint: {far} / {} · en uzağı {worst:.0} m",
+            waypoints.len()
+        );
+    }
+
     // **Tell the graph which of its roads this race uses.** Without it the walk picks the neighbour
     // nearest the goal in a straight line, and on Bayview that is regularly a parallel carriageway:
     // measured, 21 of 21 departures from the racing line had an arm that would have stayed on it.

@@ -1225,10 +1225,25 @@ impl Pilot {
         // stopping the walk on where the *car* is, rather than on road walked from a node the car
         // may be eighty metres past, is.
         //
-        // `NFS_AIMREACH=0` goes back to the road odometer, which is what every number before
-        // 2026-08-21 was taken on.
-        let how = std::env::var("NFS_AIMREACH").unwrap_or_else(|_| "1".to_string());
-        let reach = how != "0";
+        // **DÜZELTME, aynı gün: bu varsayılan geri alındı.** The acceptance above rests on time on
+        // the corridor and on cars that never leave it, and this repo learnt that morning — from
+        // its own gap-fill acceptance, reverted the same way — that **both of those columns score a
+        // stopped car as a success**: a car standing still is inside the corridor for free and
+        // never leaves the line. Put through the progress measure the lesson prescribes, the rule
+        // does not survive: cars whose waypoint count stops moving for the last third of the race
+        // go **30 → 34 of 64**, `Paths4121` from 4 of 8 to **8 of 8**, and junctions (1 665 →
+        // 1 454), distinct nodes (1 588 → 1 406) and `furthest` (5 923 → 5 432 m) all fall with it.
+        //
+        // What stands and what does not: the aim census is a fact and the mechanism is real —
+        // nothing was setting the aim's distance, and this sets it. The population reading is also
+        // real: the cars that stay on course double and cover 23.3 waypoints each against 18.7. But
+        // three progress columns and the stall count point the other way, and one route collapses
+        // on every one of them. That is a trade to resolve at `Paths4121`, not a default.
+        //
+        // So `NFS_AIMREACH=1` opts in, `=lerp` selects the exact-circle form (measured, worse), and
+        // the default is the road odometer every number before 2026-08-21 was taken on.
+        let how = std::env::var("NFS_AIMREACH").unwrap_or_default();
+        let reach = !how.is_empty() && how != "0";
         let reach_lerp = how == "lerp";
         // **What the walk does when it runs out of hops.** Nothing: the aim is left wherever the
         // last step put it, and that can be behind the car — which the block above measures at

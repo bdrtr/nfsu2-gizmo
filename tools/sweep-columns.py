@@ -54,6 +54,11 @@ AIM = re.compile(r"nişan mesafesi: ortalama ([\d.]+) m · %([\d.]+)'i 40 m'den"
 AIMB = re.compile(r"%([\d.]+)'inde arabanın arkasında")
 # One per car: its own totals, and whether the line under it says it never left the course.
 CAR = re.compile(r"car \d+: .*?(\d+) waypoints driven past")
+# The progress side of the same per-car line. A car that gained nothing in the last third of the
+# race has stopped, and time-on-corridor and never-lost-the-line both score a stopped car as a
+# success — the lesson of 2026-08-21, learnt by accepting a change on those two columns alone.
+GAIN = re.compile(r"(\d+) waypoints driven past, last gained at\s*([\d.]+)s")
+SECONDS = 90.0
 KEPT = "kursu hiç bırakmadı"
 HAD = re.compile(r"o adımların %([\d.]+)'inde düğümün kendi XZ")
 SUMM = re.compile(r"SUMMARY held=(\d+) away=(\d+) junctions=(\d+) waypoint=(\d+) "
@@ -66,6 +71,8 @@ COLUMNS = [
     ("driven", "waypoint (araba toplamı)", sum),
     ("on_course", "kursta süre %", lambda v: sum(v) / len(v)),
     ("never", "kursu hiç bırakmayan araba", sum),
+    ("stalled", "ilerlemesi duran araba", sum),
+    ("stall_share", "duruş payı %", lambda v: sum(v) / len(v)),
     ("away", "away", sum),
     ("fallen", "fallen", sum),
     ("junctions", "junctions", sum),
@@ -107,6 +114,13 @@ def one(text):
             kept_cars, kept_wp = kept_cars + 1, kept_wp + int(m.group(1))
         else:
             lost_cars, lost_wp = lost_cars + 1, lost_wp + int(m.group(1))
+    stalled = 0
+    share = 0.0
+    gains = GAIN.findall(text)
+    for _, last in gains:
+        idle = max(0.0, (SECONDS - float(last)) / SECONDS)
+        share += idle
+        stalled += int(idle > 1.0 / 3.0)
     # `deck_max` starts at f32::MIN, so a car that never held a node prints -3.4e38. Anything that
     # far down is "no sample", not a car under the road.
     worst = float(d.group(1)) if d else 0.0
@@ -135,6 +149,8 @@ def one(text):
         aim_mean=float(am.group(1)) if am else 0.0,
         aim_far=float(am.group(2)) if am else 0.0,
         aim_behind=float(ab.group(1)) if ab else 0.0,
+        stalled=stalled,
+        stall_share=100.0 * share / max(len(gains), 1),
         kept_cars=kept_cars,
         kept_wp=kept_wp,
         lost_cars=lost_cars,
