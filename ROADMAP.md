@@ -6324,3 +6324,30 @@ artık dar ve doğru biçimde sorulmuş durumda: **işaretçi, paralel şeride a
 birlikte tutulur.** `mark_line` hangi düğümlerin yarışın hattında olduğunu zaten biliyor ve
 ilerletme döngüsü ona hiç bakmıyor — hattı *kol seçiminde* kullanmak çürüdü, *işaretçiyi
 sınırlamakta* kullanmak denenmedi.
+
+### İşaretçiyi hatta sınırlamak da çürüdü — ve kapatması gereken şeyi kapatmıyor (2026-08-21)
+
+Bir önceki kaydın adını koyduğu denenmemiş kural yazıldı. `NFS_ADVANCE=line`: `arms`'ın aynısı, ama
+geri düşülen kol yalnız `mark_line`'ın yarışın hattında saydığı düğümlere. Gerekçe, bugünün iki
+sonucunu birleştirmekti — `arms` gecikmeyi kapatıyordu ama en yakın *yola* atlıyordu, ve hangi
+düğümün yarışın hattında olduğunu graf zaten biliyor.
+
+| | waypoint | kursta süre | hiç bırakmayan | **ilerlemesi duran** | furthest | tutulana ort. |
+|---|---|---|---|---|---|---|
+| **kalan** | **1.451** | **%74,3** | **14** | **30 / 64** | **5.923 m** | 38,7 m |
+| `line` | 1.368 | %66,6 | 11 | **44 / 64** | 5.372 m | **38,0 m** |
+
+Her sütunda kaybediyor, ilerleme sütunlarında da: duran araba 30 → **44**, duruş payı %31,6 → %40,9.
+Kavşak ve ayrık düğümün yükselmesi (1.665 → 1.808, 1.588 → 1.719) daha çok kaybolan arabanın grafta
+dolaşması. Nüfus ayrımı da aynı yöne: kursta kalan 14 → 11 ve araba başına 18,7 → 16,8.
+
+**Ama asıl bilgi son sütunda.** Kural gecikmeyi **kapatmıyor**: arabanın tuttuğu düğüme ortalama
+mesafesi 38,7 → 38,0 m, yani hiç. Sebebi de belli: gecikmenin en büyük olduğu yerlerde tutulan
+düğümün kendisi hattın dışında (4121'in 274'ü hattan 156 m), orada geri düşme hiç ateşlenmiyor; ve
+ateşlendiği yerlerde hat kısıtı çoğu zaman elinde aday bırakmıyor.
+
+**Bu, kol seçimi kapısını kapatıyor.** İşaretçinin gecikmesi *hangi kol* sorusuyla kapanmıyor: bütün
+kollara bakmak (`arms`) kapatıyor ama paralel şeride atlıyor, hatta sınırlamak (`line`) ne kapatıyor
+ne de kazandırıyor. Geriye sentezin çözülmemiş bıraktığı çatal kalıyor: ilerletme kapısı tıkandığında
+sebep **bayat `toward`** mu (waypoint sayacı donmuş, `step_avoiding` de ona göre kol seçiyor), yoksa
+kara liste / `came_from` arabaya doğru olan kolu elemiş mi? İkisi farklı işler, ve ayrımı ölçülmedi.

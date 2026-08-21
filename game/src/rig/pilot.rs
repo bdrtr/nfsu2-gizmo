@@ -1122,7 +1122,28 @@ impl Pilot {
         let dist = |i: u32| net.node(i).map_or(f32::MAX, |j| flat(j.at - at).length());
         let cap: usize =
             std::env::var("NFS_WALKCAP").ok().and_then(|v| v.parse().ok()).unwrap_or(3);
-        let arms = std::env::var("NFS_ADVANCE").is_ok_and(|v| v == "arms");
+        // **`NFS_ADVANCE=line`: the same fallback, but only over arms the race's own line runs
+        // through.** `arms` closed the lag and lost the field, and the reason it lost is named in
+        // the same breath as `guide_to`'s and the walked ring's: the nearest arm is regularly the
+        // carriageway beside the one being raced. `Network::mark_line` already says which nodes the
+        // race passes and the advance loop has never looked at it — using the line to pick an *arm
+        // to drive down* is refuted twice over, using it to *bound the marker* is not the same rule
+        // and has not been measured. Where the held node is itself off the line the fallback simply
+        // does not fire, so a car that has left the race is left exactly as it is today.
+        //
+        // **Refuted, and the informative part is that it does not even do what it was for.** Over
+        // the eight routes it loses every column — 1 451 → 1 368 waypoints, 74.3 → 66.6 % of race
+        // time on the corridor, cars that never leave 14 → 11, cars whose progress stops **30 →
+        // 44** — and the lag it was written to close does not move: mean car-to-held-node 38.7 →
+        // **38.0 m**. Where the lag is worst the held node is itself off the line (`Paths4121`'s
+        // node 274 is 156 m from it), so the fallback never fires there; where it does fire, the
+        // line restriction usually leaves it no candidate.
+        //
+        // Between this and `arms`, the arm-choice door is shut: looking at every arm closes the lag
+        // and jumps carriageways, looking only at on-line arms neither closes it nor pays.
+        let advance = std::env::var("NFS_ADVANCE").unwrap_or_default();
+        let arms = advance == "arms" || advance == "line";
+        let on_line_only = advance == "line";
         for _ in 0..cap {
             let here_now = self.at?;
             let step = net.step_avoiding(here_now, self.from, toward, &self.blocked);
@@ -1133,6 +1154,7 @@ impl Pilot {
                     .into_iter()
                     .flat_map(|n| n.links.iter().copied())
                     .filter(|l| Some(*l) != self.from && !self.blocked.contains(l))
+                    .filter(|l| !on_line_only || net.on_line_at(*l))
                     .filter(|l| dist(*l) < dist(here_now))
                     .min_by(|a, b| dist(*a).total_cmp(&dist(*b))),
                 _ => None,
