@@ -36,6 +36,12 @@ use nfsu2::world as city;
 const MASS_KG: f32 = 1220.0;
 const WHEEL_R: f32 = 0.31;
 
+/// How far above its held node a car has to be before it is on a different deck, in metres.
+///
+/// A road climbs, and the chassis rides about 0.65 m over the tarmac, so a metre or two of
+/// disagreement is a gradient rather than a storey. Three is more than either.
+const DECK_OUT: f32 = 3.0;
+
 /// How far from the nearest waypoint counts as off the race's own line, in metres.
 ///
 /// Not the corridor's half-width: waypoints are about 30 m apart, so a car exactly between two of
@@ -905,6 +911,53 @@ async fn run() {
         waypoints
     };
 
+    // **How steep the graph's own links are.** A road climbs; a link that gains ten metres over
+    // thirty is not a road, it is two decks joined because they happen to be near each other in
+    // plan. `Network::of` solves node heights one **path** at a time, so a cross-path link is free
+    // to do exactly that — and every test downstream is plan-view, so nothing notices. Counted
+    // rather than assumed, and split by whether the link crosses between paths.
+    if knob("NFS_GRADE").is_some() {
+        let mut all: Vec<(f32, u32, u32, bool)> = Vec::new();
+        for i in 0..net.len() as u32 {
+            let Some(a) = net.node(i) else { continue };
+            for &l in &a.links {
+                if l <= i {
+                    continue;
+                }
+                let Some(b) = net.node(l) else { continue };
+                let run = Vec3::new(b.at.x - a.at.x, 0.0, b.at.z - a.at.z).length();
+                if run < 1.0 {
+                    continue;
+                }
+                all.push(((b.at.y - a.at.y).abs() / run, i, l, a.path != b.path));
+            }
+        }
+        all.sort_by(|x, y| y.0.total_cmp(&x.0));
+        let steep = |g: f32| all.iter().filter(|x| x.0 > g).count();
+        let cross = all.iter().filter(|x| x.3).count();
+        println!(
+            "bağlantı eğimleri: {} bağlantı ({cross} tanesi hat değiştiriyor) · %25'ten dik {} · \
+             %50'den dik {} · %100'den dik {}",
+            all.len(),
+            steep(0.25),
+            steep(0.5),
+            steep(1.0)
+        );
+        for (g, i, l, x) in all.iter().take(8) {
+            let (a, b) = (net.node(*i).unwrap(), net.node(*l).unwrap());
+            println!(
+                "   {i:>4} → {l:<4} · eğim %{:>5.0} · y {:>6.1} → {:>6.1} · {:>5.0} m · hat {} → {}{}",
+                100.0 * g,
+                a.at.y,
+                b.at.y,
+                Vec3::new(b.at.x - a.at.x, 0.0, b.at.z - a.at.z).length(),
+                a.path,
+                b.path,
+                if *x { " · HAT DEĞİŞİYOR" } else { "" }
+            );
+        }
+    }
+
     // **Tell the graph which of its roads this race uses.** Without it the walk picks the neighbour
     // nearest the goal in a straight line, and on Bayview that is regularly a parallel carriageway:
     // measured, 21 of 21 departures from the racing line had an arm that would have stayed on it.
@@ -1117,6 +1170,8 @@ async fn run() {
     let mut raced = vec![0.0f32; field.len()];
     let mut top = vec![0.0f32; field.len()];
     let mut on_side = vec![0.0f32; field.len()];
+    let mut deck_max = vec![f32::MIN; field.len()];
+    let (mut deck_steps, mut deck_out, mut deck_had) = (0usize, 0usize, 0usize);
     let mut off_line_for = vec![0.0f32; field.len()];
     let mut left_line: Vec<Option<(f32, Vec3, f32)>> = vec![None; field.len()];
     let mut line_at = vec![Vec3::ZERO; field.len()];
@@ -1558,6 +1613,33 @@ async fn run() {
                     off_line_for[k] = 0.0;
                     line_at[k] = p.position;
                     line_speed[k] = p.speed;
+                }
+            }
+            // **How far the car is above the road its own pilot is holding.** Every test the pilot
+            // makes is plan-view — `step_avoiding`'s cost, the node advance, `Corridor::locate` —
+            // so a car can be on a flyover directly over the road the graph describes and nothing
+            // in the run says so. Traced on `Paths4081`: the car and its held node agree to 1 cm
+            // at node 53 and are **11.8 m** apart by node 241, the divergence opening at a path
+            // boundary and never closing (the nearest surface below is never under 2.66 m).
+            //
+            // Measured against the node rather than the ground under the car, because that is the
+            // disagreement that matters: the pilot is steering at a road it is not on.
+            if let Some(n) = pilot.node().and_then(|i| net.node(i)) {
+                let dy = p.position.y - n.at.y;
+                deck_max[k] = deck_max[k].max(dy);
+                deck_steps += 1;
+                if dy > DECK_OUT {
+                    deck_out += 1;
+                    // **Could the node have been solved onto the car's deck?** The heights are
+                    // chosen one path at a time, so the question is whether the *choice* was
+                    // wrong or the surface simply is not there. Ask the city at the node's own XZ
+                    // for every drivable layer and see whether one of them is under the car.
+                    deck_had += usize::from(
+                        ground
+                            .heights_at(n.at.x, n.at.z)
+                            .iter()
+                            .any(|h| (p.position.y - h).abs() < 2.0),
+                    );
                 }
             }
             let f = &mut falls[k];
@@ -3054,6 +3136,21 @@ async fn run() {
                 probe_load.get(i).copied().unwrap_or(0.0)
             );
         }
+    }
+    if deck_steps > 0 {
+        let worst = deck_max.iter().copied().fold(f32::MIN, f32::max);
+        println!(
+            "güverte: araba tuttuğu düğümün {:.1} m üstüne kadar çıkıyor · adımların %{:.1}'inde \
+             {DECK_OUT:.0} m'den fazla · araba araba {}",
+            worst,
+            100.0 * deck_out as f32 / deck_steps as f32,
+            deck_max.iter().map(|v| format!("{v:.1}")).collect::<Vec<_>>().join(" ")
+        );
+        println!(
+            "   o adımların %{:.1}'inde düğümün kendi XZ'sinde arabanın kotunda bir yüzey VARDI \
+             — yani seçim yanlıştı, yüzey eksik değil",
+            100.0 * deck_had as f32 / deck_out.max(1) as f32
+        );
     }
     if aim_steps > 0 {
         println!(

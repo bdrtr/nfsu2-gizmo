@@ -26,6 +26,12 @@ use super::{remap, Ground};
 use gizmo::prelude::*;
 use gizmo_nfs::world::routes::RouteNode;
 
+/// The steepest a link may be before it is a lift shaft rather than a road, as rise over run.
+///
+/// A very steep city street is about 25 %; San Francisco's worst is 31.5 %. Anything past that is
+/// two decks that happen to be near each other in plan. See [`Network::drop_climbing`].
+const MAX_GRADE: f32 = 0.0;
+
 /// One place a car can be, and where it can go from there.
 #[derive(Debug, Clone)]
 pub struct Junction {
@@ -44,6 +50,8 @@ pub struct Network {
     nodes: Vec<Junction>,
     /// Links dropped because the road does not continue along them — see [`Network::drop_walled`].
     walled: usize,
+    /// Links dropped because no road could climb them — see [`Network::drop_climbing`].
+    climbed: usize,
     /// Which nodes are on the **race's own line**, if anybody has said where that is.
     ///
     /// Empty until [`Network::mark_line`] runs, and then one flag per node. The graph knows about
@@ -121,9 +129,72 @@ impl Network {
                 edge(i, l as usize, &mut out);
             }
         }
-        let mut me = Self { nodes: out, walled: 0, near_line: Vec::new() };
+        let mut me = Self { nodes: out, walled: 0, climbed: 0, near_line: Vec::new() };
+        me.drop_climbing();
         me.drop_walled(ground);
         me
+    }
+
+    /// Remove the links no road could climb — the ones that join two **decks**.
+    ///
+    /// Heights are solved one path at a time ([`route::follow`] over each path's own candidates),
+    /// which is right for a path and says nothing about the links *between* paths. Where two
+    /// carriageways cross, their nodes can sit a couple of metres apart in plan and ten or twenty
+    /// apart in height, and the link between them is then a lift shaft the graph calls a road.
+    ///
+    /// Nothing downstream can catch it, because everything downstream is plan-view:
+    /// [`Self::step_avoiding`] ranks arms by `(x, z)` distance, the pilot's node advance measures
+    /// in plan, and `Corridor::locate` drops height on purpose so that a car on a bridge belongs
+    /// to the bridge. [`Self::drop_walled`] does not catch it either — it asks whether there is
+    /// *a* surface near the interpolated height, and with 8 m of tolerance and good road at both
+    /// ends of a 10 m step, there is.
+    ///
+    /// **Measured, and the correlation is exact.** Over the eight sweep routes, cars end up above
+    /// the node their own pilot is holding — 15.3 m on one route, 22.5 on another, and for 70.6 %
+    /// of the race on a third. The one route with **no link steeper than 15 %** is the one route
+    /// where that never happens at all. The offenders are unambiguous: 14.8 m of height over 2 m
+    /// of plan (941 %), 12.2 m over 1 m (1084 %), and **every single one of them crosses between
+    /// paths**.
+    ///
+    /// A very steep city street is about 25 %. This keeps that and everything gentler.
+    ///
+    /// **REFUTED (2026-08-21), and the refutation is what located the real mechanism.** Dropping
+    /// them changes the deck divergence hardly at all — 70.6 % → 69.7 % of the race on the worst
+    /// route, and *worse* on another (31.4 % → 53.7 %) — while costing 217 waypoints, 171
+    /// junctions and 506 m of `furthest` over the eight routes.
+    ///
+    /// The steep links are real and are not the cause. The divergence arrives through a link that
+    /// looks **gentle**: node 237 at y=10.68 to node 55 at y=5.71 is a 4.97 m drop over 30.5 m of
+    /// plan, a 16 % grade that any street could have. What is wrong is not that link's slope, it
+    /// is that its two ends were solved on **different decks** — heights are chosen one path at a
+    /// time, so nothing ever compares the two sides of a path boundary. Catching it needs the
+    /// heights themselves, not a filter over them. Off by default; `NFS_MAXGRADE=0.25` restores it.
+    fn drop_climbing(&mut self) {
+        let max: f32 =
+            std::env::var("NFS_MAXGRADE").ok().and_then(|v| v.parse().ok()).unwrap_or(MAX_GRADE);
+        if max <= 0.0 {
+            return;
+        }
+        let mut steep: Vec<(u32, u32)> = Vec::new();
+        for i in 0..self.nodes.len() {
+            let (at, links) = {
+                let n = &self.nodes[i];
+                (n.at, n.links.clone())
+            };
+            for l in links {
+                let Some(b) = self.nodes.get(l as usize).map(|n| n.at) else { continue };
+                let run = Vec3::new(b.x - at.x, 0.0, b.z - at.z).length();
+                if run >= 1.0 && (b.y - at.y).abs() / run > max {
+                    steep.push((i as u32, l));
+                }
+            }
+        }
+        for (i, l) in &steep {
+            if let Some(n) = self.nodes.get_mut(*i as usize) {
+                n.links.retain(|x| x != l);
+            }
+        }
+        self.climbed = steep.len() / 2;
     }
 
     /// Remove the links a car cannot actually drive, because the road does not continue along them.

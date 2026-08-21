@@ -5573,3 +5573,58 @@ Kavşak 205'in dört kolu da y = 3,8-5,6'da; araba 15,25'te.
 
 Bu, yarışın kendi hattının **hangi güvertede** olduğu sorusunu açıyor: `route::follow` her hat
 için "en az tırmanan diziyi" seçiyor, ama hatlar arası bağlantıya kimse bakmıyor.
+
+### Güverte sapması sekiz rotada ölçüldü, sebebi daraltıldı, ve bir düzeltme çürütüldü (2026-08-21)
+
+**Yaygınlığı:** araba, pilotunun tuttuğu düğümün ne kadar üstünde sürüyor —
+
+| rota | en fazla | adımların yüzdesi (>3 m) |
+|---|---|---|
+| 4001 | 15,3 m | %31,4 |
+| 4002 | **22,5 m** | %15,5 |
+| 4021 | 12,9 m | %7,5 |
+| 4041 | 6,1 m | %2,6 |
+| 4061 | 19,7 m | %11,8 |
+| **4081** | 14,2 m | **%70,6** |
+| **4102** | **2,7 m** | **%0,0** |
+| 4121 | 8,6 m | %22,5 |
+
+Sekiz rotanın yedisinde arabalar yarışın hattından bir güverte yukarıda sürüyor.
+
+**Bağlantı eğimleri sayıldı ve korelasyon kusursuz göründü:** `%25`'ten dik bağlantı sayısı 4001'de
+82, 4081'de 13, ve **4102'de sıfır** — yani dik bağlantısı olmayan tek rota, güverte sapması
+olmayan tek rota. En dikler akıl almaz: **%1084** (12,2 m'yi 1 m'de), **%941** (14,8 m'yi 2 m'de),
+ve **hepsi hat değiştiriyor**.
+
+**Ama dik bağlantıları atmak çürüdü.** `drop_climbing` yazıldı ve süpürüldü:
+
+| | waypoint | kursta süre | kavşak | furthest | 4081'in sapması |
+|---|---|---|---|---|---|
+| **filtre yok** (kalan) | **1.476** | **%73,8** | **1.641** | **5.951 m** | %70,6 |
+| dik bağlantı atıldı | 1.259 | %71,7 | 1.470 | 5.445 m | %69,7 |
+
+Sapmayı düzeltmiyor (%70,6 → %69,7, ve 4001'de **kötüleşiyor**: %31,4 → %53,7) ve 217 waypoint,
+171 kavşak, 506 m götürüyor. Korelasyon gerçekti ama nedensellik değil.
+
+**Ve çürütme asıl mekanizmayı buldu.** Sapma **yumuşak** bir bağlantıdan geliyor: düğüm 237
+(y=10,68) → düğüm 55 (y=5,71), 30,5 m'de 4,97 m, yani **%16** — hiçbir filtrenin yakalamayacağı,
+her sokakta olabilecek bir eğim. Yanlış olan o bağlantının eğimi değil, **iki ucunun farklı
+güvertelerde çözülmüş olması**.
+
+**Son ölçü meseleyi kapatıyor:** güverte sapması olan adımlarda, düğümün *kendi XZ'sinde*
+arabanın kotunda bir yüzey var mı?
+
+| rota | var |
+|---|---|
+| 4001 | **%88,3** |
+| 4081 | **%68,0** |
+| 4002 | %8,1 |
+
+Yani 4001 ve 4081'de yüzey **eksik değil, seçim yanlış**: `route::follow` her hattı ayrı ayrı
+"en az tırmanan dizi" diye çözüyor, ve hat sınırının iki yanını hiçbir şey karşılaştırmıyor.
+Doğru güverte orada duruyor, seçilmiyor. (4002 ayrı bir durum: orada yüzey gerçekten yok.)
+
+**Sıradaki iş belli ve dar:** kotları hat hat değil **graf genelinde** çözmek — ya da en azından
+hat sınırlarındaki bağlantılarda iki ucun aynı güvertede olmasını istemek. Bu `route::follow`'un
+kapsamını değiştirmek demek, yani ölçülerek yapılacak bir iş; ama artık hangi sayının düzelmesi
+gerektiği belli: 4001'in %31,4'ü ve 4081'in %70,6'sı.
