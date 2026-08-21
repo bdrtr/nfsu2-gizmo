@@ -5439,3 +5439,33 @@ altında tuttuğu için hiçbir waypoint artık 60 m'den uzak değil, ve yarıç
 Bu, sabahki denetimi çürütmüyor, **açıklıyor**: `PASSED_NEAR` keyfi görünüyordu çünkü halka
 düzensizdi; halka düzenlenince kanıtlanabilir biçimde atıl. **Değeri ölçülemeyen bir sabit
 genellikle başka bir şeyin yerine duruyordur** — burada durduğu şey kursun kendi aralığıydı.
+
+### İkinci sabit de atıl çıktı: kursu onarmak pilotu sadeleştiriyor (2026-08-21)
+
+`PASSED_NEAR`'ın atıl çıkması bir tahmin doğurmuştu: **"hedef arkada kaldı" hâli için yazılmış
+kurallar da atıl olmalı**, çünkü o hâlin sebebi halkadaki boşluklardı. `BEHIND` kapatılıp
+süpürüldü:
+
+| | alan farkı | kursta süre | furthest | hattı bırakan | bayt-birebir aynı rota |
+|---|---|---|---|---|---|
+| **BEHIND açık** (bugünkü) | — | %77,4 | 5.928 m | 34 | — |
+| BEHIND kapalı | +11 | %77,4 | **6.049 m** | 35 | **5 / 8** |
+
+Alan farkı **+11**, yani sekiz rotalık süpürmenin kendi ölçülmüş gürültü tabanının (±37) içinde;
+koridor süresi virgülüne kadar aynı; `furthest` kapalıyken **daha yüksek**. Ve sekiz rotanın
+**beşi bayt-birebir aynı** — kural o rotalarda hiç ateşlemiyor.
+
+`GRIP` de yeniden soruldu: 5 ile 8 arasında **+30**, yine gürültünün içinde, yine ayırt edilemez —
+kiriş halkasında ~100 waypoint olan fark, çekilmiş halkada sıfıra, onarılmış halkada gürültüye
+inmiş durumda.
+
+**İki günün en derin dersi bu:** dün "ölçülmüş değil, makul birer ayar" diye kaydedilen dört
+sabitten **ikisi**, altlarındaki gerçek kusur (kursun düzensiz aralığı) bulunup düzeltilince
+kanıtlanabilir biçimde **gereksiz** hâle geldi. Üçüncüsü (`GRIP`) zaten ölçülemiyordu.
+
+Yani o sabitler pilotun ayarları değil, **kursun kusurlarının telafisiydi**. Bu, ileriye dönük bir
+okuma kuralı da veriyor: *bir pilot sabiti ölçülemez hâle geldiyse iyi haberdir — altındaki kusur
+düzelmiş demektir; yeniden ölçülebilir hâle geldiyse kursun kaydığından şüphelen.*
+
+İkisi de kaldırılmadı: nadiren ve doğru ateşleyen bir kuralı silmek için sebep yok, ve maliyeti
+sıfır. Ama alanda hiçbir şey artık onlara dayanmıyor.
