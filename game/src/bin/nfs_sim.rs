@@ -494,7 +494,14 @@ async fn run() {
     // the racing line, but it says where road *is*, which is the question the corridor answers
     // badly — the corridor is the union of every path in the file, so it calls a car on the next
     // carriageway along "on course".
-    let lane_pts: Vec<Vec3> = std::path::Path::new(&route)
+    //
+    // Each point is kept with the block it came from, because a race's lanes include **both**
+    // carriageways: the nearest lane point to a waypoint can be the one going the other way, and
+    // snapping to it moves the ring onto the road beside the race. `lane_near`'s `like` argument is
+    // the block the previous waypoint chose; a candidate from that block wins any tie within
+    // `LANE_SAME`, so the snapped ring stays on one carriageway unless it has a real reason not to.
+    const LANE_SAME: f32 = 2.0;
+    let lane_pts: Vec<(Vec3, usize)> = std::path::Path::new(&route)
         .parent()
         .map(|d| d.join(format!("Routes{event}F.bin")))
         .and_then(|f| std::fs::read(f).ok())
@@ -502,16 +509,31 @@ async fn run() {
         .map(|blocks| {
             blocks
                 .iter()
-                .flat_map(|b| b.points.iter())
-                .map(|q| city::remap([q.at[0], q.at[1], 0.0]))
+                .enumerate()
+                .flat_map(|(k, b)| {
+                    b.points.iter().map(move |q| (city::remap([q.at[0], q.at[1], 0.0]), k))
+                })
                 .collect()
         })
         .unwrap_or_default();
-    let lane_near = |p: Vec3| -> Option<(f32, Vec3)> {
-        lane_pts
+    let lane_near_in = |p: Vec3, like: Option<usize>| -> Option<(f32, Vec3, usize)> {
+        let best = lane_pts
             .iter()
-            .map(|q| ((p.x - q.x).hypot(p.z - q.z), *q))
-            .min_by(|a, b| a.0.total_cmp(&b.0))
+            .map(|(q, k)| ((p.x - q.x).hypot(p.z - q.z), *q, *k))
+            .min_by(|a, b| a.0.total_cmp(&b.0))?;
+        match like.filter(|_| std::env::var("NFS_LANEBLOCK").is_ok_and(|v| v != "0")) {
+            Some(k) => lane_pts
+                .iter()
+                .filter(|(_, j)| *j == k)
+                .map(|(q, j)| ((p.x - q.x).hypot(p.z - q.z), *q, *j))
+                .min_by(|a, b| a.0.total_cmp(&b.0))
+                .filter(|same| same.0 <= best.0 * LANE_SAME)
+                .or(Some(best)),
+            None => Some(best),
+        }
+    };
+    let lane_near = |p: Vec3| -> Option<(f32, Vec3)> {
+        lane_near_in(p, None).map(|(d, q, _)| (d, q))
     };
 
     let roads = city::road_ground(&objects);
@@ -927,11 +949,20 @@ async fn run() {
         // every path in the file and the lane mask does not. Off unless asked for.
         let lane_pull: Option<f32> =
             knob("NFS_PULLLANE").and_then(|v| v.parse().ok()).filter(|_| !lane_pts.is_empty());
+        // Which block the last snapped waypoint landed on, so the ring keeps to one carriageway.
+        let mut last_block: Option<usize> = None;
         for (i, w) in waypoints.iter().enumerate() {
             let (dist, onto) = match lane_pull {
-                Some(edge) => match lane_near(*w) {
-                    Some((d, q)) if d > edge => (d, q),
-                    _ => continue,
+                Some(edge) => match lane_near_in(*w, last_block) {
+                    Some((d, q, k)) if d > edge => {
+                        last_block = Some(k);
+                        (d, q)
+                    }
+                    Some((_, _, k)) => {
+                        last_block = Some(k);
+                        continue;
+                    }
+                    None => continue,
                 },
                 None => match corridor.locate(*w) {
                     Some(f) if f.distance > city::COURSE_HALF_WIDTH => (f.distance, f.at),

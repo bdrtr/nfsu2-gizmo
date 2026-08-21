@@ -6874,3 +6874,37 @@ düzeltmesi her seferinde bedelli.
 138 waypoint'i, beş arabanın 41'ine düşüyor, ve sebebi artık biliniyor — o rotada şerit çekmesi
 halkayı daha çok yırtıyor. Bir sonraki deneme oraya bakmalı: şerit çekmesi neden 4021'de aralık
 büyütüyor da 4081'de büyütmüyor.
+
+### Ayırt edici işaretçi gecikmesi — ve 4021'in sebebi karşı şerit değil (2026-08-21)
+
+Şerit çekmesinin neden bazı rotada kazanıp bazısında kaybettiği soruldu. **Halkanın aralığı değil:**
+çekme 4081'de 60 m'den geniş aralığı 6 → **18**'e çıkarıyor, ve 4081 en çok kazanan rota; 4021'de
+6 → 8 ve o rota kaybediyor. Geometri yine sonucu öngörmüyor.
+
+**Ayırt edici, günün merkezî olgusunun kendisi: işaretçi gecikmesi.**
+
+| rota | kursta süre | **arabanın tuttuğu düğüme mesafesi** | nişan açısı |
+|---|---|---|---|
+| **4081** | %53,9 → **%99,8** | 33,5 → **25,6 m** | 47° → **37°** |
+| **4021** | %94,2 → %93,1 | 30,7 → **38,0 m** | 35° → **50°** |
+
+Şerit çekmesi halkayı arabaların gerçekten olduğu yere yaklaştırdığında kazanıyor, uzaklaştırdığında
+kaybediyor — ve nişan açısı gecikmeyi bire bir izliyor, tıpkı günün ana kaydındaki gibi.
+
+**İlk açıklama denendi ve çürüdü.** Bir yarışın şerit dosyası **her iki** şeridi de taşıyor, yani en
+yakın şerit noktası karşı şeridin olabilir. `NFS_LANEBLOCK=1` yazıldı: bir waypoint, bir öncekinin
+yapıştığı bloğa ait bir aday varsa ve o aday en yakının iki katından yakınsa, ona yapışır.
+
+| | kursta kalan araba | onların waypoint'i | araba başına |
+|---|---|---|---|
+| **şerit + 0,7 (ikili)** | **27** | **509** | **18,9** |
+| + blok sürekliliği | 23 | 390 | 17,0 |
+
+Alanda kaybettiriyor (4081 %99,8 → %96,5) **ve `Paths4021`'i hiç değiştirmiyor** — o rotanın kursta
+süresi, işaretçi gecikmesi ve waypoint'i birebir aynı çıkıyor. Yani 4021'de çekme karşı şeride
+yapışmıyor; doğru şeride yapışıyor ve arabalar yine de geride kalıyor.
+
+**Kapı daralmış olarak duruyor.** İkili (`NFS_PULLLANE=15` + `NFS_LOOK=0.7`) en iyi ölçülmüş kol:
+kursta kalan 14 → 27 araba, toplamları 262 → 509 waypoint, araba başına 18,7 → 18,9, duran araba
+30 → 31. Varsayılan değil, çünkü 4021 orada 6/138'den 5/41'e düşüyor — ve artık sebebinin ne
+*halkanın aralığı* ne de *karşı şerit* olduğu biliniyor.
