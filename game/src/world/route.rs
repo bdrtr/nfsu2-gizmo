@@ -37,9 +37,35 @@ use gizmo_nfs::world::WorldMesh;
 ///
 /// A **render-and-placement category, not a parser fact**, in the same family as
 /// [`super::is_backdrop`]: the file does not label roads, and the name is what the artists left
-/// behind. `TRN_ROADA_CHOP_*`, `TRN_CS_ROADA_*`, `TRN_CN_ROADA_*` and `RDP_*` all carry it; 1,928 of
-/// the city's 13,985 objects match.
-#[must_use]
+/// behind. The city names its terrain `TRN_<place>_<class>_..._CHOP_<cell>_<lod>`, and this catches
+/// every class whose name carries `ROAD`: **1,928 of the city's 13,986 objects, 89 of its 4,699
+/// name families**, with every bundle loaded. Mostly `ROADA` (1,537), then `ROAD#` (184),
+/// `ROADDRAG` (88), `ROAD` (39), `ROADB` (27) and the `ROADPIECE*` set. Names are truncated to 27
+/// characters, but the class field starts at character eight, so the token is never cut.
+///
+/// **Fifteen of those are not surface** — `ROADSIGNB` (3), `ROADBARRIERB` (3), `ROADSKID*` (9). A
+/// sign and a barrier are vertical geometry and [`super::surface_of`] should call them wall, but
+/// that has not been measured.
+///
+/// **An earlier version of this sentence also claimed `RDP_*`, and that is wrong.** `RDP` is not a
+/// road class but a *place* — the airport: its 699 objects are `TRN_RDP_RUNWAY_*` (630),
+/// `TRN_RDP_DRAG#_*` (44) and `TRN_RDP_RUNWAYSKID_*` (25), and **none** of them has `ROAD` in its
+/// name, so this matches zero of them.
+///
+/// **Swept 2026-08-21, and it is not too narrow.** What a name filter drops is the half that has to
+/// be measured, so the other classes were counted against the eight sweep routes' own nodes: 131 of
+/// their 2,052 have no road object under them. Adding `TUNNEL`, `TUNNNEL` (the city's own
+/// misspelling, six objects), `BRIDGE`, `MERIDIAN`, `RUNWAY`, `DRIFT` or `PUDDLE` to this test
+/// rescues **zero** of them, on every route. The three that would rescue any must not be added:
+/// `TERRAIN` (131 — all of them) is the flat shelf this filter exists to exclude, `CEILING` (7) is
+/// an overpass soffit, and `TRAINTRACK` (34) is a rail — on `Paths4041` the rails lie at y = −1
+/// with the ground the race drives on 9.7 m above them.
+///
+/// Nor is the surface test hiding roads behind a classification: of those nodes, **none** has a
+/// road-named object under it that [`super::surface_of`] called a wall. Where this says no road,
+/// there is no road object — [`super::Network::of`] answers those nodes from the drivable ground.
+///
+/// Ask it with `NFS_ROADNAMES=<n>` in `nfs_sim`; [`super::surfaces_by_object`] is what that uses.
 pub fn is_road(name: &str) -> bool {
     name.contains("ROAD")
 }

@@ -36,8 +36,8 @@ mod tiers;
 pub use build::{build_region, nearest, CityMesh, CityVisuals};
 pub use cell::{cell_centre, cell_of, CELL_SIZE};
 pub use collide::{
-    collision_cells, surface_of, Bounds, CityCollider, Ground, Surface, Walls, GROUND_CELL,
-    WALL_NORMAL_Y,
+    collision_cells, surface_of, surfaces_by_object, Bounds, CityCollider, Ground, Surface, Walls,
+    GROUND_CELL, WALL_NORMAL_Y,
 };
 pub use network::{Junction, Network};
 pub use load::{

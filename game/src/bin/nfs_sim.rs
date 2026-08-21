@@ -490,6 +490,155 @@ async fn run() {
     // What the height solve had to guess at. A tree is a piece nothing outside it can reach, so
     // any rule that acts at one node — a tie-break, an anchor — acts on one of these and no more.
     println!("kot çözümü: {trees} ağaç · komşudan yükseklik alan {filled} düğüm");
+
+    // **`NFS_ROADNAMES=1`: what the city calls the things a route node stands on.**
+    //
+    // `route::is_road` is a *name* filter — "the name contains ROAD" — and a name filter can only
+    // be checked against names, which `Ground` throws away by construction. This asks the objects
+    // directly: how many of them the filter calls road, and for every node the filter leaves with
+    // no surface at all, what is actually under it. The second half is the measurement that says
+    // whether the filter is too narrow or the city is simply empty there.
+    if knob("NFS_ROADNAMES").is_some() {
+        // `TRN_ROADA_CHOP_12` and `TRN_ROADA_CHOP_37` are one family and counting them apart hides
+        // the shape of the answer; a run of digits becomes `#`.
+        let stem = |name: &str| {
+            let mut out = String::new();
+            let mut run = false;
+            for c in name.chars() {
+                if c.is_ascii_digit() {
+                    if !run {
+                        out.push('#');
+                    }
+                    run = true;
+                } else {
+                    out.push(c);
+                    run = false;
+                }
+            }
+            out
+        };
+        let roadish = objects.iter().filter(|m| city::is_road(&m.header.name)).count();
+        println!(
+            "nesne sayımı: {} nesne · is_road {} tanesini yol sayıyor (%{:.1})",
+            objects.len(),
+            roadish,
+            100.0 * roadish as f32 / objects.len().max(1) as f32
+        );
+        // **Every family, not only the matched ones.** A name filter is judged by what it lets
+        // through *and* by what it drops, and only the second can say it is too narrow.
+        let mut fam: std::collections::BTreeMap<String, usize> = Default::default();
+        for m in &objects {
+            *fam.entry(stem(&m.header.name)).or_default() += 1;
+        }
+        let mut fam: Vec<_> = fam.into_iter().collect();
+        fam.sort_by_key(|(_, n)| std::cmp::Reverse(*n));
+        let matched = fam.iter().filter(|(n, _)| city::is_road(n)).count();
+        // `NFS_ROADNAMES=<n>`: how many families to print. The default is a look; the full list
+        // is what says there is no road-named class the filter misses.
+        let top: usize = knob("NFS_ROADNAMES").and_then(|v| v.parse().ok()).unwrap_or(24);
+        println!("  aile: {} · is_road {matched} tanesini yol sayıyor", fam.len());
+        for (name, n) in fam.iter().take(top) {
+            println!("     {n:>5}  {name}{}", if city::is_road(name) { "   ← is_road" } else { "" });
+        }
+
+        let flat: Vec<(f32, f32)> = nodes
+            .iter()
+            .map(|n| {
+                let p = city::remap([n.x, n.y, 0.0]);
+                (p.x, p.z)
+            })
+            .collect();
+        let all = city::surfaces_by_object(&objects, &flat);
+        // What the ground grid would offer: the drivable ones. The rest is kept beside it so
+        // the "road object, called a wall" case can be counted rather than assumed away.
+        let hits: Vec<Vec<(usize, f32)>> = all
+            .iter()
+            .map(|h| {
+                h.iter()
+                    .filter(|(_, _, k)| *k == city::Surface::Drivable)
+                    .map(|(m, y, _)| (*m, *y))
+                    .collect()
+            })
+            .collect();
+        let mut under: std::collections::BTreeMap<String, usize> = Default::default();
+        let (mut roadless, mut empty, mut shown) = (0usize, 0usize, 0usize);
+        for (i, (x, z)) in flat.iter().enumerate() {
+            if !roads.heights_at(*x, *z).is_empty() {
+                continue;
+            }
+            roadless += 1;
+            if hits[i].is_empty() {
+                empty += 1;
+                continue;
+            }
+            for (m, _) in &hits[i] {
+                *under.entry(stem(&objects[*m].header.name)).or_default() += 1;
+            }
+            if shown < 10 {
+                shown += 1;
+                let list: Vec<String> = hits[i]
+                    .iter()
+                    .map(|(m, y)| format!("{}@{y:.1}", objects[*m].header.name))
+                    .collect();
+                println!("  düğüm {i:>4} ({x:>7.1},{z:>7.1}) · {}", list.join(" · "));
+            }
+        }
+        println!(
+            "yolsuz düğüm: {roadless} / {} · bunların {empty} tanesinin altında sürülebilir hiçbir \
+             şey yok",
+            flat.len()
+        );
+        let mut under: Vec<_> = under.into_iter().collect();
+        under.sort_by_key(|(_, n)| std::cmp::Reverse(*n));
+        println!("  yolsuz düğümlerin altındaki aileler ({}):", under.len());
+        for (name, n) in under.iter().take(top) {
+            println!("     {n:>5}  {name}{}", if city::is_road(name) { "   ← is_road" } else { "" });
+        }
+        // **The question a name filter is actually asked: would widening it rescue anything?**
+        // Counted in *nodes*, not objects — a node is rescued if any one object under it carries
+        // the token, and a family histogram cannot say that because one node stands on several.
+        let tokens = [
+            "TUNNEL", "TUNNNEL", "BRIDGE", "MERIDIAN", "RUNWAY", "TRAINTRACK", "DRIFT", "PUDDLE",
+            "CEILING", "PROPS", "TERRAIN",
+        ];
+        let mut rescued = vec![0usize; tokens.len()];
+        for (i, (x, z)) in flat.iter().enumerate() {
+            if !roads.heights_at(*x, *z).is_empty() {
+                continue;
+            }
+            for (t, token) in tokens.iter().enumerate() {
+                if hits[i].iter().any(|(m, _)| objects[*m].header.name.contains(token)) {
+                    rescued[t] += 1;
+                }
+            }
+        }
+        // **The other way a name filter can be innocent: the object is there and `surface_of` calls
+        // it a wall.** Counted separately, because widening the *name* filter would not help that
+        // and steepening the *surface* test is a different change entirely.
+        let mut road_but_walled = 0usize;
+        for (i, (x, z)) in flat.iter().enumerate() {
+            if !roads.heights_at(*x, *z).is_empty() {
+                continue;
+            }
+            if all[i].iter().any(|(m, _, k)| {
+                *k != city::Surface::Drivable && city::is_road(&objects[*m].header.name)
+            }) {
+                road_but_walled += 1;
+            }
+        }
+        println!(
+            "  altında yol nesnesi olup da yüzeyi duvar sayılan yolsuz düğüm: {road_but_walled}"
+        );
+        println!(
+            "  jetonu eklemek kaç yolsuz düğümü kurtarır: {}",
+            tokens
+                .iter()
+                .zip(&rescued)
+                .map(|(t, n)| format!("{t} {n}"))
+                .collect::<Vec<_>>()
+                .join(" · ")
+        );
+    }
     // Subdivided, because the outline's own corners are up to 425 m apart — see `route::densify`.
     let coarse: Vec<Vec3> = ev
         .map(|e| e.outline.iter().map(|p| city::remap([p[0], p[1], 0.0])).collect())

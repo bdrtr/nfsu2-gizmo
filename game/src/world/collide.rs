@@ -748,6 +748,81 @@ fn surface_y(t: &[Vec3; 3], x: f32, z: f32) -> Option<f32> {
     (inside(l1) && inside(l2) && inside(l3)).then_some(l1 * a.y + l2 * b.y + l3 * c.y)
 }
 
+/// Which of the city's objects put a drivable surface over each of a set of points, and how high.
+///
+/// **A measurement instrument, and it exists because [`Ground`] deliberately throws names away.**
+/// `Ground` is a height field: it answers "what surfaces are at this XZ" and cannot answer "what is
+/// the city calling them", which is the only question that can check a *name* filter like
+/// [`route::is_road`](super::route::is_road). Asking it needs the objects themselves, so it is
+/// asked here, once, over the same triangles [`collision_cells`] would bucket.
+///
+/// Returns one list per query point: `(index into `meshes`, the height its surface has there, what
+/// [`surface_of`] calls it)`, lowest first, deduplicated the way [`Ground::heights_at`] deduplicates
+/// — two triangles of one quad meet along a diagonal and would otherwise answer twice for the same
+/// object.
+///
+/// **The surface class is returned rather than filtered on**, because the two questions a name
+/// filter raises need different answers: "what is under this node" wants the drivable ones, and
+/// "is there a road object here that was classified as wall" wants the rest. A near-vertical
+/// triangle has no area seen from above and drops out at [`surface_y`]'s determinant test either
+/// way, so the second question is answered for slopes and not for walls.
+///
+/// Costs a pass over every triangle in the city, so it is for a diagnostic and not for a frame.
+#[must_use]
+pub fn surfaces_by_object(
+    meshes: &[WorldMesh],
+    at: &[(f32, f32)],
+) -> Vec<Vec<(usize, f32, Surface)>> {
+    let key = |v: f32| (v / GROUND_CELL).floor() as i32;
+    // The query points, bucketed the way the ground grid buckets, so a triangle only has to look at
+    // the handful of points that could be under it.
+    let mut buckets: std::collections::HashMap<(i32, i32), Vec<usize>> =
+        std::collections::HashMap::new();
+    for (i, (x, z)) in at.iter().enumerate() {
+        buckets.entry((key(*x), key(*z))).or_default().push(i);
+    }
+    let mut out: Vec<Vec<(usize, f32, Surface)>> = vec![Vec::new(); at.len()];
+
+    for (m, object) in meshes.iter().enumerate() {
+        if object.positions.is_empty() || object.indices.len() < 3 {
+            continue;
+        }
+        for tri in object.indices.chunks_exact(3) {
+            let Some(p) = tri
+                .iter()
+                .map(|&i| object.positions.get(i as usize).copied())
+                .collect::<Option<Vec<_>>>()
+            else {
+                continue;
+            };
+            let w = [
+                world_point(&object.header, p[0]),
+                world_point(&object.header, p[1]),
+                world_point(&object.header, p[2]),
+            ];
+            let kind = surface_of(w[0], w[1], w[2]);
+            let (lo_x, hi_x) = w.iter().fold((f32::MAX, f32::MIN), |a, q| (a.0.min(q.x), a.1.max(q.x)));
+            let (lo_z, hi_z) = w.iter().fold((f32::MAX, f32::MIN), |a, q| (a.0.min(q.z), a.1.max(q.z)));
+            for cx in key(lo_x)..=key(hi_x) {
+                for cz in key(lo_z)..=key(hi_z) {
+                    for &i in buckets.get(&(cx, cz)).into_iter().flatten() {
+                        let (x, z) = at[i];
+                        if let Some(y) = surface_y(&w, x, z) {
+                            out[i].push((m, y, kind));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for hits in &mut out {
+        hits.sort_by(|a, b| a.1.total_cmp(&b.1).then(a.0.cmp(&b.0)));
+        hits.dedup_by(|a, b| a.0 == b.0 && a.2 == b.2 && (a.1 - b.1).abs() < 0.05);
+    }
+    out
+}
+
 /// Bucket the city's triangles into per-cell collision meshes.
 ///
 /// Takes the same objects the visuals are built from, so what you hit is what you see. Objects with
@@ -803,6 +878,29 @@ mod tests {
     use super::*;
     use gizmo_nfs::types::{AssetHash, IDENTITY};
     use gizmo_nfs::world::WorldSolidHeader;
+
+    /// What is under a point, named. The stack comes back lowest first whatever order the objects
+    /// are in, because the caller's whole question is which of them the city means.
+    #[test]
+    fn what_is_under_a_point_comes_back_named_and_lowest_first() {
+        // Horizontal in the game's own frame is horizontal in the world's — `remap` sends the
+        // file's third axis to height — so these are two flat decks twenty metres apart.
+        let mut low = mesh(vec![[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [0.0, 10.0, 0.0]], vec![0, 1, 2]);
+        low.header.name = "TRN_CN_ROADA_CHOP_A1_R1".into();
+        let mut high =
+            mesh(vec![[0.0, 0.0, 20.0], [10.0, 0.0, 20.0], [0.0, 10.0, 20.0]], vec![0, 1, 2]);
+        high.header.name = "TRN_CN_TERRAINA_NR_CHOP_R8".into();
+
+        // Passed high-first on purpose: the sort is the thing being tested.
+        let hits = surfaces_by_object(&[high, low], &[(-2.0, -2.0), (500.0, 500.0)]);
+        assert_eq!(hits[0].len(), 2, "both decks answer");
+        assert_eq!(hits[0][0].0, 1, "the road is the lower one and comes first");
+        assert!(hits[0][0].1.abs() < 1e-3);
+        assert_eq!(hits[0][0].2, Surface::Drivable);
+        assert_eq!(hits[0][1].0, 0);
+        assert!((hits[0][1].1 - 20.0).abs() < 1e-3);
+        assert!(hits[1].is_empty(), "a point off the city answers nothing");
+    }
 
     fn mesh(positions: Vec<[f32; 3]>, indices: Vec<u32>) -> WorldMesh {
         let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);

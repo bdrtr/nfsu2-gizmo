@@ -5802,6 +5802,65 @@ hâli).
   sayısı bu yüzden *normale göre sürülebilir bir katman* diyor, *yol* demiyor.
 - **4001'in kalan %7,3'ü**, ve o adımların %95'inde düğümün kotunda yüzey var — yani orada hâlâ
   bir seçim yanlış. Bir sonraki bakılacak yer burası.
-- **44 düğümün altında neden hiç yol yok?** `route::is_road` yalnız adında `ROAD` geçen nesneyi
-  yol sayıyor; aynı fonksiyonun dokümanı `RDP_*`'yi de yol sayar diyor ve `RDP_` içinde `ROAD`
-  yok. Filtrenin dar olup olmadığı ölçülmedi.
+- **44 düğümün altında neden hiç yol yok?** Ölçüldü — aşağıdaki kayda bakın: filtre dar değil.
+
+### `is_road` ölçüldü: filtre dar değil, eksik olan kapsam (2026-08-21)
+
+Bir ad filtresi ancak adlara karşı sınanabilir, ve `Ground` adları kuruluş gereği atıyor — o bir
+yükseklik alanı. Bu yüzden `world::surfaces_by_object` yazıldı: şehrin bütün üçgenlerini tek geçişte
+tarayıp bir XZ'nin altında **hangi adlı nesnenin** hangi kotta, hangi yüzey sınıfıyla yüzey verdiğini
+söylüyor. `nfs_sim`'de `NFS_ROADNAMES=<n>` onu sürüyor.
+
+**Şehrin adlandırması.** `TRN_<bölge>_<sınıf>_..._CHOP_<hücre>_<lod>`. Adlar 27 karakterde
+kırpılıyor, ama sınıf alanı 8. karakterde başlıyor, yani `ROAD` jetonu asla kırpılmıyor. Tüm
+bundle'lar yüklüyken 13.986 nesne, 4.699 ad ailesi. En kalabalık sınıflar:
+
+| sınıf | nesne | | sınıf | nesne |
+|---|---|---|---|---|
+| TERRAINA | 2.296 | | FOUNDATION | 121 |
+| **ROADA** | **1.472** | | CEILINGSA | 112 |
+| GRASS | 939 | | GRASSDRAG | 110 |
+| TERRAIN | 700 | | TRAINTRACKS | 96 |
+| **RDP** | **699** | | ROADDRAG | 88 |
+| CONCRETE | 414 | | DRIFTSZ# | 70 |
+| PROPSA / PROPSB | 327 / 195 | | ROAD# | 53 |
+
+`is_road` **1.928** nesne yakalıyor — fonksiyonun kendi dokümanındaki sayı birebir doğrulandı — ve
+yakaladığı yalnız `ROADA` değil: ROADA 1.537, ROAD# 184, ROADDRAG 88, ROAD 39, ROADB 27, artı
+`ROADPIECE*` ailesi. **Aralarında 15 tane yüzey olmayan da var** (`ROADSIGNB` 3, `ROADBARRIERB` 3,
+`ROADSKID*` 9); tabela ve bariyer geometrisi dik olduğu için `surface_of`'un onları eleyip elemediği
+ayrıca ölçülmedi.
+
+**Ve dokümanın `RDP_*` iddiası yanlış.** `RDP` bir yol sınıfı değil, bir **yer** öneki — havaalanı:
+699 nesnenin 630'u `TRN_RDP_RUNWAY_*`, 44'ü `TRN_RDP_DRAG#_*`, 25'i `TRN_RDP_RUNWAYSKID_*`. Hiçbirinin
+adında `ROAD` geçmiyor, yani `is_road` onların **sıfırını** yakalıyor. O cümle düzeltildi.
+
+**Genişletmek hiçbir şey kurtarmıyor.** Sekiz rotanın 2.052 düğümünün 131'inin altında yol nesnesi
+yok (bölge bundle'ı tek başına yüklüyken 190). Jetonu `is_road`'a eklemenin kurtardığı düğüm sayısı,
+sekiz rota toplamı:
+
+| jeton | TUNNEL | TUNNNEL | BRIDGE | MERIDIAN | RUNWAY | DRIFT | PUDDLE | PROPS | CEILING | TRAINTRACK | TERRAIN |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| kurtardığı | **0** | **0** | **0** | **0** | **0** | **0** | **0** | 4 | 7 | 34 | 131 |
+
+Yedi adayın hepsi sıfır. Kurtaran üçü de eklenmemeli: `TERRAIN` bu filtrenin dışarıda tutmak için var
+olduğu düz rafın ta kendisi, `CEILING` bir üst geçidin alt yüzeyi, ve `TRAINTRACK` bir ray —
+`Paths4041`'de raylar y = −1'de, yarışın sürdüğü zemin ise 9,7 m yukarıda (`TRN_IP_TERRAINA_NR_CHOP_J*`),
+yani eklemek arabaları garın tabanına indirirdi.
+
+**Yüzey testi de saklamıyor.** O düğümlerin altında `surface_of`'un duvar saydığı bir yol nesnesi
+bulunan düğüm sayısı sekiz rotada da **sıfır**. Filtre "yol yok" dediğinde gerçekten yol nesnesi yok.
+
+**Asıl boşluk kapsam, ve yalnız üç rotada.** Bölge bundle'ı yerine bütün şehir yüklendiğinde:
+
+| rota | 4001 | 4002 | 4021 | 4041 | 4061 | 4081 | 4102 | 4121 | toplam |
+|---|---|---|---|---|---|---|---|---|---|---|
+| bölge bundle'ı | 53 | 9 | 14 | 86 | 6 | 10 | 8 | 4 | **190** |
+| tüm bundle'lar | **10** | **0** | 14 | 86 | 6 | **3** | 8 | 4 | **131** |
+
+4001, 4002 ve 4081'de yolun bir kısmı gerçekten başka bir bölgenin bundle'ında; kalan beş rotada
+şehir orada yolu hiç modellememiş. Bu `NFS_BUNDLE=all`'ı bir düzeltme yapmaz — kayıtta duruyor ki o
+düğme delikleri bir arenanın tabanıyla kapatıyor — ama bu sefer kapanan şey *yol adlı* nesne, ki
+farklı bir iddia ve ayrıca ölçülmeye değer.
+
+**Sonuç: `is_road` olduğu gibi kalıyor.** Ölçülen bir refütasyon, bir düzeltme değil.
