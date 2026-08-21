@@ -757,7 +757,7 @@ async fn run() {
         // The width a segment has to exceed before it is split, as a multiple of the step.
         let gap_at: f32 =
             knob("NFS_FILLGAPS").and_then(|v| v.parse().ok()).unwrap_or(GAP_AT).max(1.0);
-        let ring = if knob("NFS_FILLGAPS").is_none_or(|v| v != "0") {
+        let ring = if knob("NFS_FILLGAPS").is_some_and(|v| v != "0") {
             let mut w = pulled;
             for _ in 0..8 {
                 let mut out: Vec<Vec3> = Vec::with_capacity(w.len());

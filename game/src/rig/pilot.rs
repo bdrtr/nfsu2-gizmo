@@ -209,15 +209,16 @@ const ESCAPE_FULL: f32 = 2.0;
 /// the field gains +14 and no single route moves it by more than 8 — a real win. Against 150° it
 /// gains +20, but `Paths4102` alone is −31, more than the whole margin. Between 150° and 170°
 /// the eight-route field cannot choose; see `ROADMAP.md`, 2026-08-20.
-/// **And with a regular ring it is inert too** (2026-08-21). `GAP_AT` keeps the course's spacing
-/// within about a step, so a goal is never stranded beyond the release radius and the situation
-/// this rule exists for — an aim with no usable side — barely arises. Swept again on that ring
-/// with the rule **off**: five of the eight routes come out **byte-identical**, the field differs
-/// by +11 waypoints (inside the sweep's own ±37 noise floor), `furthest` is *higher* without it
-/// (6049 m against 5928) and the cars that lose the race line go 34 → 35.
+/// **And on the pulled ring it is inert too** (2026-08-21). The situation this rule exists for —
+/// an aim with no usable side — barely arises once the ring is on the corridor. Swept with the
+/// rule **off**: **six of the eight routes come out byte-identical** and the field differs by +6
+/// waypoints, far inside the sweep's own ±37 noise floor.
 ///
-/// Second constant in two days to be rendered inert by repairing the course rather than by being
-/// re-tuned — see [`PASSED_NEAR`]. Both were written for symptoms of the same defect. Kept, at no
+/// Measured twice, once with a gap repair in place and once without it after that repair was
+/// refuted; both give the same answer, so the cause is the pull rather than the repair.
+///
+/// Second constant to be rendered inert by repairing the course rather than by being re-tuned —
+/// see [`PASSED_NEAR`]. Both were written for symptoms of the same defect. Kept, at no
 /// cost, because nothing argues for removing a rule that fires rarely and correctly; but nothing
 /// in the field depends on it any more, and a future measurement that finds it mattering again
 /// should be read as the course having drifted rather than the pilot having changed.
@@ -377,10 +378,13 @@ const REACHED: f32 = 18.0;
 /// +30 (one route is −47), and it beats switching the release *off* by +75 of which `Paths4121`
 /// alone is +104 — with off ahead on three of the eight. The release is measured; 60 rather than
 /// 80 is not. See `ROADMAP.md`, 2026-08-20.
-/// **And with a regular ring it does nothing at all** (2026-08-20). Once the pull's stretch is
-/// repaired — `GAP_AT` keeps every gap under about 1.1 steps, so 44 m at a 40 m step — no waypoint
-/// is ever further than this radius, and the radius stops binding. Swept again on that ring: 90 m
-/// gives a **byte-identical** field on all eight routes and 40 m differs by two waypoints on one.
+/// **And on the pulled ring it does nothing at all** (2026-08-21). Swept again: 90 m gives a
+/// **byte-identical** field on all eight routes and 40 m differs by two waypoints on one.
+///
+/// First measured with a gap repair in place and attributed to it; the repair was then refuted
+/// and reverted (see `GAP_AT`), and the same sweep on the shipped ring gives the same answer. So
+/// what made this constant inert is the **pull** — waypoints on the corridor are close enough to
+/// the car's own path that one is always within the radius — not anything about gap width.
 ///
 /// That explains the audit above rather than contradicting it. This constant looked arbitrary
 /// because the ring was irregular; with the ring regular it is provably inert. A constant whose

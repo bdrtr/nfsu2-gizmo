@@ -5469,3 +5469,42 @@ düzelmiş demektir; yeniden ölçülebilir hâle geldiyse kursun kaydığından
 
 İkisi de kaldırılmadı: nadiren ve doğru ateşleyen bir kuralı silmek için sebep yok, ve maliyeti
 sıfır. Ama alanda hiçbir şey artık onlara dayanmıyor.
+
+### DÜZELTME — boşluk doldurma geri alındı: kazandığı her sütun **duran arabayla** şişiyor (2026-08-21)
+
+Bir önceki bölüm `GAP_AT = 1.1`'i varsayılan yaptı. **Yanlıştı, ve daha derin bir ölçüm yakaladı.**
+
+Kabul, koridorda geçen süre (+3,6 puan) ve hattı bırakan arabanın 40 → 34 olmasına dayanıyordu.
+İkisi de **yolda duran** arabayla şişen sütunlar: duran araba koridorun içindedir, yani orada
+geçen süreyi bedavaya yazar, ve hattı da hiç bırakmaz. İlerleme sorulunca tablo tersine dönüyor:
+
+| | kursta | kursta kalanın düğümü | alan kavşağı | ayrık düğüm | ilerlemesi duran |
+|---|---|---|---|---|---|
+| **kapalı** (geri alındı) | 15 | **19,0** | **1.641** | **1.594** | **5**, duruş %21 |
+| 1,1× | **17** | 11,3 | 1.562 | 1.490 | 8, duruş **%45** |
+
+`Paths4081` bütün hikâyeyi tek rotada anlatıyor: koridorda geçen süresi %51,0 → **%90,2** —
+kabulün dayandığı sayı — ama aynı koşuda geçilen waypoint 156 → **128** ve kavşak 219 → **155**.
+Arabalar kursta değil, kursun üstüne **park etmiş**. `Paths4121` gerçekten kazanıyor (+57 waypoint)
+ve `Paths4021` gerçekten kaybediyor (0 → 4 takılan): değişiklik takılmayı ortadan kaldırmıyor,
+rotalar arasında **taşıyor**.
+
+Geri alındı ve doğrulandı (4081 219 kavşak, 4021 235 — çekme sonrası taban).
+
+**Ders, ve bu sefer bir yanlış kabule mal oldu:** *koridorda geçen süre* ve *hattı bırakma*
+ölçülerinin ikisi de **duran arabayı başarı sayıyor**. Devrilme ağında da aynı tuzağa değmiştik
+(yan yatmış araba koridorda sayılıyor). Arabaları durdurabilecek her değişiklik, kavşak · ayrık
+düğüm · takılma sayısıyla **birlikte** yargılanmalı.
+
+### Ve iki sabitin atıllığı ayakta — ama sebebi boşluk düzeltmesi değil, **çekmenin kendisi**
+
+Geri almadan sonra ikisi de yeniden soruldu, bu kez sevk edilen halkada:
+
+| | alan farkı | bayt-birebir aynı rota |
+|---|---|---|
+| `PASSED_NEAR` 60 → 90 | **±0** | **8 / 8** |
+| `BEHIND` açık → kapalı | +6 | **6 / 8** |
+
+Yani dünkü sonuç doğru, atfı yanlıştı. Bu iki sabiti gereksiz kılan şey halkanın **aralığı** değil,
+koridora **çekilmiş** olması: koridordaki bir waypoint arabanın kendi yoluna yeterince yakın
+olduğu için bırakma yarıçapı hiç bağlamıyor ve "hedef arkada" hâli neredeyse hiç doğmuyor.
