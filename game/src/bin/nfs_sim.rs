@@ -1302,6 +1302,60 @@ async fn run() {
             }
         }
         println!("   yarım adımdan geniş aralık: {gaps}");
+        // **What `0x00034149` says about the paths the ring runs over, and whether the ring agrees.**
+        //
+        // The game reads the node table and the event catalogue and nothing else; the per-path
+        // record — one 220-byte entry per path, every field of it exact in 2,923 of 2,923 — is
+        // decoded in the parser and never opened here. `driven_in_file_order` (`to >= from`) is the
+        // file's own answer to the question `Network::of` says out loud that it is guessing at:
+        // "nearly half the install's paths are stored against the way they are driven, so an edge
+        // here is undirected and the direction is the driver's business."
+        //
+        // So: for each path the ring passes over, does the ring traverse it the way the file says
+        // it is driven? A track carries two race directions, so disagreement is not by itself an
+        // error — but a route where the ring agrees on some paths and not others is telling you
+        // something neither the outline nor the node table can.
+        if let Ok(info) = gizmo_nfs::world::routes::path_info(&bytes) {
+            let by_id: std::collections::HashMap<u16, &_> =
+                info.iter().map(|i| (i.id, i)).collect();
+            // The ring's own order over each path: the progress of the first node it meets on that
+            // path against the last.
+            let mut seen: std::collections::BTreeMap<u16, (f32, f32)> = Default::default();
+            for w in &waypoints {
+                let near = (0..nodes.len())
+                    .map(|j| {
+                        let q = city::remap([nodes[j].x, nodes[j].y, 0.0]);
+                        (j, (w.x - q.x).hypot(w.z - q.z))
+                    })
+                    .min_by(|a, b| a.1.total_cmp(&b.1));
+                if let Some((j, d)) = near {
+                    if d <= 40.0 {
+                        let e = seen
+                            .entry(nodes[j].path)
+                            .or_insert((nodes[j].progress, nodes[j].progress));
+                        e.1 = nodes[j].progress;
+                    }
+                }
+            }
+            let (mut agree, mut against, mut flat_p) = (0usize, 0usize, 0usize);
+            for (path, (first, last)) in &seen {
+                let Some(i) = by_id.get(path) else { continue };
+                let ring_forward = last > first;
+                if (last - first).abs() < 1.0 {
+                    flat_p += 1;
+                } else if ring_forward == i.driven_in_file_order() {
+                    agree += 1;
+                } else {
+                    against += 1;
+                }
+            }
+            println!(
+                "   hat kaydı (0x00034149): {} hat · halkanın geçtiği {} hattın {agree}'i dosyanın \
+                 sürüş yönüyle AYNI, {against}'i TERS, {flat_p}'i tek waypoint",
+                info.len(),
+                seen.len()
+            );
+        }
         let total: usize = by_path.values().sum();
         println!(
             "   halkanın hangi hattın üstünde: {}",

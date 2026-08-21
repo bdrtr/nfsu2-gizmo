@@ -6544,3 +6544,47 @@ yok; **halkanın tarifi eksik ve ölçülerin yarısı o eksikliği arabanın ha
 iki kez sorup iki kez çürütmüştü, ama ikisi de *ağ genelinde* ilerlemeyi sıralamayı denemişti,
 hat uçlarının ilerlemesini eşleştirmeyi değil. Ölçüsü dar: kurulumun 105 rota dosyasında, bir hattın
 son düğümünün ilerlemesi ile bağlandığı hattın ilk düğümünün ilerlemesi ne sıklıkta eşleşiyor?
+
+### Oyun `0x00034149`'u hiç okumuyor — ve okusa da yarışın yönünü söylemiyor (2026-08-21)
+
+Rota dosyasının hat başına bir 220 baytlık kaydı var (`0x00034149`) ve parser'da tamamen çözülmüş:
+`id`, `nodes`, `from`/`to` (dosya sırasındaki ilk ve son düğümün ilerlemesi), `low`/`high`, hepsi
+kurulumun **2.923 hattının 2.923'ünde kesin**. Oyun bu chunk'ı **hiç açmıyor** — `path_info`,
+`PathInfo`, `driven_in_file_order` adı `nfsu2-gizmo`'da geçmiyor.
+
+Bu tembellikten fazlası, çünkü `Network::of`'un kendi dokümanı tam da bu kaydın cevapladığı şeyi
+tahmin ettiğini söylüyor:
+
+> *"nearly half the install's paths are stored against the way they are driven, so an edge here is
+> undirected and the direction is the driver's business."*
+
+`PathInfo::driven_in_file_order()` (`to >= from`) o cümlenin dosyadaki cevabı. Parser onu
+*"The one thing this record settles that nothing else does"* diye niteliyor.
+
+**Ama yarışın yönünü söylemiyor, ve bu ölçüldü.** Halkanın her hattı hangi yönde geçtiği (o hattaki
+ilk ve son waypoint'in ilerlemesi) dosyanın sürüş yönüyle karşılaştırıldı:
+
+| rota | halkanın geçtiği hat | aynı | ters | tek waypoint | aynı oranı |
+|---|---|---|---|---|---|
+| **4001** | 27 | **16** | 5 | 6 | **%76** |
+| 4002 | 32 | 10 | 11 | 11 | %48 |
+| 4021 | 20 | 5 | 7 | 8 | %42 |
+| 4041 | 46 | 10 | 10 | 26 | %50 |
+| 4061 | 7 | 2 | 2 | 3 | %50 |
+| 4081 | 32 | 13 | 12 | 7 | %52 |
+| **4102** | 43 | 8 | **18** | 17 | **%31** |
+| 4121 | 34 | 12 | 15 | 7 | %44 |
+
+Sekiz rotanın altısında yazı-tura. Bu şaşırtıcı değil: bir parkur iki yarış yönü taşıyor
+(`Routes####F.bin` / `Routes####B.bin`, ve iki çıkış gridi), yani bir hattın *saklanma* yönü ile bir
+yarışın onu *sürme* yönü ayrı şeyler. Kayıt bunu zaten söylüyordu; şimdi sayısı var.
+
+**İki uç dikkat çekiyor ama örüntü değil:** en sağlıklı rota 4001 %76 ile en uyumlu, en kötüsü 4102
+%31 ile en uyumsuz — ama 4021 %42 ile %94,2 kursta süre yapıyor, yani korelasyon yok.
+
+**Sonuç: bu kayıt yön için kullanılamaz** — grafın kenarlarını hat kaydına göre yönlendirmek
+yarışın yarısını ters yöne kilitlerdi. Ama kaydın *kullanılmayan* olduğu tespiti duruyor ve
+`from`/`to`/`low`/`high` alanları hâlâ açık: bir hattın ilerleme aralığını bilmek, bir düğümün o
+hattın neresinde olduğunu ve iki hattın uçlarının eşleşip eşleşmediğini **düğüm tablosunu
+taramadan** söyler. Bir önceki kaydın istediği ölçü (hat uçlarının ilerlemesi ne sıklıkta eşleşiyor)
+tam olarak bu dört alanla, tek dosya okumasıyla yapılabilir.
