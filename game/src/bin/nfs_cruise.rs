@@ -296,6 +296,11 @@ fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> CruiseState
     // down — including the height, which is why the airport's `y = -11` was carried downtown where
     // the ground is at `y = 27`. Asked properly, the number comes from the city.
     let ground = city::Ground::of(&colliders);
+    // The same city filtered to road objects. Heights for the race line and for the graph the
+    // rivals drive both come from this and not from `ground`: `Ground::of` judges a surface by its
+    // normal, so a flat roof is drivable and the shelf under the city climbs by nothing at all —
+    // which is what least-climb picks if you let it. See `city::road_ground`.
+    let roads = city::road_ground(&objects);
     // What a car cannot drive through, for the pilots' "not through that" rule — the same index the
     // sim measures with, so the two cannot disagree about where the concrete is.
     let walls = city::Walls::of(&colliders);
@@ -315,7 +320,7 @@ fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> CruiseState
             let nodes =
                 gizmo_nfs::world::routes::nodes(&bytes).expect("read the route file's nodes");
             route_nodes = nodes.clone();
-            let paths = city::build_route(&nodes, &city::road_ground(&objects));
+            let paths = city::build_route(&nodes, &roads);
             let corridor = city::Corridor::of(&paths, COURSE_HALF_WIDTH);
             let name = std::path::Path::new(&file)
                 .file_stem()
@@ -653,16 +658,18 @@ fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> CruiseState
         },
     );
     // The graph the rivals drive, and the waypoints they steer between junctions by. Built here
-    // because both want `ground`, which is the same surface the drawn line stands on — a driver and
-    // a ribbon that disagreed about where the road is would be very hard to read.
-    let net = city::Network::of(&route_nodes, &ground);
+    // because both want `roads`, which *is* the surface the drawn line stands on — a driver and a
+    // ribbon that disagreed about where the road is would be very hard to read, and until
+    // 2026-08-21 they did.
+    let net = city::Network::of(&route_nodes, &roads, &ground);
     if !net.is_empty() {
-        let (edges, dead, steep, walled) = net.shape();
+        let (edges, dead, steep, walled, trees, filled) = net.shape();
         println!(
             "network: {} nodes · {edges} links · {dead} with no way out · {steep} steeper than 1:1 \
              · {walled} dropped because the road does not continue along them",
             net.len()
         );
+        println!("kot çözümü: {trees} ağaç · komşudan yükseklik alan {filled} düğüm");
     }
     // Subdivided, because the outline's own corners are up to 425 m apart — see `route::densify`.
     let coarse: Vec<Vec3> = course_event

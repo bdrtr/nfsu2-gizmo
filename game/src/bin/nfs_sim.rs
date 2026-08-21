@@ -470,16 +470,26 @@ async fn run() {
     // The race's own line, as something to ask "is this car still on the course" of. The same
     // construction `nfs_cruise` draws, so the sim and the game cannot disagree about where the
     // course is.
+    //
+    // **The roads, as their own surface.** `Ground::of` calls a flat roof drivable because it judges
+    // by the normal, so the stack under a node is 79 m deep and the flat shelf under the city wins
+    // any least-climb rule outright. The drawn line has been built from this filtered ground since
+    // it existed; the graph the pilot drives was handed the unfiltered one, which is the bug
+    // `ROADMAP.md` records for 2026-08-21. Built once, given to both.
+    let roads = city::road_ground(&objects);
     let corridor =
-        city::Corridor::of(&city::build_route(&nodes, &city::road_ground(&objects)), city::COURSE_HALF_WIDTH);
+        city::Corridor::of(&city::build_route(&nodes, &roads), city::COURSE_HALF_WIDTH);
 
-    let mut net = city::Network::of(&nodes, &ground);
-    let (edges, dead, steep, walled) = net.shape();
+    let mut net = city::Network::of(&nodes, &roads, &ground);
+    let (edges, dead, steep, walled, trees, filled) = net.shape();
     println!(
         "network: {} nodes · {edges} links · {dead} with no way out · {steep} steeper than 1:1 · \
          {walled} dropped because the road does not continue along them",
         net.len()
     );
+    // What the height solve had to guess at. A tree is a piece nothing outside it can reach, so
+    // any rule that acts at one node — a tie-break, an anchor — acts on one of these and no more.
+    println!("kot çözümü: {trees} ağaç · komşudan yükseklik alan {filled} düğüm");
     // Subdivided, because the outline's own corners are up to 425 m apart — see `route::densify`.
     let coarse: Vec<Vec3> = ev
         .map(|e| e.outline.iter().map(|p| city::remap([p[0], p[1], 0.0])).collect())
@@ -913,9 +923,10 @@ async fn run() {
 
     // **How steep the graph's own links are.** A road climbs; a link that gains ten metres over
     // thirty is not a road, it is two decks joined because they happen to be near each other in
-    // plan. `Network::of` solves node heights one **path** at a time, so a cross-path link is free
-    // to do exactly that — and every test downstream is plan-view, so nothing notices. Counted
-    // rather than assumed, and split by whether the link crosses between paths.
+    // plan. `Network::of` solves node heights over the whole graph now, and over roads rather than
+    // over every drivable surface, so this is the column that says what either change bought —
+    // and every test downstream is plan-view, so nothing else notices. Counted rather than
+    // assumed, and split by whether the link crosses between paths.
     if knob("NFS_GRADE").is_some() {
         let mut all: Vec<(f32, u32, u32, bool)> = Vec::new();
         for i in 0..net.len() as u32 {

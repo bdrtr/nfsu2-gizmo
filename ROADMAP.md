@@ -5664,3 +5664,140 @@ bir güverte seçiyor ama **hangi güvertenin yarışın kendisi olduğunu bilmi
 kendi içinde pürüzsüz, ve en-az-tırnama kriteri alttakini seçebiliyor. Eksik olan bir çıpa: çıkış
 gridi gerçek zemine yerleştiriliyor (`ground at (x,z) is y=… — asked, not guessed`), yani yarışın
 hangi kotta başladığı biliniyor. Çözümü oradan çıpalamak bir sonraki adım.
+
+### Çıpa yazılmadan çürüdü; asıl sebep grafın sorduğu zeminmiş (2026-08-21)
+
+Bir önceki kaydın "sıradaki adım" dediği şey **çıkış gridinden çıpalamak**tı. Yazılmadı, çünkü
+önce ölçüldü ve ölçüm onu öldürdü.
+
+**Çıpanın düzeltecek bir şeyi yok.** Sekiz rotanın her birinde, gridin durduğu zemin ile grafın o
+gridin en yakın düğümüne verdiği kot zaten uyuşuyor:
+
+| rota | grid'in zemini | tuttuğu düğümün kotu | fark | gridin XZ'sindeki yüzeyler |
+|---|---|---|---|---|
+| 4001 | 9,98 | 10,1 | +0,1 | [7,3 · 10,0] |
+| 4002 | 30,74 | 31,0 | +0,3 | [17,9 · 28,7 · 30,7] |
+| 4021 | 12,63 | 12,3 | −0,3 | **[12,6]** |
+| 4041 | 8,62 | 8,6 | 0,0 | **[8,6]** |
+| 4061 | 323,61 | 324,3 | +0,7 | [323,5 · 323,6] |
+| 4081 | 30,44 | 29,0 | −1,4 | **[30,4]** |
+| 4102 | 17,18 | 17,0 | −0,2 | **[17,1]** |
+| 4121 | 3,80 | 3,8 | 0,0 | **[3,8]** |
+
+Güverte ayrımı ~10 m; en büyük hata 1,4 m. Yani seçili aday, çıpanın `|aday − çıpa|` terimini zaten
+minimize eden aday — çıpa hiçbir ağırlıkta hiçbir şeyi kıpırdatmaz. Sekiz gridin **beşi** üstelik
+tek yüzeyin üstünde duruyor, ve tek adaylı bir düğümde tekil terim `cost` vektörünün her girdisini
+aynı miktarda kaydırır: hiçbir `min_by`, hiçbir `chosen` yer değiştirmez. Aritmetik olarak atıl.
+
+**Ve `Paths4081`'in izi sapmanın nerede doğduğunu gösterdi** (`NFS_TRACE=2`, tek araba): sapma
+başlangıçta değil, 30. saniyeden sonra açılıyor —
+
+| t | araba y | tutulan düğüm | düğüm y | arabanın altındaki yüzeyler |
+|---|---|---|---|---|
+| 16,0 | 26,49 | 53 | 25,77 | [25,8] |
+| 28,0 | 7,98 | 57 | 7,27 | [3,5 · 4,7 · 7,3] |
+| 32,0 | 12,58 | 239 | **5,23** | [5,1 · 9,2 · **11,9**] |
+| 34,0 | 15,20 | 205 | **5,38** | [5,4 · 11,2 · **14,5**] |
+| 38,0 | 16,89 | 241 | **5,39** | [4,7 · 13,2 · **16,2**] |
+
+Araba üç güvertenin en üstünde, düğüm en altında. Çıpa 700 m geride ve doğru; hata burada.
+
+## Graf, dokuz gündür yanlış zemini soruyormuş
+
+`route::road_ground`'un kendi doküman satırı bunu zaten yazmış: *"Least-climb is only safe because
+of the road filter: over all drivable triangles it is degenerate, since the flat shelf beneath the
+city climbs by nothing at all and wins everywhere."* `follow_graph` tam olarak o en-az-tırmanma
+kuralı, ve **filtresiz zeminle besleniyordu**.
+
+Bu bir karar değil, bir kayma: `road_ground` 2026-08-11'de (`6c7658e`) geldi, `Network::of` ertesi
+gün bir binary'ye (`9ebf456`) girdi, ve o commit'in mesajı *"Every node stands on the same `Ground`
+the drawn line does, so a driver and a ribbon cannot disagree about where the road is"* diyordu —
+yazıldığı anda yanlıştı. Çizilen hat (`build_route`) baştan beri `road_ground` kullanıyor; grafın
+kendisi hiç kullanmadı. Hiçbir commit mesajı filtresiz zemini savunmuyor.
+
+### Yol zemini tek başına: bir rotayı düzeltiyor, bir rotayı öldürüyor
+
+`NFS_ROADHEIGHT=strict` — yol yoksa yok:
+
+| rota | yolsuz düğüm | duvarlı kesik | çıkışsız düğüm | güverte %adım |
+|---|---|---|---|---|
+| 4001 | **44** / 341 | 86 → **152** | 1 → **18** | 33,7 → **100,0** |
+| 4041 | 35 / 341 | 18 → **150** | 0 → **31** | 2,6 → 1,9 |
+| 4081 | 7 / 262 | 4 → 18 | 0 → 0 | **63,6 → 1,3** |
+| 4002 | 6 / 360 | 37 → 64 | 0 → 0 | 6,9 → 6,4 |
+
+4081'de aradığımız düzelme tam olarak geliyor; 4001'de alan duruyor — 31 waypoint, **sıfır kavşak**,
+32 m. Mekanizma zincirin tamamı görünüyor: altında yol olmayan düğüm `fill`'in ara değerini alıyor
+(hiçbir yüzey olmayan bir kot), `drop_walled` o düğümün bağlantılarını "yol devam etmiyor" diye
+kesiyor, ve 18 düğüm çıkışsız kalınca arabaların gidecek yeri kalmıyor.
+
+**Kontrol kolu mekanizmayı doğruluyor:** `strict` + `NFS_WALLED=0` (duvar filtresi kapalı) 4001'i
+31 → 350 waypoint'e geri getiriyor. Yani çöküş uydurulmuş kotların duvar filtresine çarpmasından.
+
+### Geri düşüş: yola sor, yol yoksa şehre sor
+
+Varsayılan artık bu. Yol yüzeyi varsa aday listesi ondan; yoksa o düğüm için sürülebilir zeminden.
+`road_ground`'un uyardığı yozlaşma böylece yerel ve sınırlı kalıyor — raf ancak yenecek yolun
+olmadığı yerde kazanabiliyor, ve yolla çözülmüş komşuları onu hâlâ çekiyor.
+
+| | waypoint | kursta süre | güverte %adım | 1:1'den dik | kavşak | furthest | hiç bırakmayan | fallen |
+|---|---|---|---|---|---|---|---|---|
+| **filtresiz** (eski) | 1.449 | %73,9 | **%18,6** | 11 | 1.649 | 5.918 m | 14 | 0 |
+| `strict` | 1.114 | %71,5 | %18,9 | 36 | 1.334 | 4.784 m | 19 | 0 |
+| `strict`+duvarsız | 1.414 | %74,9 | %11,7 | 44 | 1.651 | 5.746 m | 19 | 0 |
+| **geri düşüşlü** (kalan) | **1.451** | **%74,3** | **%7,9** | **6** | **1.665** | **5.923 m** | 14 | 0 |
+
+Rota rota güverte sapması (adımların yüzdesi, >3 m):
+
+| rota | 4001 | 4002 | 4021 | 4041 | 4061 | 4081 | 4102 | 4121 |
+|---|---|---|---|---|---|---|---|---|
+| filtresiz | 33,7 | 6,9 | 7,5 | 2,6 | 11,8 | **63,6** | 0,0 | 22,6 |
+| geri düşüşlü | **7,3** | 6,4 | 7,5 | **5,9** | 11,8 | **1,7** | 0,0 | 22,5 |
+
+Sürüş nötr — waypoint +2 (gürültü tabanı ±37), kavşak +16, `furthest` +5 m, `fallen` 0, 64/64 araba
+hâlâ kavşak alıyor — ve grafın kendi kalitesi düzeliyor: hiçbir yolun tırmanamayacağı bağlantı
+11 → 6.
+
+**Dürüstçe: iki rotada en kötü tek adım büyüyor** (4001 9,9 → 15,0 m; 4041 6,1 → 13,0 m) ve 4041'in
+sapan adım oranı %2,6 → %5,9. Karşılığında 4081 %63,6 → %1,7 ve 4001 %33,7 → %7,3. Alan ölçüsü
+adımların oranı; en kötü tek adım tek bir örnek ve öyle okunmalı.
+
+**4081'de kalan sapma artık başka bir sınıf:** kalan %1,7'lik adımların **%0**'ında düğümün kendi
+XZ'sinde arabanın kotunda bir yüzey var. Yani "seçim yanlış" sınıfı o rotada bitti; kalan "yüzey
+gerçekten yok".
+
+### Yol zemininin ortaya çıkardığı iki kusur — dünkü graf çözümünde
+
+Filtresiz zeminde her düğümün en az iki adayı vardı, yani ikisi de hiç tetiklenmiyordu.
+
+1. **Adaysız düğüm grafı ikiye bölüyordu.** `follow_graph`'ın BFS'i yalnız canlı düğümleri
+   geziyordu, dolayısıyla adaysız her düğüm bir kesme noktasıydı — ve yol filtresiyle o düğümler
+   tam olarak **hat sınırlarına** düşüyor, yani bu fonksiyonun var olma sebebi olan yeri kesiyordu.
+   Artık köprüleniyor: yürüyüş en yakın canlı atayı deliğin içinden geçiriyor.
+2. **`fill` bütün tabloyu tek dizi sayıyordu.** Düğüm indeksine göre ara değer biçiyor ve uçlarda
+   düz tutuyor — hat içinde dürüst (medyan aralık 29 m), hat sınırında anlamsız: komşu, şehrin
+   başka bir yerindeki başka bir yol. Hat hat çalışan koldaki davranış buydu zaten; graf kolu
+   almamıştı. Düzeltildi.
+
+**İkisi de eski zeminde ispatlı biçimde atıl.** Yalnız bu iki düzeltmeyi içeren kol (`NFS_ROADHEIGHT=0`)
+sürüşün her sütununda temel ölçümle **birebir aynı** çıkıyor; tek fark 4081'de 1:1'den dik sayılan
+bağlantının 3 → 2 olması, o da tek bir doldurulmuş düğümün kotunun hat içinde kalmasından.
+
+`follow_graph`'ın hiç testi yoktu; dört tane yazıldı — zincirde `follow` ile aynı cevabı vermesi,
+deliğin komşuları ayırmak yerine birleştirmesi, birleşmeyen parçaların sayılması, ve iki düz
+güvertenin berabere kalıp alttakinin seçilmesi (yani bu modülün bütün derdinin tek testte yazılı
+hâli).
+
+### Sıradaki iş
+
+- **Çizilen hat hâlâ katı yol zemininde.** `build_route` yol yoksa `fill`'in ara değerini alıyor,
+  graf ise şehre soruyor — yani ikisi artık yalnız o 4-44 düğümde ayrışıyor (eskiden her yığında
+  ayrışıyorlardı). Aynı geri düşüşü `build_route`'a vermek koridoru değiştirir, ve koridor her
+  ölçümün "kursta mı" testi; ayrı bir süpürme işi.
+- **`deck_had` ve gridin durduğu kot hâlâ filtresiz zemine soruyor** (`nfs_sim`). "Yüzey vardı"
+  sayısı bu yüzden *normale göre sürülebilir bir katman* diyor, *yol* demiyor.
+- **4001'in kalan %7,3'ü**, ve o adımların %95'inde düğümün kotunda yüzey var — yani orada hâlâ
+  bir seçim yanlış. Bir sonraki bakılacak yer burası.
+- **44 düğümün altında neden hiç yol yok?** `route::is_road` yalnız adında `ROAD` geçen nesneyi
+  yol sayıyor; aynı fonksiyonun dokümanı `RDP_*`'yi de yol sayar diyor ve `RDP_` içinde `ROAD`
+  yok. Filtrenin dar olup olmadığı ölçülmedi.

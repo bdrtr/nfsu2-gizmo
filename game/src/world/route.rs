@@ -810,61 +810,79 @@ fn point_to_segment(p: Vec3, a: Vec3, b: Vec3) -> (f32, f32) {
     ((p.x - cx).hypot(p.z - cz), t)
 }
 
-/// Choose one surface per node: the sequence that climbs least in total.
-///
-/// This is the whole of "which surface", and it replaces every rule that tried to pick per node.
-/// Bayview stacks — every node of `Paths4001` has **at least two** drivable surfaces under it, 179
-/// of its 341 have four or more, and the median distance from the top one to the bottom one is
-/// **79 m**. Taking the topmost lands on roofs, taking the lowest lands under the road, and any
-/// seed at all is a guess about a stack that deep.
-///
-/// A road does not need a seed to be recognised. It is the surface that is *there at every node*
-/// and *at nearly the same height each time*, because that is what a road is; a roof exists only
-/// over its building and a deck only over its span. So the surface to take is the one that makes
-/// the whole path climb as little as it can — minimise the sum of `|Δh|` over the path, which is a
-/// shortest path through the candidate lists and costs nothing at four candidates and ten nodes.
-///
-/// Nodes the city could not answer for are left `None` here and filled by [`fill`]; they carry no
-/// cost, so a hole does not decide anything for its neighbours.
 /// The same choice, made over the whole **graph** instead of one path at a time.
 ///
 /// [`follow`] is a Viterbi pass along a chain, and a path is a chain — which is exactly why it
 /// cannot see the thing that goes wrong at a junction. Heights solved one path at a time leave
 /// each path internally smooth and say nothing about the two sides of a path boundary, so two
 /// carriageways that meet can be solved onto **different decks** of the same interchange. Measured
-/// over the eight sweep routes: cars end up as much as 22.5 m above the node their own pilot is
-/// holding, on seven routes of eight, and for 70.6 % of the race on the worst — and in 88 % of
-/// those steps the node's own XZ *has* a surface at the car's height. The surface is there. The
-/// choice is wrong.
+/// over the eight sweep routes when this was written: cars ended up as much as 22.5 m above the
+/// node their own pilot was holding, on seven routes of eight, and for 70.6 % of the race on the
+/// worst — and in 88 % of those steps the node's own XZ *had* a surface at the car's height. The
+/// surface is there. The choice is wrong.
+///
+/// Solving over the graph halved the worst of that and left the rest. What removed it was not this
+/// function at all but the ground it is asked about — see [`Network::of`](super::Network::of): over
+/// every drivable surface, least-climb is degenerate, and the field's deck disagreement fell from
+/// 18.6 % of steps to 7.9 % the day the road filter reached this solve.
 ///
 /// So the same minimum-climb rule is applied over a spanning tree of the graph: a leaf-to-root DP
 /// that is exact on a tree exactly as [`follow`] is exact on a chain. Links that close a cycle are
 /// not constrained — capturing those needs loopy belief propagation and the tree already ties
 /// every path to its neighbours, which is the part that was missing.
-pub(crate) fn follow_graph(candidates: &[Vec<f32>], links: &[Vec<u32>]) -> Vec<Option<f32>> {
+///
+/// **A node with no candidates is a hole in the road, and holes are bridged.** The walk carries the
+/// nearest live ancestor through them, so two nodes with a hole between them are still parent and
+/// child in the DP tree. That is not tidiness: with the road-filtered ground this is solved over,
+/// the holes are the nodes the city has no road under, they sit at path boundaries, and cutting
+/// there would fragment the graph into pieces that each pick a deck on their own — which is the
+/// per-path failure this function exists to fix, arriving by a different door.
+///
+/// Returns the heights and **how many trees the graph fell into**, because one anchor, one prior or
+/// one tie-break reaches exactly one of them and a caller that does not know the count is guessing
+/// about its own reach.
+pub(crate) fn follow_graph(
+    candidates: &[Vec<f32>],
+    links: &[Vec<u32>],
+) -> (Vec<Option<f32>>, usize) {
     let n = candidates.len();
     let mut out = vec![None; n];
     let live = |i: usize| candidates.get(i).is_some_and(|c| !c.is_empty());
 
     let mut seen = vec![false; n];
+    let mut trees = 0usize;
     for root in 0..n {
         if seen[root] || !live(root) {
             continue;
         }
+        trees += 1;
         // Breadth-first, so the tree is shallow and the DP below is a single reverse pass.
+        //
+        // **A node the city could not answer for is bridged, not cut.** It joins its neighbours
+        // rather than separating them: the walk carries the nearest live ancestor through it, so
+        // two nodes with a hole between them end up parent and child in the DP tree and the hole
+        // decides nothing — the same property [`follow`] gets from filtering its chain down to the
+        // live nodes. Traversing only live nodes instead makes every hole a cut vertex, and with
+        // road-filtered ground the holes are real: they fall exactly on the path boundaries, which
+        // is where the whole point of solving over the graph is to hold two paths together.
         let mut order = vec![root];
         let mut parent = vec![usize::MAX; n];
         seen[root] = true;
-        let mut head = 0;
-        while head < order.len() {
-            let i = order[head];
-            head += 1;
+        // `(node, the nearest live node at or above it)` — for a live node that is itself.
+        let mut queue = std::collections::VecDeque::from([(root, root)]);
+        while let Some((i, up)) = queue.pop_front() {
             for &l in links.get(i).into_iter().flatten() {
                 let j = l as usize;
-                if j < n && !seen[j] && live(j) {
-                    seen[j] = true;
-                    parent[j] = i;
+                if j >= n || seen[j] {
+                    continue;
+                }
+                seen[j] = true;
+                if live(j) {
+                    parent[j] = up;
                     order.push(j);
+                    queue.push_back((j, j));
+                } else {
+                    queue.push_back((j, up));
                 }
             }
         }
@@ -916,9 +934,25 @@ pub(crate) fn follow_graph(candidates: &[Vec<f32>], links: &[Vec<u32>]) -> Vec<O
             out[i] = candidates[i].get(take[i]).copied();
         }
     }
-    out
+    (out, trees)
 }
 
+/// Choose one surface per node: the sequence that climbs least in total.
+///
+/// This is the whole of "which surface", and it replaces every rule that tried to pick per node.
+/// Bayview stacks — every node of `Paths4001` has **at least two** drivable surfaces under it, 179
+/// of its 341 have four or more, and the median distance from the top one to the bottom one is
+/// **79 m**. Taking the topmost lands on roofs, taking the lowest lands under the road, and any
+/// seed at all is a guess about a stack that deep.
+///
+/// A road does not need a seed to be recognised. It is the surface that is *there at every node*
+/// and *at nearly the same height each time*, because that is what a road is; a roof exists only
+/// over its building and a deck only over its span. So the surface to take is the one that makes
+/// the whole path climb as little as it can — minimise the sum of `|Δh|` over the path, which is a
+/// shortest path through the candidate lists and costs nothing at four candidates and ten nodes.
+///
+/// Nodes the city could not answer for are left `None` here and filled by [`fill`]; they carry no
+/// cost, so a hole does not decide anything for its neighbours.
 pub(crate) fn follow(candidates: &[Vec<f32>]) -> Vec<Option<f32>> {
     let live: Vec<usize> = (0..candidates.len()).filter(|i| !candidates[*i].is_empty()).collect();
     let mut out = vec![None; candidates.len()];
@@ -1111,6 +1145,69 @@ mod tests {
     fn a_node_with_no_surface_does_not_steer_the_others() {
         let picked = follow(&[vec![10.0], Vec::new(), vec![11.0, 60.0]]);
         assert_eq!(picked, vec![Some(10.0), None, Some(11.0)]);
+    }
+
+    /// A chain, solved over the graph, gives what the chain solve gives. The tree DP is a
+    /// generalisation and not a replacement, so the case they share has to agree or one of them is
+    /// wrong.
+    #[test]
+    fn the_graph_solve_agrees_with_the_chain_where_the_graph_is_one() {
+        let candidates = vec![vec![10.0, 39.0], vec![11.0, 40.0], vec![41.0]];
+        let links = vec![vec![1], vec![0, 2], vec![1]];
+        let (picked, trees) = follow_graph(&candidates, &links);
+        assert_eq!(picked, follow(&candidates));
+        assert_eq!(picked, vec![Some(39.0), Some(40.0), Some(41.0)]);
+        assert_eq!(trees, 1);
+    }
+
+    /// **A node the city has no road under joins its neighbours; it does not cut them apart.**
+    ///
+    /// Four nodes in a line. The first stands where the only road is the upper deck, the second has
+    /// no road at all, and the last two are under an interchange and could be on either. Bridged,
+    /// the upper deck carries across the hole and all three solved nodes stay on it. Cut — which is
+    /// what traversing live nodes only does — the far pair becomes its own tree, picks its own
+    /// cheapest assignment, and the tie there goes to the lower surface: `[40, _, 10, 10]`, two
+    /// decks in one road.
+    ///
+    /// Not a hypothetical. Holes appear the moment heights are solved over the road-filtered ground
+    /// rather than over every drivable surface, and they land at path boundaries.
+    #[test]
+    fn a_hole_joins_its_neighbours_rather_than_cutting_them() {
+        let candidates =
+            vec![vec![40.0], Vec::new(), vec![10.0, 40.0], vec![10.0, 40.5]];
+        let links = vec![vec![1], vec![0, 2], vec![1, 3], vec![2]];
+        let (picked, trees) = follow_graph(&candidates, &links);
+        assert_eq!(picked, vec![Some(40.0), None, Some(40.0), Some(40.5)]);
+        assert_eq!(trees, 1, "a hole is not a component boundary");
+    }
+
+    /// Two pieces nothing joins are two pieces, and the count is reported rather than assumed —
+    /// a rule that acts at one node reaches one tree and no further.
+    #[test]
+    fn pieces_nothing_joins_are_counted() {
+        let candidates = vec![vec![10.0], vec![11.0], vec![70.0], vec![71.0]];
+        let links = vec![vec![1], vec![0], vec![3], vec![2]];
+        let (picked, trees) = follow_graph(&candidates, &links);
+        assert_eq!(picked, vec![Some(10.0), Some(11.0), Some(70.0), Some(71.0)]);
+        assert_eq!(trees, 2);
+    }
+
+    /// **Where two decks are both flat, least-climb cannot choose and the tie goes to the lower
+    /// one.** Written down because it is the failure everything else in this module is about:
+    /// `heights_at` returns its candidates lowest first and `min_by` keeps the first minimum, so a
+    /// road on a flyover over a road solves onto the road underneath at no cost at all.
+    ///
+    /// The way out is not a tie-break. It is that on the road-filtered ground the two decks are
+    /// rarely both present — 259 of `Paths4001`'s 341 nodes have exactly one candidate — so the
+    /// tie mostly stops being reachable. Anchoring the solve at the starting grid was the other
+    /// candidate and it is refuted: over the eight sweep routes the grid's own node already carries
+    /// the height the grid stands on, to within 1.4 m, so the anchor has nothing to correct.
+    #[test]
+    fn two_flat_decks_tie_and_the_lower_one_is_taken() {
+        let candidates = vec![vec![0.0, 10.0]; 3];
+        let links = vec![vec![1], vec![0, 2], vec![1]];
+        let (picked, _) = follow_graph(&candidates, &links);
+        assert_eq!(picked, vec![Some(0.0); 3]);
     }
 
     fn straight_path(index: u16) -> RoutePath {

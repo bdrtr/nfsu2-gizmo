@@ -52,6 +52,10 @@ pub struct Network {
     walled: usize,
     /// Links dropped because no road could climb them — see [`Network::drop_climbing`].
     climbed: usize,
+    /// How many separate trees the height solve fell into — see [`route::follow_graph`].
+    trees: usize,
+    /// How many nodes took their height from a neighbour rather than from the city.
+    filled: usize,
     /// Which nodes are on the **race's own line**, if anybody has said where that is.
     ///
     /// Empty until [`Network::mark_line`] runs, and then one flag per node. The graph knows about
@@ -64,8 +68,28 @@ pub struct Network {
 impl Network {
     /// Build the graph, standing every node on the city.
     ///
-    /// Heights come from the same [`Ground`] the drawn line uses, so a car following this and a
-    /// ribbon drawn from `route::build` cannot disagree about where the road is.
+    /// **Two grounds, and they answer different questions.** `roads` is
+    /// [`route::road_ground`](super::route::road_ground) — the city filtered to road objects — and
+    /// it is what a node's height is chosen from, so a car following this and a ribbon drawn from
+    /// [`route::build`](super::route::build) cannot disagree about where the road is. `ground` is
+    /// every drivable surface, and it is what [`Network::drop_walled`] asks whether the ground
+    /// continues along a link.
+    ///
+    /// **The split is not tidiness; handing the height solve the unfiltered ground is degenerate.**
+    /// [`route::road_ground`](super::route::road_ground) says why in one sentence — over all
+    /// drivable triangles the flat shelf beneath the city climbs by nothing at all and wins
+    /// everywhere — and least-climb ([`route::follow_graph`]) is exactly the rule that shelf beats.
+    /// This constructor was handed `Ground::of` from the day it was written and the comment here
+    /// claimed the opposite. Swept over the eight routes: the field's deck disagreement — how often
+    /// a car is more than 3 m above the node its own pilot is holding — falls from **18.6 % of
+    /// steps to 7.9 %**, `Paths4081` from 63.6 % to 1.7 % and `Paths4001` from 33.7 % to 7.3 %,
+    /// while links no road could climb go 11 to 6 and the driving does not move (1 449 → 1 451
+    /// waypoints, 64 of 64 cars still taking junctions, no falls). `NFS_ROADHEIGHT=0` goes back to
+    /// the unfiltered ground, which is the arm every number before 2026-08-21 was taken on.
+    ///
+    /// `drop_walled` deliberately keeps the unfiltered ground: asking it about roads alone cuts
+    /// every link whose middle is a grass median, which is the wall filter this repo swept and
+    /// threw out once already — see [`Network::drop_walled`].
     ///
     /// **Both kinds of edge, and both directions.** Along a path, file order is the sequence — and
     /// only the sequence: nearly half the install's paths are stored against the way they are
@@ -74,29 +98,53 @@ impl Network {
     /// here for the same reason: only 29 % are mutual as stored, because a junction is written from
     /// one side.
     #[must_use]
-    pub fn of(nodes: &[RouteNode], ground: &Ground) -> Self {
+    pub fn of(nodes: &[RouteNode], roads: &Ground, ground: &Ground) -> Self {
         // Heights the same way the drawn line gets them, and for the same reason. Asking
         // `height_at` from two metres up answers "the highest surface at or below two metres",
         // which on an elevated road is **nothing** — the node then falls back to zero and sits ten
         // metres under the tarmac. Six of seven rivals drove into the ground aiming at one.
         //
-        // `route::follow` is the fix already written: every candidate surface at the node's XZ,
-        // then the sequence over the path that climbs least. Shared rather than reimplemented, so
-        // a car and a ribbon cannot end up on different decks of the same interchange.
+        // `route::follow_graph` is the fix already written: every candidate *road* surface at the
+        // node's XZ, then the assignment over the whole graph that climbs least. Shared rather than
+        // reimplemented — but a shared solver over a different candidate set is not a shared
+        // answer, which is what the unfiltered ground cost this for nine days.
         let flat: Vec<Vec3> = nodes.iter().map(|n| remap([n.x, n.y, 0.0])).collect();
         let mut height: Vec<f32> = vec![0.0; nodes.len()];
+        // **Ask the roads; where the city has no road, ask the city.**
+        //
+        // `roads` alone is what the least-climb rule needs, and on the eight sweep routes it is
+        // also 4-44 nodes per route the road filter has nothing under at all. Those are not holes
+        // in the race — the cars drive through them — so leaving them to `fill`'s interpolation
+        // invents a height that is no surface, and `drop_walled` then cuts their links: on
+        // `Paths4001` 86 walled links became 152 and 18 nodes were left with no way out, and the
+        // field stopped moving. Falling back to the drivable ground at those nodes keeps the
+        // degeneracy `road_ground` warns about local and bounded — the shelf can only win where
+        // there is no road to beat it, and its road-solved neighbours still pull on it.
+        //
+        // `NFS_ROADHEIGHT=strict` refuses the fallback (roads or nothing), `NFS_ROADHEIGHT=0` goes
+        // back to every drivable surface everywhere, which is what this did until 2026-08-21 and
+        // what every number before that date was taken on.
+        let how = std::env::var("NFS_ROADHEIGHT").unwrap_or_default();
+        let candidates_at = |x: f32, z: f32| -> Vec<f32> {
+            if how == "0" {
+                return ground.heights_at(x, z);
+            }
+            let road = roads.heights_at(x, z);
+            if road.is_empty() && how != "strict" { ground.heights_at(x, z) } else { road }
+        };
 
         // **`NFS_DECK=0` goes back to solving one path at a time.** Per-path is right for a path
         // and blind to a junction: two carriageways that meet can be solved onto different decks
-        // of the same interchange, and every test downstream is plan-view so nothing says so.
-        // Measured over eight routes, cars drive as much as 22.5 m above the node their own pilot
-        // holds, on seven routes of eight — and where they do, the node's own XZ *has* a surface
-        // at the car's height 88 % of the time. See [`route::follow_graph`].
+        // of the same interchange, and every test downstream is plan-view so nothing says so. When
+        // that was measured over eight routes, cars drove as much as 22.5 m above the node their
+        // own pilot held, on seven routes of eight. See [`route::follow_graph`] — and note that
+        // most of what was left after the graph solve turned out to be the *ground* rather than
+        // the solve, which is the fallback above.
         //
         // The adjacency is built here rather than below because the graph solve needs it, and it
         // is a property of the file: neighbours along a path, plus the record's own cross-links.
         let mut adj: Vec<Vec<u32>> = vec![Vec::new(); nodes.len()];
-        let mut join = |a: usize, b: usize, adj: &mut Vec<Vec<u32>>| {
+        let join = |a: usize, b: usize, adj: &mut Vec<Vec<u32>>| {
             if a != b && a < adj.len() && b < adj.len() {
                 if !adj[a].contains(&(b as u32)) {
                     adj[a].push(b as u32);
@@ -115,29 +163,47 @@ impl Network {
             }
         }
 
+        // Where one path ends and the next begins, in file order. Both branches want it: the
+        // per-path solve to slice its chain, and the graph solve to fill its gaps without
+        // interpolating across a boundary.
+        let mut spans: Vec<(usize, usize)> = Vec::new();
+        let mut i = 0;
+        while i < nodes.len() {
+            let mut j = i;
+            while j + 1 < nodes.len() && nodes[j + 1].path == nodes[i].path {
+                j += 1;
+            }
+            spans.push((i, j));
+            i = j + 1;
+        }
+
+        let (mut trees, mut filled) = (0usize, 0usize);
         if std::env::var("NFS_DECK").ok().is_none_or(|v| v != "0") {
             let candidates: Vec<Vec<f32>> =
-                flat.iter().map(|p| ground.heights_at(p.x, p.z)).collect();
-            let mut solved = super::route::follow_graph(&candidates, &adj);
-            super::route::fill(&mut solved);
+                flat.iter().map(|p| candidates_at(p.x, p.z)).collect();
+            let (mut solved, count) = super::route::follow_graph(&candidates, &adj);
+            trees = count;
+            // **Filled a path at a time, not over the whole table.** `fill` interpolates by node
+            // index and holds flat past either end, which is honest inside a path — median spacing
+            // 29 m — and meaningless across a boundary, where the neighbour is a different road
+            // somewhere else in the city. The per-path branch below always did this; the graph
+            // branch handed `fill` the whole array and lerped between two unrelated paths.
+            for &(a, b) in &spans {
+                filled += super::route::fill(&mut solved[a..=b]);
+            }
             for (k, h) in solved.iter().enumerate() {
                 height[k] = h.unwrap_or(0.0);
             }
         } else {
-            let mut i = 0;
-            while i < nodes.len() {
-                let mut j = i;
-                while j + 1 < nodes.len() && nodes[j + 1].path == nodes[i].path {
-                    j += 1;
-                }
+            for &(a, b) in &spans {
+                trees += 1;
                 let candidates: Vec<Vec<f32>> =
-                    (i..=j).map(|k| ground.heights_at(flat[k].x, flat[k].z)).collect();
+                    (a..=b).map(|k| candidates_at(flat[k].x, flat[k].z)).collect();
                 let mut solved = super::route::follow(&candidates);
-                super::route::fill(&mut solved);
-                for (k, h) in (i..=j).zip(&solved) {
+                filled += super::route::fill(&mut solved);
+                for (k, h) in (a..=b).zip(&solved) {
                     height[k] = h.unwrap_or(0.0);
                 }
-                i = j + 1;
             }
         }
 
@@ -154,16 +220,25 @@ impl Network {
         for (j, links) in out.iter_mut().zip(adj) {
             j.links = links;
         }
-        let mut me = Self { nodes: out, walled: 0, climbed: 0, near_line: Vec::new() };
+        let mut me =
+            Self { nodes: out, walled: 0, climbed: 0, trees, filled, near_line: Vec::new() };
         me.drop_climbing();
-        me.drop_walled(ground);
+        // `NFS_WALLED=0` leaves the link filter off. Not a setting — the one way to ask whether a
+        // change to the height solve moved the driving or merely moved what this filter cuts,
+        // which is a real confusion: the filter's own chord endpoints are the heights being
+        // changed.
+        if std::env::var("NFS_WALLED").ok().is_none_or(|v| v != "0") {
+            me.drop_walled(ground);
+        }
         me
     }
 
     /// Remove the links no road could climb — the ones that join two **decks**.
     ///
-    /// Heights are solved one path at a time ([`route::follow`] over each path's own candidates),
-    /// which is right for a path and says nothing about the links *between* paths. Where two
+    /// Heights were solved one path at a time ([`route::follow`] over each path's own candidates)
+    /// when this was written — [`route::follow_graph`] now solves them over the graph, and
+    /// `NFS_DECK=0` still asks for the old way. Either way the link filter below is a separate
+    /// question from the height solve. Where two
     /// carriageways cross, their nodes can sit a couple of metres apart in plan and ten or twenty
     /// apart in height, and the link between them is then a lift shaft the graph calls a road.
     ///
@@ -590,12 +665,16 @@ impl Network {
             .copied()
     }
 
-    /// How many links the graph holds, and how many nodes have none.
+    /// How many links the graph holds, how many nodes have none, and what the height solve had to
+    /// guess at.
     ///
     /// Reported rather than assumed: a node with no way out is a car that stops, and the count is
-    /// the difference between "the driver is bad" and "the road ends here".
+    /// the difference between "the driver is bad" and "the road ends here". The last two are the
+    /// same argument about heights — `trees` is how many pieces the solve fell into, and `filled`
+    /// how many nodes took a height from a neighbour instead of from the city. Both are zero on the
+    /// unfiltered ground and neither is zero on roads alone, which is the cost side of that trade.
     #[must_use]
-    pub fn shape(&self) -> (usize, usize, usize, usize) {
+    pub fn shape(&self) -> (usize, usize, usize, usize, usize, usize) {
         let steep = (0..self.nodes.len())
             .flat_map(|i| self.nodes[i].links.iter().map(move |l| (i as u32, *l)))
             .filter(|(a, b)| self.grade(*a, *b) > 1.0)
@@ -606,6 +685,8 @@ impl Network {
             self.nodes.iter().filter(|n| n.links.is_empty()).count(),
             steep,
             self.walled,
+            self.trees,
+            self.filled,
         )
     }
 }
@@ -624,7 +705,7 @@ mod tests {
             nodes[*a as usize].links.push(*b);
             nodes[*b as usize].links.push(*a);
         }
-        Network { nodes, walled: 0, climbed: 0, near_line: Vec::new() }
+        Network { nodes, walled: 0, climbed: 0, trees: 1, filled: 0, near_line: Vec::new() }
     }
 
     /// The short way round, not the first way found. A greedy walk down the long arm would answer
