@@ -805,6 +805,14 @@ impl Pilot {
 
     /// Which node of the network it is on.
     #[must_use]
+    /// The node the walk came from, so a measurement can ask what `step_avoiding` was allowed to
+    /// offer. Exposed for the diagnosis in `nfs_sim`, which has to reconstruct the eligible arm set
+    /// to tell a blocked gate from a pruned one.
+    #[must_use]
+    pub fn came_from(&self) -> Option<u32> {
+        self.from
+    }
+
     pub fn node(&self) -> Option<u32> {
         self.at
     }
@@ -1141,9 +1149,19 @@ impl Pilot {
         //
         // Between this and `arms`, the arm-choice door is shut: looking at every arm closes the lag
         // and jumps carriageways, looking only at on-line arms neither closes it nor pays.
+        // **`NFS_ADVANCE=free`: the same fallback, but the marker's walk ignores the blacklist.**
+        //
+        // Measured 2026-08-21, splitting every step where the marker is more than a node's spacing
+        // behind by what the graph was offering: on `Paths4002` **76 %** of them have a nearer arm
+        // that is nearer *and blacklisted*, on `Paths4081` 65 %, and 29-33 % on three more. The
+        // blacklist is permanent by measurement and load-bearing for *driving* — it is the single
+        // largest gain the pilot has, cars that got away 32/64 → 41/64 — but nothing measured says
+        // it should also freeze the pilot's idea of **where it is**. This changes only the
+        // bookkeeping walk; the escape and `step_avoiding` still see the whole list.
         let advance = std::env::var("NFS_ADVANCE").unwrap_or_default();
-        let arms = advance == "arms" || advance == "line";
+        let arms = advance == "arms" || advance == "line" || advance == "free";
         let on_line_only = advance == "line";
+        let ignore_list = advance == "free";
         for _ in 0..cap {
             let here_now = self.at?;
             let step = net.step_avoiding(here_now, self.from, toward, &self.blocked);
@@ -1153,7 +1171,7 @@ impl Pilot {
                     .node(here_now)
                     .into_iter()
                     .flat_map(|n| n.links.iter().copied())
-                    .filter(|l| Some(*l) != self.from && !self.blocked.contains(l))
+                    .filter(|l| Some(*l) != self.from && (ignore_list || !self.blocked.contains(l)))
                     .filter(|l| !on_line_only || net.on_line_at(*l))
                     .filter(|l| dist(*l) < dist(here_now))
                     .min_by(|a, b| dist(*a).total_cmp(&dist(*b))),

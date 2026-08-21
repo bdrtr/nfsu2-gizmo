@@ -6351,3 +6351,48 @@ kollara bakmak (`arms`) kapatıyor ama paralel şeride atlıyor, hatta sınırla
 ne de kazandırıyor. Geriye sentezin çözülmemiş bıraktığı çatal kalıyor: ilerletme kapısı tıkandığında
 sebep **bayat `toward`** mu (waypoint sayacı donmuş, `step_avoiding` de ona göre kol seçiyor), yoksa
 kara liste / `came_from` arabaya doğru olan kolu elemiş mi? İkisi farklı işler, ve ayrımı ölçülmedi.
+
+### İşaretçi neden takılıyor: üç yönlü ayrım, ve iki rotanın iki ayrı sebebi (2026-08-21)
+
+İşaretçinin bir düğüm aralığından (30 m) fazla geride kaldığı her adımda grafın ne sunduğu soruldu.
+Dört şık: arabaya daha yakın **uygun** bir kol vardı (yani kapı açılabilirdi ve `step_avoiding`'in
+hedefe göre seçtiği tek kol o değildi), yalnız **kara listedeki** bir kol daha yakındı, yalnız
+**geldiği** kol daha yakındı, ya da hiçbir kol daha yakın değildi.
+
+| rota | uygun kol | **kara liste** | **geldiği kol** | hiçbiri | hedef waypoint kaç sn'dir donmuş |
+|---|---|---|---|---|---|
+| 4001 | %6,3 | %0,0 | %26,9 | **%66,8** | **2,7 s** |
+| 4002 | %20,4 | **%76,0** | %3,4 | %0,2 | 23,1 s |
+| 4021 | %24,8 | %31,9 | %26,6 | %16,6 | 15,1 s |
+| 4041 | %42,0 | %32,9 | %0,0 | %25,1 | 13,9 s |
+| 4061 | %0,7 | %29,0 | %25,2 | %45,1 | 15,3 s |
+| 4081 | %3,4 | **%64,9** | %1,6 | %30,1 | 17,2 s |
+| 4102 | %0,0 | %0,0 | **%49,0** | %51,0 | 16,0 s |
+| 4121 | %9,5 | %0,0 | **%84,2** | %6,3 | 24,4 s |
+
+**Sebep tek değil, ve benim de keşif turunun da favorisi değildi.** "Amaç uyuşmazlığı" — yani
+`step_avoiding`'in hedefe göre seçtiği tek kolun arabaya göre yanlış olması — yalnız 4041'de baskın.
+Başarısız iki rotanın sebepleri birbirinden farklı: **4002 ve 4081'de kara liste** (%76 ve %65),
+**4121 ve 4102'de geldiği kol** (%84 ve %49). Ve 4001, hiçbir şeyin bozuk olmadığı rota, tek düşük
+donma süresine sahip olan: **2,7 s'ye karşı diğerlerinde 13,9-24,4 s.**
+
+**Üçüncü aday da çürüdü.** `NFS_ADVANCE=free` — işaretçinin yürüyüşü kara listeyi yok sayar,
+`came_from` durur; sürüşün kendisi ve kaçış listeyi görmeye devam eder.
+
+| | waypoint | kursta süre | hiç bırakmayan | ilerlemesi duran | kavşak | ayrık düğüm | oran |
+|---|---|---|---|---|---|---|---|
+| **kalan** | **1.451** | **%74,3** | **14** | **30** | 1.665 | 1.588 | **1,05** |
+| `free` | 1.369 | %68,8 | 12 | 40 | **2.473** | 1.805 | **1,37** |
+
+Kavşak sayısının 808 artması ve oranın 1,05'ten 1,37'ye çıkması bu deponun salınım imzası:
+listeyi kaldırınca işaretçi vazgeçilmiş düğümle normal düğüm arasında gidip geliyor.
+
+**Kol seçimi kapısı üç ölçülmüş varyantla kapandı:** bütün kollar (`arms`) gecikmeyi kapatır ama
+paralel şeride atlar; hat-üstü kollar (`line`) ne kapatır ne kazandırır; listesiz (`free`) salınıma
+sokar. Üçü de alanı kaybediyor ve üçünün de ilerleme sütunları kötüleşiyor.
+
+**Geriye kalan ve bu oturumda hiç dokunulmayan şey yukarı akışta:** hedef waypoint sayacı. İşaretçi
+takıldığında hedef **ortalama 13,9-24,4 saniyedir** aynı — 4001'de 2,7. Sayacın donması bilinen bir
+sorun (`pilot.rs`, "İlerletme kuralının iki kolu da ölü") ve bir çaresi (nearest'a resync) ölçülüp
+çürütülmüş; ama donmanın **ne kadar sürdüğü** ilk kez burada bir sayı. Zincirin başı orası:
+hedef donuyor → `toward` bayatlıyor → işaretçi geride kalıyor → nişan yana kayıyor → tam kilit.

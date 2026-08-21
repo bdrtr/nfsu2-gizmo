@@ -1564,6 +1564,19 @@ async fn run() {
     // that node and wild when it is fifty metres past it, the chain is lag → sideways aim → full
     // lock, and the thing to fix is not the steering.
     let (mut ang_near, mut ang_far) = ((0.0f64, 0usize), (0.0f64, 0usize));
+    // **Why the marker is stuck, split three ways.** Every step where the car is more than a node's
+    // spacing past the node it holds, ask what the graph offered:
+    //   A — an *eligible* arm (not the one it came from, not blacklisted) is nearer the car than
+    //       the held node. The gate could have opened; `step_avoiding`'s single goal-ranked pick
+    //       was not that arm, so the cause is the objective — and behind it a stale `toward`.
+    //   B — only an *ineligible* arm is nearer. The cause is pruning: the blacklist or `came_from`.
+    //   C — nothing at all is nearer. The marker sits at a local minimum and the graph has nothing
+    //       to offer; the lag is then a fact about where the car is, not about the walk.
+    let mut why = [0usize; 4];
+    let mut why_steps = 0usize;
+    // And how stale the goal is when that happens, in simulated seconds.
+    let mut goal_at: Vec<(usize, f32)> = vec![(usize::MAX, 0.0); field.len()];
+    let (mut goal_age, mut goal_n) = (0.0f64, 0usize);
     let mut aim_off = 0usize;
     let mut still = vec![0usize; field.len()];
     let mut rolled = vec![0usize; field.len()];
@@ -1949,8 +1962,47 @@ async fn run() {
                         aim_far[t] += usize::from(reach > *edge);
                     }
                     aim_behind += usize::from(d.dot(fwd) <= 0.0);
-                    if let Some(n) = pilot.node().and_then(|i| net.node(i)) {
+                    if let Some((held, n)) = pilot.node().zip(pilot.node().and_then(|i| net.node(i)))
+                    {
                         let plan = (p.position.x - n.at.x).hypot(p.position.z - n.at.z);
+                        if plan > 30.0 {
+                            why_steps += 1;
+                            let to_car = |j: u32| {
+                                net.node(j).map_or(f32::MAX, |m| {
+                                    (p.position.x - m.at.x).hypot(p.position.z - m.at.z)
+                                })
+                            };
+                            let (mut ok, mut back, mut listed) = (false, false, false);
+                            for &l in net.node(held).map(|m| &m.links).into_iter().flatten() {
+                                if to_car(l) >= plan {
+                                    continue;
+                                }
+                                if Some(l) == pilot.came_from() {
+                                    back = true;
+                                } else if pilot.given_up().contains(&l) {
+                                    listed = true;
+                                } else {
+                                    ok = true;
+                                }
+                            }
+                            // The two prunes are different things and want different work: the
+                            // blacklist is permanent and load-bearing, `came_from` is one step of
+                            // memory that stops a walk turning round at a junction.
+                            why[if ok {
+                                0
+                            } else if listed {
+                                1
+                            } else if back {
+                                2
+                            } else {
+                                3
+                            }] += 1;
+                            goal_age += f64::from(now - goal_at[k].1);
+                            goal_n += 1;
+                        }
+                        if goal_at[k].0 != pilot.goal() {
+                            goal_at[k] = (pilot.goal(), now);
+                        }
                         let box_ = if plan <= DECK_NEAR { &mut ang_near } else { &mut ang_far };
                         box_.0 += f64::from(deg);
                         box_.1 += 1;
@@ -3655,6 +3707,19 @@ async fn run() {
             100.0 * aim_on_node as f32 / aim_steps as f32,
             100.0 * aim_behind as f32 / aim_steps as f32
         );
+        if why_steps > 0 {
+            println!(
+                "   işaretçi 30 m'den geride kaldığı {why_steps} adımda sebep: \
+                 %{:.1} UYGUN bir kol daha yakındı (amaç uyuşmazlığı) · %{:.1} yalnız KARA \
+                 LİSTEDEKİ bir kol · %{:.1} yalnız GELDİĞİ kol · %{:.1} hiçbir kol daha yakın \
+                 değildi · o adımlarda hedef waypoint ortalama {:.1} s'dir değişmemiş",
+                100.0 * why[0] as f32 / why_steps as f32,
+                100.0 * why[1] as f32 / why_steps as f32,
+                100.0 * why[2] as f32 / why_steps as f32,
+                100.0 * why[3] as f32 / why_steps as f32,
+                goal_age / goal_n.max(1) as f64
+            );
+        }
         println!(
             "   nişan açısı, arabanın düğümüne uzaklığına göre: {DECK_NEAR:.0} m içinde \
              ortalama {:.0}° ({} örnek) · dışında {:.0}° ({} örnek)",
