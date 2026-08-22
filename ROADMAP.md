@@ -6985,3 +6985,61 @@ firkete yoğunluğu. Beş hipotez, beşi de ölçülüp elendi. `Paths4121` de k
 Varsayılan yapılmadı. Ama bu kol, günün ilk kez **waypoint, kursta kalan araba, duran araba ve nüfus
 ilerlemesinin dördünde birden** kazanan kolu, ve halkanın boyu değişmediği için sayıları
 tartışmasız.
+
+### Güvenilir halkada, çürütülmüş fren kuralı kazanıyor — ve alanın dört sütununu birden alıyor (2026-08-21)
+
+`Paths4021`'in neden düştüğü, tahmin yerine **çıkış kayıtlarına** bakılarak soruldu. Sekiz arabanın
+sekizi aynı noktada çıkıyor:
+
+```
+kursu bıraktı: waypoint 23 · (-609, 5, 1600)
+   çıkarken: t=44.8s (-572,1609) · 64 km/h · hatta 18 m · direksiyon -0.84 · fren 1.00
+             · nişan 30 m 89° · hedef 36 m 92°
+```
+
+Aynı yer, aynı hız (62-69 km/h), **tam fren**, tam kilide yakın direksiyon, ve nişan 30 m ötede
+**89°** — yani dik yanda. Yürünmüş halka orada yolun gerçek 90°'lik dönüşünü koyuyor; kiriş halkası
+onu kesiyordu. Araba 65 km/h'de geliyor ve viraj ~41 km/h.
+
+**Yani doğru soru "halkanın virajı yanlış mı" değil, "araba onun için yavaşlıyor mu" idi.** Depoda
+tam bu kural var — `NFS_RINGBRAKE`, halkanın kendi yarıçapına göre frenle — ve **çürütülmüş**.
+Çürütme cümlesi de sebebini söylüyor:
+
+> *"the ring's radii are not trustworthy enough to brake on, and making them smoother does not make
+> them true"* — çünkü o gün ölçülen halka çekilmiş kiriş halkasıydı ve 13 m'lik yarıçapı bir kink'ti,
+> firkete değil.
+
+Bugün halkanın yarıçapları yolun kendisinin (yürünmüş + adıma aralanmış, 40 km/h altı viraj sıfır).
+Refütasyonun öncülü değişti, o yüzden yeniden soruldu — ve **5,2 m/s²'de**, yani alanın kendi ölçülmüş
+yanal tutuşunda, kazanıyor:
+
+| | waypoint | kursta süre | hiç bırakmayan | ilerlemesi duran | duruş payı | **kursta kalan nüfus** |
+|---|---|---|---|---|---|---|
+| **kalan** | 1.451 | %74,3 | 14 | 30 | %31,6 | 14 / 262 / 18,7 |
+| yürünmüş+aralanmış, 0,9 | 1.643 | %74,1 | 23 | 25 | %22,5 | 23 / 752 / 32,7 |
+| **+ `RINGBRAKE=5,2`** | **1.741** | **%81,5** | **23** | **22** | **%23,4** | **23 / 730 / 31,7** |
+| + `RINGBRAKE=8` | 1.579 | %74,5 | 23 | 28 | — | 23 / 752 / 32,7 |
+
+**8'de kaybediyor, 5,2'de kazanıyor** — yani işe yarayan sayı, fiziğin kendi ölçülmüş sayısı. Bir
+kural doğru girdiyle beslenince doğru sabitle çalışıyor.
+
+**Alan, dört karar sütununda birden:** waypoint 1.451 → **1.741** (+290, tek rota taşımıyor), kursta
+süre %74,3 → **%81,5**, kursu hiç bırakmayan 14 → **23** (tek rota taşımıyor), ilerlemesi duran
+30 → **22** (tek rota taşımıyor). Halkanın boyu koridor halkasınınkiyle aynı (rota başına −1…+14),
+yani hiçbiri diskalifiye değil.
+
+Rota rota waypoint: 4102 **+109**, 4081 **+114**, 4002 +63, 4061 +32, 4121 +17, 4021 +2; kayıp
+4041 −44, 4001 −3. Kursta süre: 4081 %53,9 → **%99,7**, 4102 %43,4 → **%66,2**, 4061 %62,0 → %81,5,
+4121 %66,2 → **%72,2** (taban seviyesinin de üstünde).
+
+**Tek tutarlı kayıp yine `Paths4021`:** 6 araba → 0, kursta süre %94,2 → %62,8, duran araba 3 → 8. O
+rotanın 90°'lik dönüşü, frenle bile alınamıyor.
+
+**Varsayılan yapılmadı, ve gerekçesi bu sefer sayı değil, disiplin.** Kol dört sütunun dördünde de
+kazanıyor ve ilerleme sütunları bu kez temiz (halka boyu değişmiyor). Ama dört düğme birden, bir rota
+6 arabadan sıfıra düşüyor, ve bugün iki erken kabul aynı gün geri alındı. Bir sonraki oturum bunu
+soğuktan tekrar üretsin ve öyle karar versin:
+
+```
+NFS_WALKLINE=1 NFS_WALKFIT=1 NFS_LOOK=0.9 NFS_RINGBRAKE=5.2
+```
