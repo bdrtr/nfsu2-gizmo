@@ -390,6 +390,24 @@ pub fn densify(outline: &[Vec3], step: f32) -> Vec<Vec3> {
 /// the *ground* continues along a link and nothing asks it about walls, because a wall filter
 /// inside the graph was swept and thrown out once already — this test is given to the course
 /// builder alone.
+///
+/// **Re-spaced at the step (`NFS_WALKFIT`) the ring is measurably better geometry and measurably
+/// neutral driving (2026-08-22).** Over the eight routes it is the same length as the chord ring
+/// it replaces (37 634 m against 37 040), with **1** waypoint over no ground against 8 and **53**
+/// corners under 60 km/h against 90 — and metres driven along the ring move −0.3 %. On **24 routes
+/// of the region that had never been run** it is +0.7 %, carried, ahead on 11 of 24. What the ring
+/// does is not drive better; it makes the two constants beside it behave differently (see
+/// `rig::pilot::RING_HELD`).
+///
+/// **And it empties routes.** Of the eight in-sample routes and the 24 held out, the ones whose
+/// baseline keeps four or more cars on the course number eight, and **two of those eight go to
+/// zero** — `Paths4021` (6 → 0) and `Paths4142` (5 → 0, 186 → 140 waypoints, 95.0 → 68.6 % of race
+/// time on the corridor). A third, `Paths4123`, empties only once the constants are added. On
+/// `Paths4021` the cause is visible: the walk enters a node chain the chord never visits
+/// (100→101→102→103, 14-15 m legs turning west then hard south — a real hairpin), and with the
+/// lookahead shortened the aim lands on those nodes. Restricting the walk to the race's own roads
+/// (`NFS_WALKONLY=1`) changes **nothing at all** over eight routes — the walked ring is already
+/// inside the corridor — so that is not the mechanism.
 #[must_use]
 pub fn along_roads(
     net: &super::Network,

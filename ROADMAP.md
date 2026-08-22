@@ -7043,3 +7043,254 @@ soğuktan tekrar üretsin ve öyle karar versin:
 ```
 NFS_WALKLINE=1 NFS_WALKFIT=1 NFS_LOOK=0.9 NFS_RINGBRAKE=5.2
 ```
+
+### Soğuk yeniden üretim: kol birebir çıkıyor, tablonun taban satırı bu ikiliden değil (2026-08-22)
+
+Dünkü oturum dört düğmeli kolu varsayılan yapmadı ve gerekçesini yazdı: *"Bir sonraki oturum bunu
+soğuktan tekrar üretsin ve öyle karar versin."* Üretildi.
+
+Merdivenin tamamı, aynı ikili, temiz ağaç, art arda:
+
+| kol | waypoint | kursu hiç bırakmayan |
+|---|---|---|
+| taban | 1.451 | 14 |
+| `WALKLINE+WALKFIT` | 1.454 | 19 |
+| `+ LOOK=0,9` | 1.643 | 23 |
+| `+ RINGBRAKE=5,2` | **1.741** | **23** |
+
+Dördü de dünkü sayıların aynısı. Dahası, dört düğmeli kol arka arkaya iki kez koşuldu ve iki koşu
+rota rota **byte-aynı**: sim hem koşu-koşu hem oturum-oturum deterministik.
+
+**Ama tablonun taban satırı bu ikiliden ölçülmemiş.** Soğuk taban, dünkü tablonun taban satırıyla
+waypoint toplamında (1.451) ve kursu hiç bırakmayan sayısında (14) birebir uyuşuyor, geri kalanında
+uyuşmuyor: kursta süre **%74,7** (tabloda %74,3), ilerlemesi duran **26** (tabloda 30), kursta kalan
+nüfusun araba başına düğümü **20,6** (tabloda 18,7). Rota rota da iki yerde ayrılıyor: 4002 52
+(tabloda 49) ve 4102 102 (tabloda 105) — toplam yine 1.451. Kolun satırı ise her rotada birebir.
+Yani dünkü kabul tablosunda taze bir kol satırı ile eski bir taban satırı yan yana konmuş; yönü
+değiştirmiyor, sütunları değiştiriyor.
+
+**Ve deponun kendi aracı, kabul cümlesinin yarısını çürütüyor.** `tools/sweep-columns.py` aynı
+kayıtlar üzerinde şunu diyor:
+
+| sütun | taban → dört düğme | verdikt |
+|---|---|---|
+| waypoint | 1.451 → 1.741 (+290) | **sağlam** (en büyük tek rota +114) |
+| kursu hiç bırakmayan | 14 → 23 (+9) | **sağlam** (en büyük tek rota +8) |
+| kursta süre | %74,7 → %81,5 (+6,8) | **TAŞINIYOR** — 4081 tek başına +44,5 |
+| ilerlemesi duran | 26 → 22 (−4) | **TAŞINIYOR** — en büyük tek rota +5 |
+
+Dün "alanın dört sütununu birden alıyor" diye yazılan şey, aracın kendi ölçütüyle iki sütun.
+
+**Halka boyu iddiası ise doğrulandı.** Beşinci tuzak — halkanın *boyunu* değiştiren bir kolun
+waypoint ve durma sütunlarında yargılanamayacağı — bu kolda devrede değil: rota başına halka
+159→158, 144→143, 65→67, 126→125, 74→78, 126→130, 104→107, 130→**144**, yani dünkü "−1 ile +14"
+aralığı aynen çıkıyor. Waypoint sütunu tartışmasız.
+
+**Ve halkanın koridordan çıkmadığı da ölçüldü.** `NFS_WALKONLY=1` — yürüyüşü yalnız yarışın kendi
+yollarıyla sınırlayan düğme — alanın sekiz rotasında **hiçbir sayıyı kıpırdatmıyor**: waypoint 1.741
+→ 1.741, kursta süre %81,5 → %81,5, rota rota fark sıfır (kayıtların tek farkı bir teşhis satırının
+sıralaması). Yürünmüş halka zaten koridorun içinde kalıyor, `NFS_CURVE=1` bunu 4021'de 67 waypoint'in
+0'ı dışarıda diye söylüyor. "Halka yan sokağa sapıyor" açıklaması alan seviyesinde ölü.
+
+### Çürütülmüş iki kural da aynı gün yeniden çürütüldü — fark yalnızca hangi kurs (2026-08-22)
+
+`RINGBRAKE` ağustosta koridor halkasında çürütülmüştü ve sabitin doküman satırı zararı **−153
+waypoint** diye yazıyor. `LOOKAHEAD_PER_SPEED` de 1,8'de sabitlenmişti, 0,9 **−100** ile kaybederek.
+İkisi de bugün, aynı ikiliyle, koridor halkasında tek başına ölçüldü:
+
+| kol (koridor halkası) | waypoint | fark | kursta süre | hiç bırakmayan |
+|---|---|---|---|---|
+| taban | 1.451 | — | %74,7 | 14 |
+| `RINGBRAKE=5,2` tek | 1.299 | **−152** | %70,3 | 17 |
+| `LOOK=0,9` tek | 1.347 | **−104** | %78,9 | 31 |
+| yürünmüş halkada ikisi | **1.741** | **+290** | **%81,5** | 23 |
+
+−153 → −152, −100 → −104. Yani iki çürütme de yeniden üretiliyor; kabul de yeniden üretiliyor;
+aradaki tek değişken kursun kendisi. **Bir kural bir kurs tarifine karşı çürütülmüşse başka bir
+tarife karşı çürütülmüş değildir** — dün yazılan ders bugün iki bağımsız sabitte birden ölçüldü.
+
+Ve `LOOK=0,9` tek başına 31 arabayı kursta tutuyor (dört düğmenin 23'üne karşı) — ama o 31 araba
+başına 23,6 düğüm topluyor, dördün 23 arabası ise 32,1. Durmuş araba tuzağının kendisi: sayı yukarı,
+ilerleme aşağı.
+
+### 4021'in sebebi bulundu: viraj waypoint'i araba 18 m kala bırakılıyor, fren onunla düşüyor (2026-08-22)
+
+Dünkü kayıt 4021 için şunu yazıyor: *"sekiz arabanın sekizi aynı noktada, 62-69 km/h'de, TAM
+FRENDE."* O ölçüm `RINGBRAKE` **olmayan** koldan. Fren açıkken aynı yerdeki çıkış satırları şöyle:
+
+```
+çıkarken: t=46.7s (-572,1607) · 44 km/h · hatta 19 m · direksiyon -0.83 · fren 0.50 · nişan 28 m 88°
+```
+
+Yani fren işini yapmış — 62-69 → **41-44 km/h**, virajın kendi sınırı olan 46'nın *altında* — ve
+arabalar yine de çıkıyor. Doğru soru bir kez daha değişiyor: "neden yavaşlamıyor" değil, "neden
+geç yavaşlıyor".
+
+`NFS_LOST=1` izi bunu adım adım söylüyor (`Paths4021`, dört düğmeli kol, koridor yarı genişliği 12 m):
+
+```
+t=44.1  59 km/h · koridora 0.4 m · fren 0.42 · hedef 44 · 18 m ötede 10°
+t=44.2  59 km/h · koridora 0.4 m · fren 0.00 · hedef 45 · 48 m ötede 53°
+t=44.9  59 km/h · fren 1.00 (GRIP devreye giriyor, nişan 26 m 43°)
+t=45.3  55 km/h · koridora 1.8 m   ← virajın tepesi; halkanın yarıçapı 31 m, sınırı 46 km/h
+t=46.4  45 km/h · tam kilit · koridora 8.8 m
+t=47.5  42 km/h · koridora 19.5 m  ← koridoru terk
+```
+
+Zincir tek bir satırda kırılıyor: **waypoint 44 — virajın kendisi — araba ona daha 18,7 m uzaktayken
+bırakılıyor.** Bırakma kuralı ([`PASSED_NEAR`]) "kursun kendi yönünde geçildi mi" diye soruyor ve o
+yönü **bir sonraki** bacaktan alıyor; 90°'lik bir virajda bu koşul araba varmadan sağlanıyor. Hedef
+virajın ötesindeki waypoint'e atlıyor, halka freninin taraması **hedeften** başladığı için viraj
+taramanın dışında kalıyor, ve fren 0,87 → **0,00**. 0,7 saniye sonra `GRIP` kuralı nişan açısıyla
+uyanıyor ama o sırada kaybedilen hız 5,2 m/s² × 0,7 s ≈ **13 km/h** — tam da virajın açığı. Araba
+tepeye 55 ile giriyor, 46 gerekiyor, tam kilitte dışarı savruluyor.
+
+Yani 4021 halkanın hatası değil: o rotada halka **koridorun tamamen içinde** (67 waypoint'in 0'ı
+dışarıda, 0'ının altında boşluk — `NFS_CURVE=1`). Hata, bırakma kuralı ile fren taramasının
+kesişiminde.
+
+### Halkanın kendisi de ölçüldü: aynı uzunluk, daha az delik, yarısı kadar sahte firkete (2026-08-22)
+
+`NFS_CURVE=1` sekiz rotada iki halkaya da soruldu (koridora çekilmiş kiriş halkası → yürünmüş +
+aralanmış halka):
+
+| | uzunluk (m, alan toplamı) | altında zemin olmayan wp | 60 km/h altı viraj | 80 altı | en dar aralık |
+|---|---|---|---|---|---|
+| koridor halkası | 37.040 | 8 | 90 | 226 | 0-28 m (5 rotada 10 m'den yakın çift) |
+| yürünmüş + aralanmış | 37.634 | **1** | **53** | **151** | 3-34 m |
+
+İkisi de koridorun dışına hiç çıkmıyor (çekilmiş halka için bu tanım gereği). Yani yeni halka aynı
+mesafeyi tarif ediyor, ama altı sağlam, yığılması yok, ve kursun kendi hız sınırını kuran sahte
+firketelerin yarısı kayboluyor. Sürüşteki kazancın geometrik karşılığı bu.
+
+**Ve mekanizması doğru olan kural yine de çürüdü.** Fren taramasını hedeften değil arabadan
+başlatan iki varyant yazıldı (`NFS_RINGFROM=car`, arabaya en yakın halka noktası; `=back`, arabanın
+fiilen varmadığı waypoint'lere geri yürüyen sınırlı biçim) ve ikisi de alanı kaybediyor:
+
+| kol | waypoint | kursta süre | 4021 |
+|---|---|---|---|
+| dört düğme | 1.741 | %81,5 | 0 araba · 188 wp |
+| `RINGFROM=car` | 1.669 | %76,4 | 0 · 188 |
+| `RINGFROM=back` | 1.716 | %78,2 | 0 · 188 |
+
+`car` varyantının neden kaybettiği geriye bakınca açık: `look` mesafesi taramanın *başladığı*
+noktadan ölçülüyor, dolayısıyla taramayı arabanın gerisinden başlatmak ileri görüşü kısaltıyor.
+`back` ateşleniyor (4021'de çıkış anı 49,7 → 50,2 s kayıyor) ama rotayı kurtarmıyor. Yani frenin
+hedefe bağlı olması gerçek bir kusur, 4021'in çaresi değil — düğme açık kalıyor, ölçümü de kuralın
+yanında duruyor.
+
+**4021'in asıl sebebi ise hattın nereye girdiği.** Yürünen hat, kiriş halkasının hiç uğramadığı
+100→101→102→103 düğüm zincirine giriyor: 14-15 m'lik bacaklarla (−548,1615) → (−560,1607) →
+(−563,1593) → (−562,1580), yani önce batıya sonra keskin güneye kıran gerçek bir firkete. `LOOK=0,9`
+nişanı ortalama 40 → 30,4 m'ye çekince nişan tam bu yakın düğümlerin üstüne oturuyor: nişan açısı
+ortalaması %35 → %54, 90°'yi aşan adımlar %12,0 → %29,1, koridor dışındaki nişan %1,8 → %22,4.
+Ayrım da temiz: **yürünmüş halkalı beş kolun beşinde de 4021'de 0/8 araba, kiriş halkalı üç kolun
+üçünde de 2-6/8.** Sebep halkanın kendisi, sabitler değil.
+
+**`AIMREACH` ailesi bu halkada da kapandı:** `=lerp` 1.426 (−315, sağlam kayıp), `=1` 1.740 (−1, ölü
+nötr, kursu hiç bırakmayan −2). Kodun söylediğiyle tutarlı: tutulan düğüm zaten `look`'tan uzaksa
+yürüyüş ilk kontrolde kırılıyor ve nişan yine tutulan düğümün kendisi oluyor.
+
+### Kazancın da kaybın da sahibi kim: rota rota sayım (2026-08-22)
+
+Sekiz rotanın her biri, taze kayıtlardan tek tek okundu. Sonuç, "halka iyi / sabitler iyi" diye
+tek cümlelik bir hikâye olmadığını söylüyor:
+
+| rota | wp | kursta kalan | sebebi ne |
+|---|---|---|---|
+| 4001 | 361 → 358 | 1 → **8** | **`LOOK`**. Yalnız halka (walkfit) aynı virajda 8/8 araba kaybediyor, dört düğme sıfır çıkış veriyor: nişan 45,4 → 42,4 m, 40 m tavanını aşan adım %55,9 → %47,0 |
+| 4002 | 52 → **118** | 5 → 6 | **halka**. Koridora çekilen waypoint 83/144 → 20/143; nişan arkada kalan adım %23,3 → %10,1 |
+| 4021 | 186 → 188 | **6 → 0** | **halka**. Kirişin uğramadığı 14-15 m'lik firkete zincirine giriyor |
+| 4041 | 240 → **196** | 2 → 1 | **halka**. `walkfit` tek başına dörtle neredeyse aynı (195); üç bacak yol bulamayıp kirişte kalıyor |
+| 4061 | 196 → 228 | 0 → 0 | **halka**. Çekilen waypoint 62/74 → 2/78, en büyük aralık 204 → 56 m |
+| 4081 | 156 → **270** | 0 → **8** | **halka**. Kiriş koridoru kesiyordu; tabanda 8/8 araba aynı noktada, fren 0,00 ile çıkıyordu |
+| 4102 | 102 → **208** | 0 → 0 | **halka + fren**. Tutulan düğüme mesafe 45,7 → 22,8 m; aynı virajda çıkış hızı 66 → 45 km/h |
+| 4121 | 158 → 175 | 0 → 0 | **halka**. Çekilen waypoint 56/130 → 1/144, koridor dışı nişan %11,5 → %2,1 |
+
+Yani alanın kazancının da iki kaybının da sahibi **halka**; `LOOK` bir rotayı tek başına kurtarıyor,
+fren bir rotada ölçülebilir katkı veriyor. Ve kaybeden iki rotanın ikisinde de halkanın *statik*
+kalitesi iyileşiyor (4021'de çekilen waypoint 38/65 → 2/67, güverte hatası 12,9 → 2,7 m; 4041'de
+67/126 → 21/125) — yani "halka ölçüsü iyi mi" diye bir ön kapı kurulamıyor, çünkü ölçü iyileşirken
+sürüş çöküyor.
+
+### Fren sabiti bu sekiz rotada seçilemiyor — çünkü alanı tek bir rota sallıyor (2026-08-22)
+
+Dün yalnız iki değer ölçülmüştü (5,2 kazanıyor, 8 kaybediyor). Eğrinin tamamı çıkarıldı:
+
+| `NFS_RINGBRAKE` | yok | 3,0 | 3,5 | 4,0 | 4,5 | 5,2 | 8 |
+|---|---|---|---|---|---|---|---|
+| alan waypoint | 1.643 | 1.747 | **1.866** | 1.850 | 1.724 | 1.741 | 1.579 |
+| `Paths4081` | 292 | 239 | 318 | **346** | **188** | 270 | — |
+| kursu hiç bırakmayan | 23 | 22 | — | **28** | 24 | 23 | 23 |
+
+**Eğri monoton değil ve sebebi tek bir rota.** `Paths4081` fren değerine göre 188 ile 346 arasında
+zıplıyor — tek başına 158 waypoint — alanın en büyük marjı ise ~140. Bu, gürültü tabanı ölçülürken
+`Paths4021` için bulunan çatallanmanın aynısı: sim kararlı, ama bir arabanın kavşakta aldığı karar
+rotayı iki sonuç arasında yalpalatıyor ve alan toplamı onu taşıyor.
+
+Yani **3,5 ile 5,2 arasındaki hiçbir değer bu sekiz rotada diğerinden ayırt edilemez.** Ayırt
+edilebilen yalnız iki uç var: **8 kaybediyor** ve **fren yokken 1.643**. Sabiti seçmek için sekiz
+rota yetmiyor; bu kararın verisi rotanın dışında olmalı.
+
+### Sekiz rota bir seçim kümesi değil: paket, hiç görülmemiş 24 rotada genellemiyor (2026-08-22)
+
+Sekiz rotanın hepsi bu düğmeleri *seçerken* kullanıldı, yani üzerlerindeki sayı bir sınav değil bir
+uyum ölçüsü. Bölgede 185 rota dosyası var ve sekizi kullanılmış; hiç kullanılmamış **24 rota**
+seçildi (4003, 4004, 4011, 4012, 4013, 4022, 4023, 4042, 4043, 4062, 4063, 4082, 4083, 4084, 4103,
+4104, 4122, 4123, 4141, 4142, 4161, 4162, 4174, 4175) ve aynı protokolle koşuldu.
+
+| kol | waypoint | kursta kalan araba | kursta süre | hâlâ ilerleyen araba |
+|---|---|---|---|---|
+| taban | 3.464 | 49 | %70,1 | 72 |
+| yalnız halka (`WALKLINE+WALKFIT`) | 3.578 | 51 | %69,5 | 78 |
+| tam paket (`+LOOK=0,9 +RINGBRAKE=4,0`) | 3.569 | **41** | %69,2 | **85** |
+
+**Sekiz rotada +%20 waypoint ve +9 araba olan kol, 24 yeni rotada +%3 waypoint ve −8 araba veriyor.**
+Kazancın büyük kısmı, üzerinde seçildiği sekiz rotaya ait. Yalnız halka ise burada da nötr — sekiz
+rotadaki (+3 waypoint, metrede −%0,3) sonucun aynısı, üç kat büyük bir kümede.
+
+**Rota boşaltma, tek bir rotanın tuhaflığı değil ama tek bir kolun da değil.** Tabanında en az 4
+araba tutan altı sınav rotasından biri yalnız halkada sıfırlanıyor (`Paths4142`: 186 wp / 5 araba /
+%95,0 → 140 / 0 / %68,6), tam pakette ise başka biri sıfırlanıyor (`Paths4123`: 4 → 0) ve 4142
+kısmen kurtuluyor (198 / 3 / %84,9). İçerideki `Paths4021` ile birlikte, güçlü rotaların **2/8**'i
+bir kolda boşalıyor.
+
+Tek yönlü iyi haber, ilerleme kapısında: yarışın son üçte birinde hâlâ waypoint kazanan araba
+72 → **85**. Yani paket, dışarıda da arabaları hareket ettiriyor; sadece onları koridorda tutmuyor.
+
+**Ve metre sütunu sınavda kesin konuşuyor.** Halka uzunlukları 24 rotanın ikisi için de ölçülüp
+(`NFS_CURVE=1`) waypoint'ler metreye çevrildi:
+
+| kol (24 yeni rota) | metre | fark | verdikt |
+|---|---|---|---|
+| taban | 139.566 | — | — |
+| yalnız halka | 140.512 | +%0,7 | TAŞINIYOR · 11/24 rotada ileride |
+| tam paket, fren 5,2 | **128.608** | **−%7,9** | **sağlam kayıp** · 8/24 |
+| tam paket, fren 4,0 | 140.325 | +%0,5 | TAŞINIYOR · 7/24 |
+
+Sekiz rotada **+%19,3** (5,2) ve **+%26,8** (4,0) olan aynı sütun, sınavda **−%7,9** ve **+%0,5**.
+Ve fren değerinin sıralaması da tersine dönüyor: sekiz rotada 4,0 > 5,2, sınavda 5,2 açık ara kötü —
+`Paths4063`'te 5,2 altı arabayı kursta tutarken 4,0 bir tanesini tutuyor, `Paths4123`'te ikisi de
+rotayı boşaltıyor.
+
+### Karar: düğmeler varsayılan yapılmıyor (2026-08-22)
+
+Dünkü oturumun bıraktığı görev "soğuktan üret ve karar ver" idi. Üretildi — kol rota rota birebir
+çıktı. Karar **hayır**, ve gerekçesi sekiz rotanın kendisinde değil, dışında:
+
+- Paket, seçildiği sekiz rotada metre cinsinden **+%19 ile +%27**; hiç görülmemiş 24 rotada
+  **+%0,5** (fren 4,0) ve **−%7,9** (fren 5,2, yani dünkü aday).
+- Kursta kalan araba sınavda 49 → **41** (4,0) ve **34** (5,2).
+- Fren sabiti sekiz rotada seçilemiyor (eğri monoton değil, alanı `Paths4081`'in ±158'lik
+  çatallanması sallıyor) ve sınavda sıralaması tersine dönüyor.
+- Güçlü rotaların 2/8'i bir kolda boşalıyor (`Paths4021`, `Paths4142`, `Paths4123`).
+
+**Kalan tek pozitif ve o gerçek:** yarışın son üçte birinde hâlâ waypoint kazanan araba sınavda
+72 → **85** (fren 4,0). Paket arabaları hareket ettiriyor; koridorda tutmuyor.
+
+**Düğmeler duruyor, ölçümleri sabitlerinin yanında.** `NFS_WALKLINE`, `NFS_WALKFIT`, `NFS_LOOK`,
+`NFS_RINGBRAKE`, `NFS_RINGFROM` — hepsi kapalı, hepsi ölçülmüş.
+
+**Bu oturumun en taşınabilir dersi ise ölçüm kümesi hakkında:** sekiz rota bir *uyum* kümesi, sınav
+kümesi değil. Bölgede 185 rota dosyası var, sekizi kullanılmış; rota başına maliyet ~30 saniye.
+Bundan sonra bir varsayılanı taşımadan önce, o değişiklik **hiç görülmemiş rotalarda** sınanmalı.

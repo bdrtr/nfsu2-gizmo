@@ -133,6 +133,13 @@ const AIM_CLEAR: f32 = 5.0;
 /// then 50.3, 49.6, 53.6, 48.1 — and its cars leave at `(−354, −180)` at 48 km/h with the aim
 /// 33 m away at 52°, cutting a corner the shorter lookahead took. That corner is the next thing
 /// to look at, not a reason to keep a constant the field has moved away from.
+///
+/// **0.9 is a property of the ring, not of the pilot (2026-08-22).** Alone, on the corridor ring
+/// this constant was fitted against, it loses the eight routes by **104** waypoints — while
+/// keeping 31 of 64 cars on the course against 14, which is the stopped-car trap in one line: the
+/// same arm covers **53 429 m** of ring against the baseline's 57 560. On the walked ring it gains
+/// 189. It is the ring it is paired with that decides it, and that pairing does not survive the
+/// 24-route test set — see [`RING_HELD`].
 const LOOKAHEAD_PER_SPEED: f32 = 1.8;
 const LOOKAHEAD_MIN: f32 = 12.0;
 const LOOKAHEAD_MAX: f32 = 40.0;
@@ -245,6 +252,22 @@ const BEHIND: f32 = 2.97;
 ///
 /// Fourth refusal of a "do less" lever this day, and the sharpest: it was aimed at a place where
 /// the arithmetic said the corner was impossible, and slowing for it still lost.
+///
+/// **On the walked ring it wins, and the win does not survive a test set (2026-08-22).** Against
+/// `NFS_WALKLINE=1 NFS_WALKFIT=1 NFS_LOOK=0.9` the eight routes give 1 643 waypoints with no brake
+/// and 1 741 at 5.2 — the refutation above reproduces at the same time, cold, on the chord ring
+/// (−152 against its recorded −153), so the premise really was what changed. But the constant
+/// cannot be *chosen* there: the field reads 1 747 / 1 866 / 1 850 / 1 724 / 1 741 / 1 579 at
+/// 3.0 / 3.5 / 4.0 / 4.5 / 5.2 / 8, a curve with no shape, because `Paths4081` alone swings 188 to
+/// 346 with this value while the whole field margin is ~140. Only the ends are real: 8 loses, and
+/// no brake loses.
+///
+/// And on **24 routes of the same region that had never been run** (185 exist; eight were used to
+/// pick these knobs), the package's gain evaporates: metres driven along the ring — see
+/// `tools/ring-metres.py` — go **+19.3 %** in sample and **−7.9 %** out of it at 5.2, **+26.8 %**
+/// in and **+0.5 %** out at 4.0, and the two values swap order. Cars that never leave the course
+/// go 49 → 34 (5.2) and 49 → 41 (4.0). Default off, and the reason is now generalisation rather
+/// than the eight routes.
 const RING_HELD: f32 = 0.0;
 
 /// Steering lock the pilot will ask for, as a fraction of the controller's own.
@@ -1894,7 +1917,55 @@ impl Pilot {
             let n = course.len();
             let look = (speed * speed / (2.0 * ring_held)).clamp(20.0, 200.0);
             let mut walked = 0.0;
+            // **Where the scan starts, and why the goal is the wrong place to start it.**
+            //
+            // Traced on `Paths4021` with `NFS_LOST=1`, the four-knob arm: at the 90° corner where
+            // all eight cars leave, the release rule (see [`PASSED_NEAR`]) lets the corner's own
+            // waypoint go while the car is still **18 m short of it** — "past it in the course's
+            // own direction" is measured against the *next* leg, and at a right angle that is
+            // satisfied before the car arrives. The goal becomes the waypoint beyond the corner,
+            // the scan starts there, and the brake falls 0.87 → **0.00** for 0.7 s at 59 km/h —
+            // 13 km/h at this rule's own 5.2 m/s². The car meets a 31 m radius (a 46 km/h apex)
+            // at 55 km/h and runs wide out of the corridor at full lock.
+            //
+            // `NFS_RINGFROM=back` walks the start back over waypoints the car has not physically
+            // reached; `=car` starts at the ring point nearest the car.
+            //
+            // **Both are refuted, and the mechanism above survives the refutation.** Over the eight
+            // routes on the four-knob arm: `back` **1 716** waypoints and 78.2 % of race time on
+            // the corridor, `car` **1 669** and 76.4 %, against **1 741** and 81.5 % for the arm
+            // they modify. `back` does fire on `Paths4021` — the departure moves from t=49.7 s to
+            // t=50.2 s — and the route still empties, 0 of 8 cars either way. So the brake losing
+            // its corner is real and is *not* what holds that route: the walked ring there enters a
+            // node chain the chord ring never visits (100→101→102→103, 14-15 m legs turning west
+            // then hard south), and with the aim a mean 30 m out it is the hairpin that takes them.
+            //
+            // `car` is worse than `back` for a reason worth keeping: `look` is measured from where
+            // the scan *starts*, so starting it behind the car shortens the anticipation instead of
+            // lengthening it. A scan window has two ends and only one of them was being moved.
+            //
+            // Both default off.
+            let from = std::env::var("NFS_RINGFROM").unwrap_or_default();
             let mut i = self.goal % n;
+            if from == "car" {
+                i = (0..n)
+                    .min_by(|&a, &b| {
+                        flat(course[a] - at).length().total_cmp(&flat(course[b] - at).length())
+                    })
+                    .unwrap_or(i);
+            } else if from == "back" {
+                // The same projection the release rule uses, asked of the leg that leads *into*
+                // the waypoint instead of the one that leaves it. Bounded at three, because a
+                // corner the car is already through is not a corner to brake for.
+                for _ in 0..3 {
+                    let p = (i + n - 1) % n;
+                    let u = flat(course[p] - course[(p + n - 1) % n]);
+                    if u.length() < 0.01 || flat(at - course[p]).dot(u.normalize_or_zero()) >= 0.0 {
+                        break;
+                    }
+                    i = p;
+                }
+            }
             let mut limit = f32::INFINITY;
             while walked < look {
                 let (a, b, c) = (course[(i + n - 1) % n], course[i], course[(i + 1) % n]);
