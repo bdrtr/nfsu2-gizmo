@@ -14,8 +14,43 @@
 //!
 //! How many laps a circuit runs is *not* in anything decoded, so it is a caller's choice and
 //! [`Race::LAPS`] is a default rather than a fact.
+//!
+//! ## Units
+//!
+//! A race counts in whatever its field counts in, and says so through [`Runner`]. A field of
+//! simulated [`Pilot`]s counts **waypoints** driven past; a field of [`Rail`]s counts **metres**
+//! along the race line. [`Race::new`]'s `course` is the length of one lap in the same unit.
 
+use crate::rig::rail::Rail;
 use crate::rig::Pilot;
+
+/// Anything whose place in a race can be read: completed laps, and how far it has got since the
+/// line in the race's own unit.
+pub trait Runner {
+    /// Completed laps.
+    fn laps(&self) -> u32;
+    /// How far since the line, laps included, in the unit `course` is in.
+    fn along(&self, course: usize) -> usize;
+}
+
+impl Runner for Pilot {
+    fn laps(&self) -> u32 {
+        Pilot::laps(self)
+    }
+    fn along(&self, course: usize) -> usize {
+        Pilot::along(self, course)
+    }
+}
+
+/// A rail counts in metres, and knows its own lap length, so `course` is only the unit's promise.
+impl Runner for Rail {
+    fn laps(&self) -> u32 {
+        Rail::laps(self)
+    }
+    fn along(&self, _course: usize) -> usize {
+        Rail::along(self)
+    }
+}
 
 /// One car's place in the running order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -24,7 +59,8 @@ pub struct Standing {
     pub car: usize,
     /// Completed laps.
     pub laps: u32,
-    /// Waypoints driven since the line, laps included — what the order sorts on.
+    /// How far since the line, laps included, in the field's unit (see [`Runner`]) — what the
+    /// order sorts on.
     pub along: usize,
     /// Whether this car has finished.
     pub done: bool,
@@ -102,7 +138,7 @@ impl Race {
     /// the index wraps and the order must not. Ties keep the field's own order, which is the grid
     /// order — so a car that has not moved is behind one on the same waypoint that started behind
     /// it, and never in front.
-    pub fn standings(&mut self, field: &[Pilot]) -> Vec<Standing> {
+    pub fn standings<R: Runner>(&mut self, field: &[R]) -> Vec<Standing> {
         let mut out: Vec<Standing> = field
             .iter()
             .enumerate()

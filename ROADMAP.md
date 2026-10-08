@@ -4969,6 +4969,9 @@ Alet repoda: `NFS_RESIST=1`.
 
 ### DÜZELTME — motor suçsuz: düz zeminde araba 179 km/h yapıyor (2026-08-20)
 
+> **DÜZELTME (2026-10-08): bu bölümün hükmü de eksik.** `nfs_top` rig'in dışında ölçüyor; rig'in
+> kendi `linear_damping = 0.1`'i arabayı düz zeminde **95 km/h**'de tutuyordu. Bkz. "Raylar" bölümü.
+
 Bir önceki bölüm "aktarma 4.700-8.900 N sunuyor, arabaya 800-3.200 N ulaşıyor · sabit ~3.800 N
 kayıp · `gizmo-physics-dynamics`'in tekerlek→şasi eşlemesine ait" diye bitiyordu. **Bu hüküm
 yanlıştı ve şimdi çürütüldü.**
@@ -7294,3 +7297,145 @@ Dünkü oturumun bıraktığı görev "soğuktan üret ve karar ver" idi. Üreti
 **Bu oturumun en taşınabilir dersi ise ölçüm kümesi hakkında:** sekiz rota bir *uyum* kümesi, sınav
 kümesi değil. Bölgede 185 rota dosyası var, sekizi kullanılmış; rota başına maliyet ~30 saniye.
 Bundan sonra bir varsayılanı taşımadan önce, o değişiklik **hiç görülmemiş rotalarda** sınanmalı.
+
+## Raylar: rakipler simüle değil, kinematik (2026-10-08)
+
+M4'ün kendi planı bunu açıkça yazıyordu — *"Kinematik rakipler, simüle değil"* — ve §9'un dördüncü
+sorusu "üç lens de kinematik öneriyor" diye kaydediyordu. Proje yine de simüle pilotu seçti, çünkü
+motorun araç modelini kanıtlayacak olan oydu. On gün ve kırk kadar çürütülmüş kural sonra hiçbir
+rakip yarışı bitirmiyordu (alan 15 km'lik devrenin ~2 km'sine varıyor) ve son karar, en iyi paketin
+**genellemediğiydi**: seçildiği sekiz rotada +%19, hiç görmediği 24 rotada −%8 ile +%0,5.
+
+Pilot çalışmasının asıl öğrettiği şey zorluğun *hatta nişan almakta* olduğuydu, hattın kendisinde
+değil. Ray buna hiç girmiyor: hat üzerinde bir mesafeye **konuyor**, oradan çıkamıyor, ve geriye tek
+soru kalıyor — orada ne kadar hızlı gidebilir. Bu da hattın eğriliği ve arabanın sınırları
+üzerinde aritmetik. Pilot duruyor; motorun araç modelinin aleti olarak `nfs_sim` onu sürmeye devam
+ediyor.
+
+**Ne yazıldı:**
+
+| parça | ne |
+|---|---|
+| `world::race_ring` | `NFS_WALKLINE=1 NFS_WALKFIT=1` halkası tek yerde: duvarlı bağlantıları reddet, anahat köşeleri arasında ağı yürü, adıma göre yeniden arala. Duvar filtresiyle bağlanamayan bacak kiriş olmadan önce **filtresiz** yürüyor (`along_roads_or`). `nfs_sim`'in çağrısı bayt bayt aynı. |
+| `rig::dyno::Limits` | arabanın sınırları, **arabanın kendisinde ölçülmüş**: düz asfaltta tam gaz, tam fren, sabit direksiyonlu daire |
+| `rig::rail::RaceLine` | halka → 2 m'de örneklenmiş, yolun izin verdiği kadar yumuşatılmış, yol yüzeyine oturmuş, her noktasında hız sınırı olan hat |
+| `rig::rail::Rail` + `advance` | bir rakibin hattaki yeri; takip mesafesi, iki şerit, sollama |
+| `race::Runner` | `Race` artık pilotu da rayı da sayıyor (biri waypoint, biri metre) |
+| `nfs_rail` | pencere açmadan **105 yarışın hepsi**, her bölge bir kez yüklenerek: ~10 saniye |
+
+### Dyno'nun ilk bulgusu: arabayı 95 km/h'de tutan şey bir sabitti
+
+Rayın sınırlarını oyuncunun arabasından ölçmek, o arabanın hiç ölçülmemiş bir sayısını ortaya
+çıkardı. Rig şasiye `linear_damping = 0.1` veriyor — ilk içe aktarmadan beri, motorun kendi
+varsayılanının on katı, yanında tek satır gerekçe yok — ve bu `m · 0,1 · v` büyüklüğünde bir kuvvet:
+95 km/h'de 3.200 N, yani dördüncü viteste kutunun verdiğinin tamamı.
+
+| `linear_damping` | son hız | 0-100 km/h |
+|---|---|---|
+| 0,1 (önceki) | **95 km/h** | hiç |
+| 0,05 | 132 km/h | 12,8 s |
+| 0,01 (motor varsayılanı) | 193 km/h | 10,4 s |
+| **0** | **220 km/h** | **10,0 s** |
+
+Stok bir 240SX (KA24DE, 155 hp) ~215-220 km/h yapıyor ve 0-100'ü ~9 saniyede çıkıyor; motorun araç
+modeli hava direncini zaten kendisi hesaplıyor (`AeroPackage`). **Sönümleme 0'a çekildi.**
+
+**DÜZELTME — "103 km/h tavanı kursun virajları" hükmü yanlıştı.** 2026-08-20'deki ölçüm (179/231
+km/h) `nfs_top` ile alınmıştı, ve `nfs_top` motorun `update_vehicle`'ını **rig'in dışında** çağırıyor.
+Sönümlemenin yaşadığı tek yer, kimsenin zamanlamadığı tek yerdi. "Araba hızı tatmin etmiyor"
+şikâyetinin cevabı stok 240SX değil, bu sabitti.
+
+**Bedeli, ölçüldü: pilot süpürmesinin tabanı kaydı.** Sekiz rota, aynı ritüel, `sweep-columns.py`:
+
+| sütun | 0,1 → 0 | verdikt |
+|---|---|---|
+| waypoint | −317 | sağlam (en büyük tek rota −85) |
+| furthest | −439 m | sağlam |
+| ilerlemesi duran | +18 | sağlam |
+| kursta süre | −11,9 puan | TAŞINIYOR (tek rota −41,9) |
+| away / fallen | 0 / 0 | — |
+
+Pilotun her sabiti, düz zeminde 95 km/h'yi geçemeyen bir arabaya karşı oturtulmuştu; araba
+hızlanınca kayıp beklenen yönde. Bu commit'ten sonraki her pilot ölçümü **yeni tabana** karşı
+alınmalı — eski sayılarla kıyaslanamaz.
+
+Dyno'nun diğer iki sayısı: fren **6,0 m/s²**, yanal tutunma **6,1 m/s²** (0,62 g). İkincisi pilotun
+kendi notunu doğruluyor ("alanın kendi viraj alışının p90'ı 5,2 m/s²"; `GRIP = 8` arabanın
+yapabileceğinin üstünde). Bir yol arabası için düşük — motorun lastik modelinin sınırı, rayın değil.
+
+### 105 yarışın hepsi: 840 arabanın 840'ı bitiriyor
+
+| bölge | yarış (devre/sprint) | hat | yolsuz | basamak | duvar adımı | temas adımı | kiriş bacak | birincinin ortalaması |
+|---|---|---|---|---|---|---|---|---|
+| `L4RA` | 60 (31/29) | 306,5 km | %9,2 | 114 | 592 | 402 | 25 | 67 km/h |
+| `L4RB` | 9 (0/9) | 21,5 km | %85,6 | 0 | 3 | 0 | 9 | 170 km/h |
+| `L4RC` | 12 (12/0) | 7,5 km | %1,5 | 0 | 20 | 556 | 0 | 44 km/h |
+| `L4RD` | 3 (0/3) | 7,4 km | %14,9 | 0 | 31 | 0 | 2 | 125 km/h |
+| `L4RF` | 8 (8/0) | 6,0 km | %2,3 | 0 | 28 | 404 | 1 | 41 km/h |
+| `L4RG` | 13 (12/1) | 29,5 km | %56,4 | 0 | 2 | 0 | 1 | 67 km/h |
+
+Sütunların anlamı: **yolsuz** — altında `ROAD` adlı nesne olmayan örnek (yüksekliği komşulardan
+köprüleniyor, varsa ±2 m'deki zemine oturuyor); `L4RB` havaalanı (`TRN_RDP_*`) ve `L4RG` yüzeylerini
+yol diye adlandırmıyor, oradaki pay bir kusur değil bir adlandırma. **Basamak** — iki örnek arasında
+%50'den dik. **Duvar adımı** — ardışık iki örnek arasında araç boyunda bir duvar (çoğu tek örnek:
+bordür, refüj kenarı; geri kalanı kiriş bacakları). **Temas** — iki araba, ikisi de hâlâ yarışırken,
+240SX'in kendi boyutlarında (4,52 × 1,69 m) birbirinin içinde; neredeyse tamamı dört sütunlu gridin
+iki şeride indiği kalkış saniyeleri. `L4RB`'nin 170 km/h'si drag pisti.
+
+### Yol boyunca ölçülen ve düzeltilen yedi kusur
+
+Hepsi `nfs_rail`'in kendi teşhis düğmeleriyle bulundu (`NFS_RAILDUMP`, `NFS_RAILFLAGS`,
+`NFS_RAILTRACE`, `NFS_RAILENDS`); her biri düzeltmenin yanında kodda yazılı.
+
+1. **Yükseklik bir kez kaybedilince hiç geri gelmiyordu.** Örnek örnek "son yüksekliğe en yakın
+   yüzey" takibi, yüzey olmayan yerde son yüksekliği tutuyordu — ve yol inip çıktıkça hiçbir şey o
+   yüksekliğe bir daha yakın olmuyor. `Paths4001` 1.800. örnekte yolu kaybetti ve turun geri
+   kalanını, 2,5 km'yi, 52 m'de durdu; yol 7-30 m'de. Hattın %43'ü havadaydı. Yerine
+   `route::follow`'un yaptığı şey: bütün hat boyunca en az toplam tırmanış.
+2. **En az tırmanış köprü altında tabliyeye zıplıyordu.** Yol maskesi alttaki yolu tam tabliyenin
+   altında kaybediyor; tek aday tabliye olunca çözüm 10-20 m tırmanıp iniyordu (`Paths4121`, %85-142
+   eğim). Çözüme örnek **atlama** seçeneği verildi (örnek başına 0,5 m bedel) — basamak 77 → 11.
+   İlk sürümü yolsuz örnekleri de atlama sayıyordu ve uzun bir kiriş bacağı zinciri koparıp hattın
+   yarısını düz bir yükseklikte bırakıyordu; çözüm artık yalnız adayı olan örnekler üzerinde koşuyor.
+3. **Halkada geri dönüş sivrileri.** Bir bacağın bittiği düğüm sonrakinin başladığının biraz
+   ilerisindeyse halka 11 m gidip geri geliyor; yumuşatma onu 1,6 m yarıçaplı, 14 km/h'lik bir
+   viraja katlıyordu. Yön 4 m'lik tabanda 120°'den fazla dönen her örnek ayıklanıyor.
+4. **Sprint gridleri hattın başının gerisinde.** `Paths4107`'de grid ilk köşenin 134-140 m gerisinde,
+   ve sekiz araba hattın ilk metresine üst üste doğuyordu. Giriş parçası gridin kendisinden çiziliyor
+   — ama yalnız gerektiğinde; çoğu sprintte ilk köşe gridin **gerisinde** (`Paths4211` 316 m) ve grid
+   zaten ilk bacağın üstünde.
+5. **Sprint sonunda duran araba hâlâ hız bildiriyordu**; arkadaki onu uzaklaşıyor sanıp üstüne
+   kapanıyordu. Ve aynı noktaya varan iki araba birbirini lider saymıyordu.
+6. **Sollama yalnız mesafeye bakıyordu**; `Paths4101`'de yavaşlayan bir araba, 30 km/h daha hızlı
+   kapanan bir arabanın 20 m önüne geçti. Artık her iki taraf için fren mesafesi şartı var.
+7. **İki şeride dört sütun.** Kalkışta aynı sıradaki iki araba aynı şeride kayıp iç içe geçiyordu;
+   yanında araba varken şerit değiştirilmiyor.
+
+### Grid sorusunun cevabı: grid yönü doğru, anahat bazen ters (2026-10-08)
+
+"Izgara sorusu"nda grid yönünün önü/arkası **çözülmedi** diye kaldı. İlk sürüm anahattın sırasına
+güvenip gridleri ona göre çeviriyordu. 42 sprint bunun tersini söylüyor:
+
+- **39'unda** grid anahattın **ilk** köşesine yakın (8-320 m) ve dosyanın grid yönü halkanın oradan
+  çıkış yönüyle aynı (+0,63 … +1,00);
+- **3'ünde** — `Paths4104`, `4126`, `4127` — grid anahattın **son** köşesine 5-42 m ve grid yönü
+  halkanın oraya varış yönünün tam tersi (−0,97 … −1,00). 4126'da ilk köşe gridden 2,4 km uzakta.
+
+Yani dosyanın grid yönü 42'nin 42'sinde doğru, ve üç anahat sondan başa yazılmış. `rail::orient_ring`
+sprinti gridin durduğu uçtan başlatıyor; bir devreyi, halka gridin yanından ona karşı akıyorsa ters
+çeviriyor (105 yarışta 5 halka çevrildi: 4083, 4104, 4126, 4127, 4304). **Ölçülmeyen:** pilotun
+`Pilot::place`'i ve `nfs_sim` hâlâ anahattın sırasını kullanıyor — bu üç sprint ve iki devre pilot
+için ters.
+
+### Bilinen sınırlar
+
+- Ray **eğimi** modellemiyor: yokuş ne yavaşlatıyor ne hızlandırıyor. Virajı sınırda, freni düz
+  çizgide yapıyor — her yarış hattı çözücüsünün basitleştirmesi; `PACE` (0,88-0,95) bunu geri ödüyor.
+- Duvar adımlarının çoğu tek örneklik bordür/refüj geçişi; kalanı 38 kiriş bacağı.
+- Yumuşatma payı 4 m (`NFS_RAILSHIFT`); 8 m turları %7-11 kısaltıyor ama basamakları 11 → 25 ve duvar
+  adımlarını 117 → 132 yapıyor.
+
+### Sıradaki
+
+Raylar pencereye: `nfs_cruise`'da `NFS_ROUTE` yüklenince rakipler ray olarak sürsün, kinematik gövdeyle
+oyuncuya çarpabilsinler, ve M4'ün döngüsü — geri sayım → yarış → sıralama → sonuç — HUD'da kapansın.

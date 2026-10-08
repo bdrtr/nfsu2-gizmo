@@ -29,13 +29,17 @@
 
 mod chase;
 mod drive;
+pub mod dyno;
 mod pilot;
+pub mod rail;
 
 use crate::world::Ground;
 
 pub use chase::ChaseCamera;
 pub use drive::{Controls, Driver, FIXED_DT};
+pub use dyno::Limits;
 pub use pilot::Pilot;
+pub use rail::{Obstacle, RaceLine, Rail};
 
 use crate::car::tune::{steering_lock, tune_from_record, CarTune, Upgrades};
 use crate::car::{build_car_visuals, PbrLook, WheelFit};
@@ -351,7 +355,24 @@ pub fn spawn_car(
     // still integrating it while printing the real one.
     let mass = tune.as_ref().map_or(1200.0, |t| t.mass_kg);
     let mut rb = RigidBody::new(mass, true);
-    rb.linear_damping = 0.1;
+    // **No linear damping: it was the car's top speed.** 0.1 s⁻¹ came over with the first import,
+    // ten times the engine's own default and with no reason written beside it, and it is a force of
+    // `m · 0.1 · v` — 3 200 N at 95 km/h, which is everything the box delivers in fourth. Measured
+    // on the bench (`rig::dyno`, flat asphalt, full throttle, this 240SX):
+    //
+    // | `linear_damping` | top speed | 0-100 km/h |
+    // |---|---|---|
+    // | 0.1 (was) | **95 km/h** | never |
+    // | 0.05 | 132 km/h | 12.8 s |
+    // | 0.01 (engine default) | 193 km/h | 10.4 s |
+    // | **0** | **220 km/h** | **10.0 s** |
+    //
+    // A stock 240SX (KA24DE, 155 hp) tops out around 215-220 km/h and does 0-100 in about 9 s, so
+    // the vehicle model's own aero drag (`AeroPackage`, ½ρC_dAv²) already holds the car where the car
+    // is, and a second, invented drag on top of it only took speed away. `ROADMAP.md`'s "the city's
+    // 103 km/h ceiling is its corners" was measured with `nfs_top`, which drives `update_vehicle`
+    // without this rig — so the one place the damping lived was the one place nobody had timed.
+    rb.linear_damping = 0.0;
     rb.angular_damping = 1.8;
     rb.calculate_box_inertia(size.x, size.y, size.z);
     rb.center_of_mass = Vec3::new(0.0, -size.y * 0.1, 0.0);

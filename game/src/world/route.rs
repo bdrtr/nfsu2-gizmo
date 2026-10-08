@@ -416,6 +416,22 @@ pub fn along_roads(
     detour: f32,
     passable: impl Fn(u32, u32) -> bool,
 ) -> (Vec<Vec3>, usize) {
+    along_roads_or(net, outline, step, detour, passable, None)
+}
+
+/// [`along_roads`], with a second test of which links may be walked for a leg the first one cannot
+/// join — tried before the leg falls back to the chord.
+///
+/// `None` is [`along_roads`] exactly, which is what `nfs_sim` measures.
+#[must_use]
+pub fn along_roads_or(
+    net: &super::Network,
+    outline: &[Vec3],
+    step: f32,
+    detour: f32,
+    passable: impl Fn(u32, u32) -> bool,
+    fallback: Option<&dyn Fn(u32, u32) -> bool>,
+) -> (Vec<Vec3>, usize) {
     let mut poly: Vec<Vec3> = Vec::new();
     let mut chords = 0usize;
     // Two nodes of a route file can sit on top of each other; a polyline with a zero-length segment
@@ -448,12 +464,29 @@ pub fn along_roads(
     // refuted "cannot terminate on a cycle" mistake in another costume.
     let mut arrived_from: Option<u32> = None;
     for w in outline.windows(2) {
+        let within = |ids: &Vec<u32>| {
+            if detour <= 0.0 {
+                return true;
+            }
+            let plan = |a: Vec3, b: Vec3| Vec3::new(b.x - a.x, 0.0, b.z - a.z).length();
+            let road: f32 = ids
+                .windows(2)
+                .filter_map(|p| Some(plan(net.node(p[0])?.at, net.node(p[1])?.at)))
+                .sum();
+            road <= plan(w[0], w[1]).max(1.0) * detour
+        };
         let legs = snap(w[0])
             .zip(snap(w[1]))
             .and_then(|(a, b)| {
                 let back = arrived_from;
-                net.path_where(a, b, |x, y| {
-                    passable(x, y) && !(x == a && Some(y) == back)
+                let first = net
+                    .path_where(a, b, |x, y| passable(x, y) && !(x == a && Some(y) == back))
+                    .filter(|ids| within(ids));
+                first.or_else(|| {
+                    fallback.and_then(|f| {
+                        net.path_where(a, b, |x, y| f(x, y) && !(x == a && Some(y) == back))
+                            .filter(|ids| within(ids))
+                    })
                 })
             })
             .filter(|ids| {
@@ -495,6 +528,99 @@ pub fn along_roads(
         }
     }
     (densify(&poly, step), chords)
+}
+
+/// Re-space a polyline at `step` by arc length in plan, keeping its first and last point.
+///
+/// **Why a walked ring needs it.** [`along_roads`] returns the graph's own nodes, and a road's nodes
+/// are not a driving line: they sit a median 30 m apart, but at a junction they crowd, and the ring
+/// comes out with consecutive points 1-2 m apart. Three points inside two metres make an arbitrary
+/// angle, which anything reading curvature off the ring takes for a hairpin — on `Paths4021` the
+/// walked ring imposed a sub-40 km/h limit at ten waypoints where the chord ring imposed it at none.
+/// Re-spacing keeps the shape and the length and throws away only the crowding.
+///
+/// This is `nfs_sim`'s `NFS_WALKFIT` moved here unchanged, so the ring the sweep measured and the
+/// ring [`race_ring`] builds are the same arithmetic.
+#[must_use]
+pub fn respace(points: &[Vec3], step: f32) -> Vec<Vec3> {
+    if points.len() <= 2 {
+        return points.to_vec();
+    }
+    let (mut out, mut acc) = (vec![points[0]], 0.0f32);
+    for q in points.windows(2) {
+        let d = (q[1].x - q[0].x).hypot(q[1].z - q[0].z);
+        if d < 1e-3 {
+            continue;
+        }
+        let mut t = 0.0;
+        while acc + (d - t) >= step {
+            t += step - acc;
+            acc = 0.0;
+            out.push(q[0].lerp(q[1], (t / d).clamp(0.0, 1.0)));
+        }
+        acc += d - t;
+    }
+    if let Some(last) = points.last() {
+        out.push(*last);
+    }
+    out
+}
+
+/// How far round a leg [`race_ring`] lets the walk go before it takes the chord instead, as a
+/// multiple of the chord. `nfs_sim`'s `NFS_WALKDETOUR` default, which every walked-ring measurement
+/// was taken at.
+pub const RING_DETOUR: f32 = 3.0;
+
+/// The race's ring, walked along the roads and re-spaced: the best *geometry* the project has for
+/// where a race goes.
+///
+/// The three steps `nfs_sim` runs under `NFS_WALKLINE=1 NFS_WALKFIT=1`, in one place: refuse every
+/// network link something stands across at car height, walk the network between the outline's
+/// corners ([`along_roads`], with [`RING_DETOUR`]), and [`respace`] the result at `step`.
+///
+/// **Better geometry, not better driving, and the difference matters for who uses it.** Over the
+/// eight sweep routes this ring has 1 waypoint over no ground against the chord ring's 8, and 53
+/// corners under 60 km/h against 90 — but the *pilot* drives it no better (metres along the ring
+/// −0.3 % in sample, +0.7 % on 24 held-out routes) and two strong routes empty on it. That is a fact
+/// about a physical car steering at waypoints. A follower that is placed on the line rather than
+/// steered at it ([`crate::rig::rail`]) asks only for the geometry, and this is the best there is.
+///
+/// Returns the ring and how many legs fell back to the chord because no road joined their ends.
+#[must_use]
+pub fn race_ring(
+    net: &super::Network,
+    ground: &Ground,
+    walls: &super::Walls,
+    outline: &[Vec3],
+    step: f32,
+) -> (Vec<Vec3>, usize) {
+    let mut blocked: std::collections::HashSet<(u32, u32)> = Default::default();
+    for i in 0..net.len() as u32 {
+        let Some(a) = net.node(i) else { continue };
+        for &l in &a.links {
+            if l <= i {
+                continue;
+            }
+            let Some(b) = net.node(l) else { continue };
+            if walls.across(ground, a.at, b.at, 0.5, 3.0) {
+                blocked.insert((i, l));
+                blocked.insert((l, i));
+            }
+        }
+    }
+    // A leg the wall-checked graph cannot join walks the whole graph before it becomes a chord: a
+    // link through a reservation is two metres through a kerb, and a chord is a straight line
+    // through however many blocks lie between two corners.
+    let any: &dyn Fn(u32, u32) -> bool = &|_, _| true;
+    let (ring, chords) = along_roads_or(
+        net,
+        outline,
+        step,
+        RING_DETOUR,
+        |a, b| !blocked.contains(&(a, b)),
+        Some(any),
+    );
+    (respace(&ring, step), chords)
 }
 
 /// The track id free roam's own markers carry.
