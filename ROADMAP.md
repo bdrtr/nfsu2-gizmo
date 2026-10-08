@@ -7454,17 +7454,22 @@ trafik olarak görüp yavaşlıyor ya da sollıyor.
 - **R** oyuncuyu gridine geri koyuyor; yarış onsuz devam ediyor.
 - `NFS_RIVALDRIVER=pilot` eski simüle pilotları geri getiriyor; `NFS_WATCH=<k>` kamerayı k. rakibe
   veriyor — rayın şehri nasıl sürdüğünü, ona yetişmek zorunda kalmadan görmenin yolu.
+- `NFS_DEMO=1`: oyuncunun arabası da kendi rayında — yarış başından sonucuna kendi kendine koşuyor.
+  Gösteri modu, ve bütün döngüyü klavyede kimse olmadan pencerede görmenin yolu.
 
 **Görerek doğrulandı** (`GIZMO_SCREENSHOT`, uygulamanın kendi karesi): 4001 geri sayımı ("3 · Hazır
 ol", "1/8", "tur 1/3", gridde iki yanda rakipler, oyunun kendi damalı çizgisi); `NFS_WATCH=2` ile
 t=2,2 s yan yana kalkış, t=17,4 s ve t=47,3 s ray şehirde yolun üstünde ve yönünde; 4107 ve 4126
 sprintlerinin kalkışı (grid hattın başında, 4126'da halka çevrilmiş). Kare 93-134 fps.
-**Görülmeyen:** sonuç ekranı — oyuncunun bitirmesi gerekiyor ve bu oturumda kimse sürmedi. Aynı
-`Race` aritmetiği `nfs_rail`'de 840 bitişi sayıyor; ekranın kendisi denenmedi.
+**Sonuç ekranı da görüldü**, `NFS_DEMO=1` ile `Paths4304`'te (815 m, 3 tur): "Yarış bitti" ve sekiz
+araba, sırası ve süresiyle. Süreler başsız `nfs_rail`'in aynı yarış için bulduklarıyla onda birine
+kadar aynı — birinci 3:15,0, sonuncu 3:34,2 — yani pencere 240 Hz'de, `nfs_rail` 60 Hz'de adımlasa
+da yarış aynı yarış.
 
 ### Sıradaki
 
-- Sonuç ekranını gerçek bir yarışla görmek.
+- Bir insanın sürdüğü bir yarış: ray hızları (`PACE` 0,88-0,95, birincinin şehir ortalaması 67 km/h)
+  ve oyuncunun arabası 0,62 g yanal tutunmayla — dengeyi ancak biri sürünce söyleyebilir.
 - Bitiren sprint raylarının hattın ucunda park etmesi yarıştan sonra sürtünüyor; bitirenleri gizlemek
   ya da hattı finişin ötesine uzatmak.
 - `Pilot::place` ve `nfs_sim` hâlâ anahattın sırasını kullanıyor: üç sprint ve iki devre pilot için ters.

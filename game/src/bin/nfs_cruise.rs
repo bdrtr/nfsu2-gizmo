@@ -24,7 +24,8 @@
 //! imposters and from a car they are blurred boxes in open ground) · `NFS_ROUTE=<Paths*.bin>` load that race: its line is drawn on the road and the HUD says
 //! where you are on it and whether you are still on it — and the race is **run**: the rivals are
 //! rails ([`nfsu2::rig::rail`]), there is a countdown, a running order, laps or the distance to go,
-//! and a result · `NFS_RIVALDRIVER=pilot` drive the rivals with the simulated pilot instead · `NFS_AT="x,y,z"` where to start — downtown sits near `y ≈ 27` and the airport near
+//! and a result · `NFS_DEMO=1` with it, your car rides a rail too — the race runs itself, start to
+//! result · `NFS_RIVALDRIVER=pilot` drive the rivals with the simulated pilot instead · `NFS_AT="x,y,z"` where to start — downtown sits near `y ≈ 27` and the airport near
 //! `y ≈ -11`, so the height matters as much as the place · `NFS_BUDGET=<n>` caps objects,
 //! nearest-first · `NFS_DIAG=1` prints the physics' own view once a second · plus everything
 //! [`nfsu2::rig`] reads (`NFS_PAINT`, `NFS_KIT`, `NFS_ENGINE`, `NFS_SHOTCAM`, …).
@@ -198,6 +199,10 @@ struct RailRace {
     finished: Vec<Option<f32>>,
     /// The running order, leader first. Entrant 0 is the player.
     order: Vec<Standing>,
+    /// `NFS_DEMO=1`: the player's own rail. The player's car is then placed like a rival's and the
+    /// race runs itself — the attract mode, and the way to see the whole race through in a window
+    /// without anyone at the keys.
+    demo: Option<Rail>,
 }
 
 /// What a [`RailRace`] is built from.
@@ -238,6 +243,7 @@ impl RailRace {
         let RailPlan { line, limits, slots, heading, rivals } = plan;
         let mut grid = Rail::grid(&line, &slots, heading, &PACE)?;
         let player = grid.remove(0);
+        let demo = std::env::var("NFS_DEMO").is_ok_and(|v| v != "0").then(|| player.clone());
         let from = player.from();
         let field: Vec<Rail> = grid.into_iter().take(rivals).collect();
         let mut rigs = Vec::with_capacity(field.len());
@@ -272,6 +278,7 @@ impl RailRace {
             from,
             clock: 0.0,
             order: Vec::new(),
+            demo,
         })
     }
 
@@ -288,11 +295,22 @@ impl RailRace {
 
     /// One physics step: the field moves, and each body is given the velocity that takes it there,
     /// so what it meets on the way is pushed rather than passed through.
-    fn step(&mut self, world: &mut World, dt: f32) {
+    fn step(&mut self, world: &mut World, dt: f32, player: &CarRig) {
         let me = Obstacle { s: self.player_s, lane: self.player_lane, v: self.player_v };
         let before: Vec<(Vec3, Quat)> =
             self.rigs.iter().zip(&self.field).map(|(g, r)| r.pose(&self.line, g.ride())).collect();
-        rail::advance(&mut self.field, &[me], &self.line, &self.limits, dt, self.race.holding());
+        match self.demo.take() {
+            // In the demo the player is a rail among rails, so it goes into the same traffic.
+            Some(own) => {
+                let was = own.pose(&self.line, player.ride());
+                self.field.insert(0, own);
+                rail::advance(&mut self.field, &[], &self.line, &self.limits, dt, self.race.holding());
+                let own = self.field.remove(0);
+                player.place(world, was, own.pose(&self.line, player.ride()), dt);
+                self.demo = Some(own);
+            }
+            None => rail::advance(&mut self.field, &[me], &self.line, &self.limits, dt, self.race.holding()),
+        }
         for ((rig, r), now) in self.rigs.iter().zip(&self.field).zip(before) {
             rig.place(world, now, r.pose(&self.line, rig.ride()), dt);
         }
@@ -303,11 +321,15 @@ impl RailRace {
         if !self.race.holding() {
             self.clock += dt;
         }
-        if let Some((s, lane)) = self.line.track(at, self.player_s) {
-            self.player_s = s;
-            self.player_lane = lane;
+        if let Some(own) = &self.demo {
+            (self.player_s, self.player_lane, self.player_v) = (own.s(), own.lane(), own.speed());
+        } else {
+            if let Some((s, lane)) = self.line.track(at, self.player_s) {
+                self.player_s = s;
+                self.player_lane = lane;
+            }
+            self.player_v = speed;
         }
-        self.player_v = speed;
         let entrants: Vec<Entrant> = std::iter::once(self.entrant())
             .chain(self.field.iter().map(|r| Entrant { laps: r.laps(), along: r.along() }))
             .collect();
@@ -896,6 +918,10 @@ fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> CruiseState
                 let plan = RailPlan { line, limits, slots: grid_slots.clone(), heading, rivals };
                 RailRace::start(world, renderer, &mut assets, &mut phys, &car_path, plan)
             });
+        if rails.as_ref().is_some_and(|r| r.demo.is_some()) {
+            println!("NFS_DEMO: senin araban da rayda — yarış kendi kendine koşuyor");
+            rig.make_kinematic(world);
+        }
     }
     let mut field = Vec::new();
     for slot in grid_slots.iter().skip(1).take(if rails.is_some() { 0 } else { rivals }) {
@@ -1060,14 +1086,15 @@ fn update(world: &mut World, state: &mut CruiseState, dt: f32, input: &Input) {
     // the player and to every rival through the same call: a fence one of them can drive through is
     // not a fence, it is a handicap.
     let CruiseState { rig, driver, field, ground, rails, .. } = state;
+    let demo = rails.as_ref().is_some_and(|r| r.demo.is_some());
     driver.step_physics_with(world, dt, |w| {
-        if let Some(p) = rig.pose(w) {
+        if let Some(p) = rig.pose(w).filter(|_| !demo) {
             rig.hold_at_edge(w, p, ground);
         }
         // The rails move once per physics step, not once per frame, so a body that meets the
         // player is moving at the step's own rate.
         if let Some(rr) = rails.as_mut() {
-            rr.step(w, FIXED_DT);
+            rr.step(w, FIXED_DT, rig);
         }
         for (r, _) in field.iter_mut() {
             if let Some(p) = r.pose(w) {
@@ -1088,7 +1115,11 @@ fn update(world: &mut World, state: &mut CruiseState, dt: f32, input: &Input) {
         }
     }
 
-    let Some(pose) = state.rig.pose(world) else { return };
+    let Some(mut pose) = state.rig.pose(world) else { return };
+    // A placed car has no controller to report its speed; its rail does.
+    if let Some(own) = state.rails.as_ref().and_then(|r| r.demo.as_ref()) {
+        pose.speed = own.speed();
+    }
     if let Some(rr) = state.rails.as_mut() {
         rr.sync(world, dt);
         rr.observe(pose.position, pose.speed, dt);
@@ -1097,7 +1128,9 @@ fn update(world: &mut World, state: &mut CruiseState, dt: f32, input: &Input) {
     // The city has holes the shipped geometry never covered; a car that finds one must come back,
     // not fall for ever. One frame is skipped rather than driving the camera to a pose that no
     // longer exists.
-    match state.rig.keep_in_world(world, pose, dt) {
+    // A placed car is never off the world, and the rescue reads wheels it no longer has.
+    let placed = state.rails.as_ref().is_some_and(|r| r.demo.is_some());
+    match if placed { Rescue::None } else { state.rig.keep_in_world(world, pose, dt) } {
         Rescue::None => {}
         Rescue::ToLastGround => {
             state.driver.reset();
@@ -1270,11 +1303,14 @@ fn diagnose(world: &World, state: &mut CruiseState, pose: nfsu2::rig::Pose) {
 }
 
 fn ui(world: &mut World, state: &mut CruiseState, ctx: &egui::Context) {
-    let speed = world
-        .borrow::<gizmo::physics::vehicle::VehicleController>()
-        .get(state.rig.chassis)
-        .map(|v| v.current_speed_kmh.abs())
-        .unwrap_or(0.0);
+    let speed = match state.rails.as_ref().and_then(|r| r.demo.as_ref()) {
+        Some(own) => own.speed() * 3.6,
+        None => world
+            .borrow::<gizmo::physics::vehicle::VehicleController>()
+            .get(state.rig.chassis)
+            .map(|v| v.current_speed_kmh.abs())
+            .unwrap_or(0.0),
+    };
     let s = &state.stats;
     egui::Area::new(egui::Id::new("city"))
         .anchor(egui::Align2::LEFT_TOP, egui::vec2(24.0, 24.0))
@@ -1344,7 +1380,9 @@ fn ui(world: &mut World, state: &mut CruiseState, ctx: &egui::Context) {
     egui::Area::new(egui::Id::new("spd"))
         .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-30.0, -30.0))
         .show(ctx, |ui| {
-            ui.heading(format!("{speed:.0} km/h"));
+            // Never wrapped: an area pinned to the right edge has no width of its own, and "60
+            // km/h" came out as three lines.
+            ui.add(egui::Label::new(egui::RichText::new(format!("{speed:.0} km/h")).heading()).extend());
         });
 }
 
