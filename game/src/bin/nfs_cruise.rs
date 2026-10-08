@@ -14,7 +14,7 @@
 //! ```
 //!
 //! Controls: **W/↑** accelerate · **S/↓** reverse · **A/D or ←/→** steer · **Space** brake ·
-//! **R** back to the start · **T** auto-shift · hold **right mouse** to orbit · **F** print where
+//! **R** back to the start · **Enter** run the race again · **T** auto-shift · hold **right mouse** to orbit · **F** print where
 //! the car is.
 //!
 //! Env: `NFS_FREEROAM=1` **serbest dolaşım** — Bayview with no race in it: loads `STREAML4RA.BUN`
@@ -203,7 +203,17 @@ struct RailRace {
     /// race runs itself — the attract mode, and the way to see the whole race through in a window
     /// without anyone at the keys.
     demo: Option<Rail>,
+    /// The grid the race started from, kept so **Enter** can start it again.
+    slots: Vec<Vec3>,
+    heading: Vec3,
 }
+
+/// How long a car that has finished a sprint stays parked at the end of the line before it is
+/// taken off it, in seconds. The line ends where the data does, so the field parks nose to tail in
+/// the run-out; once you have seen them finish, the pile is in the way of the result.
+const PARKED_FOR: f32 = 3.0;
+/// Where a car taken off the line goes: far enough under the city that nothing sees it.
+const PARKED_BELOW: f32 = 1000.0;
 
 /// What a [`RailRace`] is built from.
 struct RailPlan {
@@ -242,6 +252,7 @@ impl RailRace {
     ) -> Option<Self> {
         let RailPlan { line, limits, slots, heading, rivals } = plan;
         let mut grid = Rail::grid(&line, &slots, heading, &PACE)?;
+        let keep = slots.clone();
         let player = grid.remove(0);
         let demo = std::env::var("NFS_DEMO").is_ok_and(|v| v != "0").then(|| player.clone());
         let from = player.from();
@@ -279,7 +290,44 @@ impl RailRace {
             clock: 0.0,
             order: Vec::new(),
             demo,
+            slots: keep,
+            heading,
         })
+    }
+
+    /// Back to the grid: every rail on its mark, the player's place reset, the countdown again.
+    /// The player's car itself is put back by the caller, which owns it.
+    fn restart(&mut self, world: &mut World) {
+        let Some(mut grid) = Rail::grid(&self.line, &self.slots, self.heading, &PACE) else { return };
+        let player = grid.remove(0);
+        if self.demo.is_some() {
+            self.demo = Some(player);
+        }
+        self.field = grid.into_iter().take(self.rigs.len()).collect();
+        for (rig, r) in self.rigs.iter().zip(&self.field) {
+            let p = r.pose(&self.line, rig.ride());
+            rig.place(world, p, p, FIXED_DT);
+        }
+        self.race = Race::new(self.line.course(self.from), self.line.closed());
+        self.player_s = self.player_start;
+        self.player_v = 0.0;
+        self.clock = 0.0;
+        self.finished = vec![None; self.field.len() + 1];
+        self.order.clear();
+        println!("yarış yeniden başlıyor");
+    }
+
+    /// Where rival `k`'s body goes: on its rail, or — a sprint finished more than [`PARKED_FOR`]
+    /// ago — under the city.
+    fn shown(&self, k: usize, ride: f32) -> (Vec3, Quat) {
+        let (at, rot) = self.field[k].pose(&self.line, ride);
+        let parked = !self.line.closed()
+            && self.finished.get(k + 1).copied().flatten().is_some_and(|t| self.clock - t > PARKED_FOR);
+        if parked {
+            (at - Vec3::Y * PARKED_BELOW, rot)
+        } else {
+            (at, rot)
+        }
     }
 
     /// The player's place in the order, measured as a rail's is.
@@ -298,7 +346,7 @@ impl RailRace {
     fn step(&mut self, world: &mut World, dt: f32, player: &CarRig) {
         let me = Obstacle { s: self.player_s, lane: self.player_lane, v: self.player_v };
         let before: Vec<(Vec3, Quat)> =
-            self.rigs.iter().zip(&self.field).map(|(g, r)| r.pose(&self.line, g.ride())).collect();
+            self.rigs.iter().enumerate().map(|(k, g)| self.shown(k, g.ride())).collect();
         match self.demo.take() {
             // In the demo the player is a rail among rails, so it goes into the same traffic.
             Some(own) => {
@@ -311,8 +359,8 @@ impl RailRace {
             }
             None => rail::advance(&mut self.field, &[me], &self.line, &self.limits, dt, self.race.holding()),
         }
-        for ((rig, r), now) in self.rigs.iter().zip(&self.field).zip(before) {
-            rig.place(world, now, r.pose(&self.line, rig.ride()), dt);
+        for (k, (rig, now)) in self.rigs.iter().zip(before).enumerate() {
+            rig.place(world, now, self.shown(k, rig.ride()), dt);
         }
     }
 
@@ -348,8 +396,9 @@ impl RailRace {
 
     /// Move the rails' visible parts onto their bodies, wheels turning at the speed they go.
     fn sync(&mut self, world: &mut World, dt: f32) {
-        for (rig, r) in self.rigs.iter_mut().zip(&self.field) {
-            let (position, rotation) = r.pose(&self.line, rig.ride());
+        let shown: Vec<(Vec3, Quat)> =
+            self.rigs.iter().enumerate().map(|(k, g)| self.shown(k, g.ride())).collect();
+        for ((rig, r), (position, rotation)) in self.rigs.iter_mut().zip(&self.field).zip(shown) {
             rig.sync_visuals(world, Pose { position, rotation, speed: r.speed() }, dt);
         }
     }
@@ -1073,6 +1122,14 @@ fn update(world: &mut World, state: &mut CruiseState, dt: f32, input: &Input) {
         }
     }
 
+    // **Enter**: the race again, from the grid.
+    if input.is_key_just_pressed(KeyCode::Enter as u32) {
+        if let Some(rr) = state.rails.as_mut() {
+            state.rig.reset(world);
+            state.driver.reset();
+            rr.restart(world);
+        }
+    }
     if input.is_key_just_pressed(KeyCode::KeyR as u32) {
         state.rig.reset(world);
         state.driver.reset();
@@ -1430,6 +1487,7 @@ fn race_ui(rr: &RailRace, ctx: &egui::Context) {
             .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 40.0))
             .show(ctx, |ui| {
                 ui.heading("Yarış bitti · Race over");
+                ui.label("Enter: yeniden · again");
                 for (i, s) in rr.order.iter().enumerate() {
                     let who = if s.car == 0 { "Sen · you".to_string() } else { format!("Rakip {}", s.car) };
                     let time = rr

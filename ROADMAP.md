@@ -7456,6 +7456,10 @@ trafik olarak görüp yavaşlıyor ya da sollıyor.
   veriyor — rayın şehri nasıl sürdüğünü, ona yetişmek zorunda kalmadan görmenin yolu.
 - `NFS_DEMO=1`: oyuncunun arabası da kendi rayında — yarış başından sonucuna kendi kendine koşuyor.
   Gösteri modu, ve bütün döngüyü klavyede kimse olmadan pencerede görmenin yolu.
+- **Enter** yarışı gridden yeniden başlatıyor. Sprintte bitiren rakip, hattın ucunda 3 s park
+  ettikten sonra hattan kaldırılıyor — veri orada bitiyor ve alan burun buruna yığılıyordu
+  (`Paths4709`'un sonucunda görüldü: yığın yok). Yeniden başlatmanın kendisi klavye istediği için
+  denenmedi.
 
 **Görerek doğrulandı** (`GIZMO_SCREENSHOT`, uygulamanın kendi karesi): 4001 geri sayımı ("3 · Hazır
 ol", "1/8", "tur 1/3", gridde iki yanda rakipler, oyunun kendi damalı çizgisi); `NFS_WATCH=2` ile
@@ -7470,8 +7474,6 @@ da yarış aynı yarış.
 
 - Bir insanın sürdüğü bir yarış: ray hızları (`PACE` 0,88-0,95, birincinin şehir ortalaması 67 km/h)
   ve oyuncunun arabası 0,62 g yanal tutunmayla — dengeyi ancak biri sürünce söyleyebilir.
-- Bitiren sprint raylarının hattın ucunda park etmesi yarıştan sonra sürtünüyor; bitirenleri gizlemek
-  ya da hattı finişin ötesine uzatmak.
 - `Pilot::place` ve `nfs_sim` hâlâ anahattın sırasını kullanıyor: üç sprint ve iki devre pilot için ters.
 - Motor pini (`550a7dfd`) motorun `main`'inin 105 commit gerisinde; metin ve `gizmo-ui` çizimi
   orada. HUD egui ile çizildiği için bugün gerekmiyor.
