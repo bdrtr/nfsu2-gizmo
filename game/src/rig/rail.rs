@@ -121,6 +121,10 @@ const FOLLOW_MIN: f32 = 2.0;
 const FOLLOW_S: f32 = 0.4;
 /// How far ahead a rival looks for traffic, in metres.
 const TRAFFIC_LOOK: f32 = 80.0;
+/// How far either side of a car's last place [`RaceLine::track`] looks for it, and how far from the
+/// line it may be and still be on it, in metres.
+const TRACK_WINDOW: f32 = 80.0;
+const TRACK_OFF: f32 = 30.0;
 /// How long a rival sits behind a slower car before it tries the other lane, in seconds.
 const PASS_AFTER: f32 = 1.0;
 /// How fast a car that is already too close drops back, in m/s per metre it is inside the gap.
@@ -408,6 +412,45 @@ impl RaceLine {
         } else {
             t
         }
+    }
+
+    /// How far a race over this line counts to, in metres, for a race that starts at `from`: one
+    /// lap of a circuit, or a sprint from its start to its finish — [`SPRINT_RUNOUT`] short of the
+    /// end of the line, so the cars home first have somewhere to stop.
+    #[must_use]
+    pub fn course(&self, from: f32) -> usize {
+        if self.closed {
+            self.length.round() as usize
+        } else {
+            (self.length - SPRINT_RUNOUT - from).max(1.0).round() as usize
+        }
+    }
+
+    /// Where a car that is *not* on the line is along it: `at` projected onto the stretch within
+    /// [`TRACK_WINDOW`] of where it was last (`last`, unwrapped), as an unwrapped distance and how
+    /// far to the right. `None` when the car is further than [`TRACK_OFF`] from that stretch — it
+    /// has left the race's line, and its last place is kept rather than guessed.
+    ///
+    /// Looked for near where it was rather than anywhere, because a circuit crosses itself and a
+    /// city runs streets side by side: the nearest piece of line overall is often another lap's.
+    #[must_use]
+    pub fn track(&self, at: Vec3, last: f32) -> Option<(f32, f32)> {
+        let (s, lateral) = self.project(at, None, Some((self.wrap(last), TRACK_WINDOW)))?;
+        let plan = |p: Vec3| Vec3::new(p.x, 0.0, p.z);
+        if (plan(self.point(s)) - plan(at)).length() > TRACK_OFF {
+            return None;
+        }
+        // Unwrap round a circuit: of the laps `s` could be on, the one nearest `last`.
+        let s = if self.closed {
+            let base = last - self.wrap(last);
+            [s + base - self.length, s + base, s + base + self.length]
+                .into_iter()
+                .min_by(|a, b| (a - last).abs().total_cmp(&(b - last).abs()))
+                .unwrap_or(s)
+        } else {
+            s
+        };
+        Some((s, lateral))
     }
 
     /// The places worth looking at: every sample where the line steps steeper than
@@ -1349,6 +1392,21 @@ mod tests {
 
         let mut curve = circle(4.0, 13);
         assert_eq!(unspur(&mut curve, true), 0);
+    }
+
+    /// Tracking a car round a circuit keeps counting up through the line, and a car far off the
+    /// line keeps its last place instead of jumping to whatever piece of line is nearest.
+    #[test]
+    fn tracking_unwraps_laps_and_ignores_a_car_off_the_line() {
+        let l = limits();
+        let line = RaceLine::from_points(circle(50.0, 157), true, &l).unwrap();
+        let len = line.length();
+        // A little way into the second lap.
+        let at = line.point(12.0) + Vec3::new(0.0, 0.0, 0.0);
+        let (s, _) = line.track(at, len + 5.0).unwrap();
+        assert!((s - (len + 12.0)).abs() < 1.0, "{s} against {}", len + 12.0);
+        // 200 m from the circle is nowhere on it.
+        assert_eq!(line.track(Vec3::new(250.0, 0.0, 0.0), 5.0), None);
     }
 
     /// A fast car behind a slow one in the same lane never drives into it, and gets past it.

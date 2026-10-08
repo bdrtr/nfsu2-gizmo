@@ -7435,7 +7435,38 @@ için ters.
 - Yumuşatma payı 4 m (`NFS_RAILSHIFT`); 8 m turları %7-11 kısaltıyor ama basamakları 11 → 25 ve duvar
   adımlarını 117 → 132 yapıyor.
 
+### Raylar pencerede: yarış artık koşuluyor (2026-10-08)
+
+`nfs_cruise NFS_ROUTE=<Paths*.bin>` artık yarışı **koşuyor**. Açılışta oyuncunun arabası dyno'da
+ölçülüyor (~1 s), hat `race_ring` → `orient_ring` → `RaceLine::build` ile kuruluyor, ve gridin 0.
+slotu oyuncunun, kalan yedisi ray. Raylar **kinematik gövde**: `CarRig::make_kinematic` gövdeyi
+`RigidBody::new_kinematic`'e çeviriyor ve `VehicleController`'ı söküyor; her fizik adımında
+(`FIXED_DT`, kare başına değil) `CarRig::place` adımın başındaki pozu ve onu adımın sonuna taşıyan
+hızı yazıyor. Yani oyuncu bir raya çarparsa itilen oyuncu oluyor, ray değil — ve raylar oyuncuyu
+trafik olarak görüp yavaşlıyor ya da sollıyor.
+
+- **Geri sayım** (`Race::COUNTDOWN`, 3 s): raylar ve oyuncu tutuluyor (oyuncunun freni basılı,
+  direksiyon serbest), ortada büyük rakam, ardından "BAŞLA!".
+- **Sıra**: oyuncu, rayın ölçüldüğü gibi ölçülüyor — aynı hatta, son bulunduğu yerin ±80 m'sinde
+  izdüşerek (`RaceLine::track`) — ve `Race::standings` herkesi aynı birimle sıralıyor. Sağ üstte
+  "3/8 · sıra", devrede "tur 2/3", sprintte "kalan 4,2 km", ve yarış saati.
+- **Sonuç**: oyuncu bitirince ortada sıralama ve süreler; konsola her bitiş bir satır.
+- **R** oyuncuyu gridine geri koyuyor; yarış onsuz devam ediyor.
+- `NFS_RIVALDRIVER=pilot` eski simüle pilotları geri getiriyor; `NFS_WATCH=<k>` kamerayı k. rakibe
+  veriyor — rayın şehri nasıl sürdüğünü, ona yetişmek zorunda kalmadan görmenin yolu.
+
+**Görerek doğrulandı** (`GIZMO_SCREENSHOT`, uygulamanın kendi karesi): 4001 geri sayımı ("3 · Hazır
+ol", "1/8", "tur 1/3", gridde iki yanda rakipler, oyunun kendi damalı çizgisi); `NFS_WATCH=2` ile
+t=2,2 s yan yana kalkış, t=17,4 s ve t=47,3 s ray şehirde yolun üstünde ve yönünde; 4107 ve 4126
+sprintlerinin kalkışı (grid hattın başında, 4126'da halka çevrilmiş). Kare 93-134 fps.
+**Görülmeyen:** sonuç ekranı — oyuncunun bitirmesi gerekiyor ve bu oturumda kimse sürmedi. Aynı
+`Race` aritmetiği `nfs_rail`'de 840 bitişi sayıyor; ekranın kendisi denenmedi.
+
 ### Sıradaki
 
-Raylar pencereye: `nfs_cruise`'da `NFS_ROUTE` yüklenince rakipler ray olarak sürsün, kinematik gövdeyle
-oyuncuya çarpabilsinler, ve M4'ün döngüsü — geri sayım → yarış → sıralama → sonuç — HUD'da kapansın.
+- Sonuç ekranını gerçek bir yarışla görmek.
+- Bitiren sprint raylarının hattın ucunda park etmesi yarıştan sonra sürtünüyor; bitirenleri gizlemek
+  ya da hattı finişin ötesine uzatmak.
+- `Pilot::place` ve `nfs_sim` hâlâ anahattın sırasını kullanıyor: üç sprint ve iki devre pilot için ters.
+- Motor pini (`550a7dfd`) motorun `main`'inin 105 commit gerisinde; metin ve `gizmo-ui` çizimi
+  orada. HUD egui ile çizildiği için bugün gerekmiyor.

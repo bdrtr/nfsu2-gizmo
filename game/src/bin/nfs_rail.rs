@@ -242,12 +242,7 @@ fn race(
     let from = field.first().map_or(0.0, Rail::from);
     let heading_cos = line.tangent(from).dot(Vec3::new(heading.x, 0.0, heading.z).normalize_or_zero());
 
-    // A sprint finishes short of the end of its line, so the cars home first have somewhere to stop.
-    let course = if line.closed() {
-        line.length().round() as usize
-    } else {
-        (line.length() - rail::SPRINT_RUNOUT - from).max(1.0).round() as usize
-    };
+    let course = line.course(from);
     let mut race = Race::new(course, line.closed());
     let laps = if line.closed() { Race::LAPS as f32 } else { 1.0 };
     let slowest_pace = PACE.iter().copied().fold(1.0f32, f32::min);

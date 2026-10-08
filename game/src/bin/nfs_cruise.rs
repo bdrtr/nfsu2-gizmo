@@ -22,7 +22,9 @@
 //! never says you are off course · `NFS_SPOT=<n>` with it, stand at the n'th of the 24 places the
 //! free-roam markers name instead · `NFS_TIERS=all` draw the coarse detail tiers too (off by default — they are distance
 //! imposters and from a car they are blurred boxes in open ground) · `NFS_ROUTE=<Paths*.bin>` load that race: its line is drawn on the road and the HUD says
-//! where you are on it and whether you are still on it · `NFS_AT="x,y,z"` where to start — downtown sits near `y ≈ 27` and the airport near
+//! where you are on it and whether you are still on it — and the race is **run**: the rivals are
+//! rails ([`nfsu2::rig::rail`]), there is a countdown, a running order, laps or the distance to go,
+//! and a result · `NFS_RIVALDRIVER=pilot` drive the rivals with the simulated pilot instead · `NFS_AT="x,y,z"` where to start — downtown sits near `y ≈ 27` and the airport near
 //! `y ≈ -11`, so the height matters as much as the place · `NFS_BUDGET=<n>` caps objects,
 //! nearest-first · `NFS_DIAG=1` prints the physics' own view once a second · plus everything
 //! [`nfsu2::rig`] reads (`NFS_PAINT`, `NFS_KIT`, `NFS_ENGINE`, `NFS_SHOTCAM`, …).
@@ -32,7 +34,9 @@ use gizmo::physics::world::PhysicsWorld;
 use gizmo::prelude::*;
 use gizmo_nfs::types::AssetHash;
 use nfsu2::geom::add_transform;
-use nfsu2::rig::{spawn_car, CarRig, ChaseCamera, Driver, Pilot, Placement, Rescue};
+use nfsu2::race::{Race, Runner, Standing};
+use nfsu2::rig::rail::{self, Obstacle, RaceLine, Rail, PACE};
+use nfsu2::rig::{spawn_car, CarRig, ChaseCamera, Driver, Limits, Pilot, Placement, Pose, Rescue, FIXED_DT};
 use nfsu2::scene::{self, Textures};
 // Aliased: `world` is the ECS `World` in every function here, and a module by the same name three
 // characters from a variable of another type is a re-read waiting to happen.
@@ -121,8 +125,12 @@ struct CruiseState {
     free_roam: bool,
     /// The lone free-roam markers, so the HUD can say how many places there are to jump to.
     spots: usize,
-    /// The rivals, and the driver each one has.
+    /// The rivals, and the driver each one has — under `NFS_RIVALDRIVER=pilot` only; rails live in
+    /// [`Self::rails`].
     field: Vec<(CarRig, Pilot)>,
+    /// The race on rails, when a route is loaded: the line, the field on it and the race being run.
+    /// `None` in free roam and under `NFS_RIVALDRIVER=pilot`.
+    rails: Option<RailRace>,
     /// How many pilots produced controls last frame — zero means they are not being driven at all,
     /// which looks exactly like being driven badly.
     driving: usize,
@@ -161,6 +169,175 @@ struct Course {
 }
 
 use nfsu2::world::COURSE_HALF_WIDTH;
+
+/// A race against rivals on rails: placed on the race line by distance, never steered at it — see
+/// [`nfsu2::rig::rail`] for why, and `nfs_rail` for all 105 races run the same way without a window.
+///
+/// The player is the one car on the road that is driven. It is measured the way a rail is — its
+/// distance along the same line, found near where it was last ([`RaceLine::track`]) — so the
+/// running order compares like with like, and the rails see it as traffic.
+struct RailRace {
+    line: RaceLine,
+    limits: Limits,
+    /// The rivals' cars, and their places on the line, in the same order.
+    rigs: Vec<CarRig>,
+    field: Vec<Rail>,
+    race: Race,
+    /// Where the race starts on the line.
+    from: f32,
+    /// The player's place on the line — unwrapped, so a lap adds a lap's length — how far right of
+    /// it, and how fast. What the rails slow for and go round.
+    player_s: f32,
+    player_lane: f32,
+    player_v: f32,
+    /// Where the player stood on the grid, for **R**.
+    player_start: f32,
+    /// Seconds since the lights went green.
+    clock: f32,
+    /// When each entrant finished, in race seconds: the player first, then the rivals in field order.
+    finished: Vec<Option<f32>>,
+    /// The running order, leader first. Entrant 0 is the player.
+    order: Vec<Standing>,
+}
+
+/// What a [`RailRace`] is built from.
+struct RailPlan {
+    line: RaceLine,
+    limits: Limits,
+    slots: Vec<Vec3>,
+    heading: Vec3,
+    rivals: usize,
+}
+
+/// A place in the running order that is not a rail — the player.
+struct Entrant {
+    laps: u32,
+    along: usize,
+}
+
+impl Runner for Entrant {
+    fn laps(&self) -> u32 {
+        self.laps
+    }
+    fn along(&self, _course: usize) -> usize {
+        self.along
+    }
+}
+
+impl RailRace {
+    /// Put the grid on the line — the player in slot 0, rails in the rest — and spawn the rails'
+    /// cars as placed bodies.
+    fn start(
+        world: &mut World,
+        renderer: &gizmo::renderer::Renderer,
+        assets: &mut AssetManager,
+        phys: &mut PhysicsWorld,
+        car_path: &str,
+        plan: RailPlan,
+    ) -> Option<Self> {
+        let RailPlan { line, limits, slots, heading, rivals } = plan;
+        let mut grid = Rail::grid(&line, &slots, heading, &PACE)?;
+        let player = grid.remove(0);
+        let from = player.from();
+        let field: Vec<Rail> = grid.into_iter().take(rivals).collect();
+        let mut rigs = Vec::with_capacity(field.len());
+        for r in &field {
+            let (at, rot) = r.pose(&line, 0.0);
+            let rig = spawn_car(world, renderer, assets, phys, car_path, Placement::facing(at, rot * Vec3::NEG_Z, 0.0));
+            rig.make_kinematic(world);
+            let pose = r.pose(&line, rig.ride());
+            rig.place(world, pose, pose, FIXED_DT);
+            rigs.push(rig);
+        }
+        let race = Race::new(line.course(from), line.closed());
+        println!(
+            "raylar: {} rakip · hat {:.0} m · {} · bitiş {} m · ideal tur {:.1} s",
+            field.len(),
+            line.length(),
+            if line.closed() { format!("{} tur", Race::LAPS) } else { "sprint".to_string() },
+            race.distance(),
+            line.report.lap_time,
+        );
+        Some(Self {
+            player_s: player.s(),
+            player_lane: player.lane(),
+            player_v: 0.0,
+            player_start: player.s(),
+            finished: vec![None; field.len() + 1],
+            line,
+            limits,
+            rigs,
+            field,
+            race,
+            from,
+            clock: 0.0,
+            order: Vec::new(),
+        })
+    }
+
+    /// The player's place in the order, measured as a rail's is.
+    fn entrant(&self) -> Entrant {
+        let progress = (self.player_s - self.from).max(0.0);
+        let laps = if self.line.closed() && self.line.length() > 0.0 {
+            (progress / self.line.length()).floor() as u32
+        } else {
+            0
+        };
+        Entrant { laps, along: progress as usize }
+    }
+
+    /// One physics step: the field moves, and each body is given the velocity that takes it there,
+    /// so what it meets on the way is pushed rather than passed through.
+    fn step(&mut self, world: &mut World, dt: f32) {
+        let me = Obstacle { s: self.player_s, lane: self.player_lane, v: self.player_v };
+        let before: Vec<(Vec3, Quat)> =
+            self.rigs.iter().zip(&self.field).map(|(g, r)| r.pose(&self.line, g.ride())).collect();
+        rail::advance(&mut self.field, &[me], &self.line, &self.limits, dt, self.race.holding());
+        for ((rig, r), now) in self.rigs.iter().zip(&self.field).zip(before) {
+            rig.place(world, now, r.pose(&self.line, rig.ride()), dt);
+        }
+    }
+
+    /// Once a frame, after physics: where the player is, the running order, and who has finished.
+    fn observe(&mut self, at: Vec3, speed: f32, dt: f32) {
+        if !self.race.holding() {
+            self.clock += dt;
+        }
+        if let Some((s, lane)) = self.line.track(at, self.player_s) {
+            self.player_s = s;
+            self.player_lane = lane;
+        }
+        self.player_v = speed;
+        let entrants: Vec<Entrant> = std::iter::once(self.entrant())
+            .chain(self.field.iter().map(|r| Entrant { laps: r.laps(), along: r.along() }))
+            .collect();
+        self.order = self.race.standings(&entrants);
+        for &c in self.race.finishers() {
+            if let Some(slot) = self.finished.get_mut(c) {
+                if slot.is_none() {
+                    *slot = Some(self.clock);
+                    let who = if c == 0 { "sen".to_string() } else { format!("rakip {c}") };
+                    let place = self.race.finishers().iter().position(|f| *f == c).map_or(0, |p| p + 1);
+                    println!("bitiş: {place}. {who} · {}", race_clock(self.clock));
+                }
+            }
+        }
+    }
+
+    /// Move the rails' visible parts onto their bodies, wheels turning at the speed they go.
+    fn sync(&mut self, world: &mut World, dt: f32) {
+        for (rig, r) in self.rigs.iter_mut().zip(&self.field) {
+            let (position, rotation) = r.pose(&self.line, rig.ride());
+            rig.sync_visuals(world, Pose { position, rotation, speed: r.speed() }, dt);
+        }
+    }
+}
+
+/// A race time as minutes, seconds and tenths.
+fn race_clock(s: f32) -> String {
+    let tenths = (s.max(0.0) * 10.0).round() as u32;
+    format!("{}:{:02}.{}", tenths / 600, (tenths / 10) % 60, tenths % 10)
+}
 
 /// How long the car may be off the course before the HUD stops being polite about it.
 const OFF_COURSE_GRACE: f32 = 4.0;
@@ -694,8 +871,34 @@ fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> CruiseState
         .and_then(|v| v.parse().ok())
         .unwrap_or(if grid_slots.is_empty() { 0 } else { GRID_SLOTS - 1 })
         .min(grid_slots.len().saturating_sub(1));
+    // **Rails by default.** A route with a full grid is raced against rivals on rails; the
+    // simulated pilot is still here, under `NFS_RIVALDRIVER=pilot`, because it is the instrument
+    // for the engine's car model and `nfs_sim` measures it.
+    let pilots = std::env::var("NFS_RIVALDRIVER").is_ok_and(|v| v == "pilot");
+    let mut rails: Option<RailRace> = None;
+    if let (false, Some(ev), Some(heading), true) =
+        (pilots, course_event.as_ref(), start_heading, grid_slots.len() > 1)
+    {
+        // What the player's own car can do, measured on it: the rails race to these numbers.
+        let limits = Limits::measure(renderer, &mut assets, &car_path);
+        let (ring, chords) = city::race_ring(&net, &ground, &walls, &coarse, WAYPOINT_STEP);
+        // The grid's heading is the reliable half; three outlines in the install are written
+        // finish first — see `rail::orient_ring`.
+        let (ring, reversed) = rail::orient_ring(&ring, ev.circuit, &grid_slots, heading);
+        if reversed {
+            println!("anahat sondan başa yazılmış: halka gridin yönüne çevrildi");
+        }
+        if chords > 0 {
+            println!("yarış hattı: {chords} bacak yol bulamayıp kirişte kaldı");
+        }
+        rails = RaceLine::build(&ring, ev.circuit, Some((&grid_slots, heading)), &roads, &ground, &limits)
+            .and_then(|line| {
+                let plan = RailPlan { line, limits, slots: grid_slots.clone(), heading, rivals };
+                RailRace::start(world, renderer, &mut assets, &mut phys, &car_path, plan)
+            });
+    }
     let mut field = Vec::new();
-    for slot in grid_slots.iter().skip(1).take(rivals) {
+    for slot in grid_slots.iter().skip(1).take(if rails.is_some() { 0 } else { rivals }) {
         // The marker's own height is within a metre of the ground almost everywhere, but "almost"
         // is what drops a car through the road — ask the city, the same as for the player.
         let stand = match ground.height_at(*slot + Vec3::Y * SPAWN_PROBE) {
@@ -772,6 +975,7 @@ fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> CruiseState
         free_roam,
         spots: spot_count,
         field,
+        rails,
         driving: 0,
         net,
         waypoints: course_line,
@@ -799,7 +1003,15 @@ fn update(world: &mut World, state: &mut CruiseState, dt: f32, input: &Input) {
     }
     state.frames.push(dt * 1000.0);
 
-    let controls = state.driver.read(input, dt);
+    let mut controls = state.driver.read(input, dt);
+    if let Some(rr) = state.rails.as_mut() {
+        rr.race.tick(dt);
+        // On the line until the lights go: the brake held, the wheel free.
+        if rr.race.holding() {
+            controls.throttle = 0.0;
+            controls.brake = 1.0;
+        }
+    }
     state.rig.drive(world, &controls);
 
     // The rivals. Same `drive` the player's controls go through — a pilot that reached past it
@@ -838,15 +1050,24 @@ fn update(world: &mut World, state: &mut CruiseState, dt: f32, input: &Input) {
     if input.is_key_just_pressed(KeyCode::KeyR as u32) {
         state.rig.reset(world);
         state.driver.reset();
+        // Back on the grid is back at the grid's place on the line; the race goes on without you.
+        if let Some(rr) = state.rails.as_mut() {
+            rr.player_s = rr.player_start;
+        }
     }
 
     // The barrier the files do not carry, derived from the ground the city does have. Applied to
     // the player and to every rival through the same call: a fence one of them can drive through is
     // not a fence, it is a handicap.
-    let CruiseState { rig, driver, field, ground, .. } = state;
+    let CruiseState { rig, driver, field, ground, rails, .. } = state;
     driver.step_physics_with(world, dt, |w| {
         if let Some(p) = rig.pose(w) {
             rig.hold_at_edge(w, p, ground);
+        }
+        // The rails move once per physics step, not once per frame, so a body that meets the
+        // player is moving at the step's own rate.
+        if let Some(rr) = rails.as_mut() {
+            rr.step(w, FIXED_DT);
         }
         for (r, _) in field.iter_mut() {
             if let Some(p) = r.pose(w) {
@@ -868,6 +1089,10 @@ fn update(world: &mut World, state: &mut CruiseState, dt: f32, input: &Input) {
     }
 
     let Some(pose) = state.rig.pose(world) else { return };
+    if let Some(rr) = state.rails.as_mut() {
+        rr.sync(world, dt);
+        rr.observe(pose.position, pose.speed, dt);
+    }
 
     // The city has holes the shipped geometry never covered; a car that finds one must come back,
     // not fall for ever. One frame is skipped rather than driving the camera to a pose that no
@@ -936,7 +1161,18 @@ fn update(world: &mut World, state: &mut CruiseState, dt: f32, input: &Input) {
     diagnose(world, state, pose);
 
     state.rig.sync_visuals(world, pose, dt);
-    state.camera.update(world, input, pose, dt);
+    // `NFS_WATCH=<k>`: the camera follows rival `k` instead of you — the way to see a rail drive the
+    // city without having to keep up with it.
+    let watched = std::env::var("NFS_WATCH")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .and_then(|k| {
+            let rr = state.rails.as_ref()?;
+            let (r, g) = (rr.field.get(k)?, rr.rigs.get(k)?);
+            let (position, rotation) = r.pose(&rr.line, g.ride());
+            Some(Pose { position, rotation, speed: r.speed() })
+        });
+    state.camera.update(world, input, watched.unwrap_or(pose), dt);
 }
 
 /// `NFS_DIAG=1`: once a second, whether the car is standing on the city or falling through it.
@@ -1101,9 +1337,71 @@ fn ui(world: &mut World, state: &mut CruiseState, ctx: &egui::Context) {
         }
     }
 
+    if let Some(rr) = &state.rails {
+        race_ui(rr, ctx);
+    }
+
     egui::Area::new(egui::Id::new("spd"))
         .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-30.0, -30.0))
         .show(ctx, |ui| {
             ui.heading(format!("{speed:.0} km/h"));
         });
+}
+
+/// The race's own HUD: the countdown, where you are in the order, how much is left, and at the end
+/// the result. Turkish first, English under it, as everywhere on this screen.
+fn race_ui(rr: &RailRace, ctx: &egui::Context) {
+    let big = |text: String| egui::RichText::new(text).size(72.0).strong();
+    if rr.race.holding() {
+        egui::Area::new(egui::Id::new("countdown"))
+            .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, -120.0))
+            .show(ctx, |ui| {
+                ui.label(big(format!("{}", rr.race.countdown().ceil() as u32)));
+                ui.label("Hazır ol · Get ready");
+            });
+    } else if rr.clock < 1.5 {
+        egui::Area::new(egui::Id::new("go"))
+            .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, -120.0))
+            .show(ctx, |ui| {
+                ui.label(big("BAŞLA!".to_string()));
+                ui.label("Go!");
+            });
+    }
+
+    let entrants = rr.field.len() + 1;
+    let place = rr.order.iter().position(|s| s.car == 0).map_or(entrants, |p| p + 1);
+    egui::Area::new(egui::Id::new("standing"))
+        .anchor(egui::Align2::RIGHT_TOP, egui::vec2(-30.0, 24.0))
+        .show(ctx, |ui| {
+            ui.label(egui::RichText::new(format!("{place}/{entrants}")).size(40.0).strong());
+            ui.label("sıra · position");
+            let me = rr.entrant();
+            if rr.line.closed() {
+                let lap = (me.laps + 1).min(Race::LAPS);
+                ui.label(format!("tur {lap}/{} · lap", Race::LAPS));
+            } else {
+                let left = rr.race.distance().saturating_sub(me.along) as f32 / 1000.0;
+                ui.label(format!("kalan {left:.1} km · to go"));
+            }
+            ui.label(race_clock(rr.clock));
+        });
+
+    // The result, once you are home.
+    if rr.finished.first().is_some_and(Option::is_some) {
+        egui::Area::new(egui::Id::new("result"))
+            .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 40.0))
+            .show(ctx, |ui| {
+                ui.heading("Yarış bitti · Race over");
+                for (i, s) in rr.order.iter().enumerate() {
+                    let who = if s.car == 0 { "Sen · you".to_string() } else { format!("Rakip {}", s.car) };
+                    let time = rr
+                        .finished
+                        .get(s.car)
+                        .copied()
+                        .flatten()
+                        .map_or_else(|| "—".to_string(), race_clock);
+                    ui.label(format!("{}. {who} · {time}", i + 1));
+                }
+            });
+    }
 }

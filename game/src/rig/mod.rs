@@ -508,6 +508,51 @@ impl CarRig {
         }
     }
 
+    /// Make this car something that is *placed* rather than driven: a kinematic body with no
+    /// vehicle controller, which pushes what it meets and is pushed by nothing — a rival on rails
+    /// ([`rail`]). Keeps its collider, so the player can still hit it.
+    pub fn make_kinematic(&self, world: &mut World) {
+        if let Some(mut rb) = world.borrow_mut::<RigidBody>().get_mut(self.chassis) {
+            *rb = RigidBody::new_kinematic();
+        }
+        if let Some(mut v) = world.borrow_mut::<Velocity>().get_mut(self.chassis) {
+            *v = Velocity::default();
+        }
+        if let Some(e) = world.get_entity(self.chassis) {
+            world.remove_component::<VehicleController>(e);
+        }
+    }
+
+    /// How high the chassis rides over the road with every wheel just touching it, in metres —
+    /// where a placed car's chassis goes. From the wheels the eye sees: their centres are a radius
+    /// above the road.
+    #[must_use]
+    pub fn ride(&self) -> f32 {
+        if self.wheels.is_empty() {
+            return self.size.y * 0.5;
+        }
+        let mean = self.wheels.iter().map(|w| w.local.y).sum::<f32>() / self.wheels.len() as f32;
+        self.radius - mean
+    }
+
+    /// Put a placed car where it is, moving the way it is going: the transform at the start of a
+    /// physics step and the velocity that carries it to `next` by the end of one, so what it meets
+    /// in between is pushed rather than passed through.
+    pub fn place(&self, world: &mut World, now: (Vec3, Quat), next: (Vec3, Quat), dt: f32) {
+        if let Some(mut t) = world.borrow_mut::<Transform>().get_mut(self.chassis) {
+            t.position = now.0;
+            t.rotation = now.1;
+            t.update_local_matrix();
+        }
+        if let Some(mut v) = world.borrow_mut::<Velocity>().get_mut(self.chassis) {
+            let turn = next.1 * now.1.inverse();
+            let (axis, angle) = turn.to_axis_angle();
+            let angle = if angle > std::f32::consts::PI { angle - std::f32::consts::TAU } else { angle };
+            v.linear = (next.0 - now.0) / dt.max(1e-6);
+            v.angular = if axis.is_finite() { axis * (angle / dt.max(1e-6)) } else { Vec3::ZERO };
+        }
+    }
+
     /// Read the chassis' pose and speed. `None` once the chassis is gone, which ends the frame.
     #[must_use]
     pub fn pose(&self, world: &World) -> Option<Pose> {
