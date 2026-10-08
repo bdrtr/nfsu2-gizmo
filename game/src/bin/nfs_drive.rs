@@ -89,20 +89,20 @@ fn setup_scene(world: &mut World, renderer: &gizmo::renderer::Renderer) -> Drive
     world.add_component(ground, MeshRenderer::new());
     world.add_component(ground, RigidBody::new_static());
     world.add_component(ground, Velocity::default());
-    world.add_component(ground, Collider::offset_box(
+    world.add_component(ground, nfsu2::scene::road(Collider::offset_box(
             Vec3::new(0.0, -GROUND_THICKNESS / 2.0, 0.0),
             Vec3::new(GROUND_SIZE / 2.0, GROUND_THICKNESS / 2.0, GROUND_SIZE / 2.0),
-        ));
+        )));
     world.add_component(ground, gizmo::physics::components::PhysicsMaterial::ASPHALT);
     phys.add_body(
         gizmo::physics::BodyHandle::from_id(ground.id()),
         RigidBody::new_static(),
         Transform::new(Vec3::ZERO),
         Velocity::default(),
-        Collider::offset_box(
+        nfsu2::scene::road(Collider::offset_box(
             Vec3::new(0.0, -GROUND_THICKNESS / 2.0, 0.0),
             Vec3::new(GROUND_SIZE / 2.0, GROUND_THICKNESS / 2.0, GROUND_SIZE / 2.0),
-        ),
+        )),
     );
 
     scene::add_lights(
@@ -131,6 +131,8 @@ fn update(world: &mut World, state: &mut DriveState, dt: f32, input: &Input) {
     state.t += dt;
 
     let mut controls = state.driver.read(input, dt);
+    // Full key at speed asks the tyres for what they have, not three times more — `steer_for_speed`.
+    controls.steer = state.rig.steer_for_speed(world, controls.steer);
     if state.autodrive {
         // A slow weave with the throttle down: enough to watch the suspension work and the wheels
         // steer without a hand on the keyboard, which is what the screenshot passes want.

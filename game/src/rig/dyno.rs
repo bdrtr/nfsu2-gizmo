@@ -119,12 +119,6 @@ impl Limits {
     pub fn measure(renderer: &Renderer, assets: &mut AssetManager, car_path: &str) -> Self {
         let mut bench = Bench::new(renderer, assets, car_path);
         let trace = std::env::var("NFS_DYNO").is_ok_and(|v| v != "0");
-        if let Some(d) = std::env::var("NFS_DYNO_DAMPING").ok().and_then(|v| v.parse::<f32>().ok()) {
-            if let Some(mut rb) = bench.world.borrow_mut::<RigidBody>().get_mut(bench.rig.chassis) {
-                println!("dyno: linear_damping {} → {d} (yalnız tezgâhta)", rb.linear_damping);
-                rb.linear_damping = d;
-            }
-        }
         bench.run(SETTLE_S, |_, _| Controls::default());
 
         // ── Full throttle from rest ──
@@ -212,23 +206,27 @@ impl Limits {
 }
 
 /// One car on one plane, stepped the way the race steps its cars.
-struct Bench {
+///
+/// Public so a measurement binary can script its own manoeuvres on the same plane the dyno uses.
+pub struct Bench {
     world: World,
     rig: CarRig,
-    t: f32,
+    /// Seconds simulated.
+    pub t: f32,
 }
 
 impl Bench {
-    fn new(renderer: &Renderer, assets: &mut AssetManager, car_path: &str) -> Self {
+    /// The car at `car_path`, standing at rest on a flat asphalt plane in a world of its own.
+    pub fn new(renderer: &Renderer, assets: &mut AssetManager, car_path: &str) -> Self {
         let mut world = World::new();
         let mut phys = PhysicsWorld::new();
         let plane = world.spawn();
         let at = Transform::new(Vec3::ZERO);
         add_transform(&mut world, plane, at);
-        let collider = Collider::offset_box(
+        let collider = crate::scene::road(Collider::offset_box(
             Vec3::new(0.0, -PLANE_THICK / 2.0, 0.0),
             Vec3::new(PLANE_HALF, PLANE_THICK / 2.0, PLANE_HALF),
-        );
+        ));
         world.add_component(plane, RigidBody::new_static());
         world.add_component(plane, Velocity::default());
         world.add_component(plane, collider.clone());
@@ -242,17 +240,32 @@ impl Bench {
         );
         let rig = spawn_car(&mut world, renderer, assets, &mut phys, car_path, Placement::origin());
         world.insert_resource(phys);
+        // `NFS_DYNO_DAMPING=<x>` / `NFS_DYNO_ANGDAMP=<x>`: the chassis' linear and angular damping
+        // replaced, for the bench only — so each one's share of a number can be read directly.
+        let knob = |name: &str| std::env::var(name).ok().and_then(|v| v.parse::<f32>().ok());
+        if let Some(mut rb) = world.borrow_mut::<RigidBody>().get_mut(rig.chassis) {
+            if let Some(d) = knob("NFS_DYNO_DAMPING") {
+                println!("tezgâh: linear_damping {} → {d}", rb.linear_damping);
+                rb.linear_damping = d;
+            }
+            if let Some(d) = knob("NFS_DYNO_ANGDAMP") {
+                println!("tezgâh: angular_damping {} → {d}", rb.angular_damping);
+                rb.angular_damping = d;
+            }
+        }
         Self { world, rig, t: 0.0 }
     }
 
-    fn step(&mut self, c: &Controls) {
+    /// One physics step with these controls.
+    pub fn step(&mut self, c: &Controls) {
         self.rig.drive(&mut self.world, c);
         gizmo::physics::vehicle_controller_system(&self.world, FIXED_DT);
         gizmo::physics::physics_step_system(&self.world, FIXED_DT);
         self.t += FIXED_DT;
     }
 
-    fn run(&mut self, seconds: f32, mut controls: impl FnMut(&World, f32) -> Controls) {
+    /// Step for `seconds`, asking `controls` each step.
+    pub fn run(&mut self, seconds: f32, mut controls: impl FnMut(&World, f32) -> Controls) {
         let end = self.t + seconds;
         while self.t < end {
             let c = controls(&self.world, self.t);
@@ -269,27 +282,86 @@ impl Bench {
     }
 
     /// Speed along the car's own nose, in m/s — the car's forward is −Z.
-    fn forward_speed(&self) -> f32 {
+    pub fn forward_speed(&self) -> f32 {
         let (lin, _, rot) = self.velocity();
         lin.dot(rot * Vec3::NEG_Z)
     }
 
     /// Speed in plan, in m/s.
-    fn speed(&self) -> f32 {
+    pub fn speed(&self) -> f32 {
         let (lin, _, _) = self.velocity();
         Vec3::new(lin.x, 0.0, lin.z).length()
     }
 
     /// The gear the box is in and the engine speed — what a trace needs to say why the car stopped
     /// gaining.
-    fn gearbox(&self) -> (usize, f32) {
+    pub fn gearbox(&self) -> (usize, f32) {
         let vehicles = self.world.borrow::<gizmo::physics::vehicle::VehicleController>();
         vehicles.get(self.rig.chassis).map_or((0, 0.0), |v| (v.current_gear, v.engine_rpm))
     }
 
     /// Yaw rate, in rad/s.
-    fn yaw_rate(&self) -> f32 {
+    pub fn yaw_rate(&self) -> f32 {
         self.velocity().1.y
+    }
+
+    /// Sideslip: the angle between where the nose points and where the car is going, in plan, in
+    /// radians — positive when the car is travelling to the right of its nose. What a driver feels
+    /// as the car "sliding"; near zero in a car that is gripping.
+    pub fn sideslip(&self) -> f32 {
+        let (lin, _, rot) = self.velocity();
+        let v = Vec3::new(lin.x, 0.0, lin.z);
+        if v.length() < 1.0 {
+            return 0.0;
+        }
+        let nose = rot * Vec3::NEG_Z;
+        let nose = Vec3::new(nose.x, 0.0, nose.z).normalize_or_zero();
+        let right = nose.cross(Vec3::Y);
+        v.dot(right).atan2(v.dot(nose))
+    }
+
+    /// Lateral acceleration felt in the car, in m/s²: speed times yaw rate.
+    pub fn lateral(&self) -> f32 {
+        self.speed() * self.yaw_rate()
+    }
+
+    /// Every wheel as the controller sees it: whether it touches, the suspension force it carries
+    /// in newtons, and the friction of what it stands on.
+    pub fn wheels(&self) -> Vec<(bool, f32, f32)> {
+        let vehicles = self.world.borrow::<gizmo::physics::vehicle::VehicleController>();
+        vehicles.get(self.rig.chassis).map_or_else(Vec::new, |v| {
+            v.wheels.iter().map(|w| (w.is_grounded, w.suspension_force, w.surface_friction)).collect()
+        })
+    }
+
+    /// The chassis' mass in kilograms, as its rigid body has it.
+    pub fn mass(&self) -> f32 {
+        self.world.borrow::<RigidBody>().get(self.rig.chassis).map_or(0.0, |rb| rb.mass)
+    }
+
+    /// The chassis' height over the plane, and the bottom of its collider box over the plane, in
+    /// metres — a box that reaches the plane is carrying weight the tyres should be.
+    pub fn clearance(&self) -> (f32, f32) {
+        let y = self.world.borrow::<Transform>().get(self.rig.chassis).map_or(0.0, |t| t.position.y);
+        let size = self.rig.size;
+        // The rig's own box: centre `0.12 h` up, half-height `0.30 h` (see `spawn_car`).
+        (y, y + size.y * 0.12 - size.y * 0.30)
+    }
+
+    /// A steering input as the player's would arrive: scaled to the speed by
+    /// [`CarRig::steer_for_speed`](super::CarRig::steer_for_speed).
+    #[must_use]
+    pub fn assisted(&self, steer: f32) -> f32 {
+        self.rig.steer_for_speed(&self.world, steer)
+    }
+
+    /// The front wheels' steering angles, radians, as the controller applied them.
+    pub fn steer_angle(&self) -> f32 {
+        let vehicles = self.world.borrow::<gizmo::physics::vehicle::VehicleController>();
+        vehicles
+            .get(self.rig.chassis)
+            .and_then(|v| v.wheels.first().map(|w| w.steering_angle))
+            .unwrap_or(0.0)
     }
 }
 

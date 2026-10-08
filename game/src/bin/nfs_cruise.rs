@@ -399,6 +399,8 @@ impl RailRace {
         let shown: Vec<(Vec3, Quat)> =
             self.rigs.iter().enumerate().map(|(k, g)| self.shown(k, g.ride())).collect();
         for ((rig, r), (position, rotation)) in self.rigs.iter_mut().zip(&self.field).zip(shown) {
+            let angle = r.steer(&self.line, rig.wheelbase());
+            rig.steer_visual(angle);
             rig.sync_visuals(world, Pose { position, rotation, speed: r.speed() }, dt);
         }
     }
@@ -724,7 +726,9 @@ fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> CruiseState
         let at_cell = Transform::new(cell.origin);
         let entity = world.spawn();
         add_transform(world, entity, at_cell);
-        let collider = Collider::trimesh(cell.vertices, cell.indices);
+        // The road's own material on the collider itself: the wheel reads that, not the component
+        // beside it — see `scene::road`.
+        let collider = nfsu2::scene::road(Collider::trimesh(cell.vertices, cell.indices));
         world.add_component(entity, RigidBody::new_static());
         world.add_component(entity, Velocity::default());
         world.add_component(entity, collider.clone());
@@ -1079,6 +1083,8 @@ fn update(world: &mut World, state: &mut CruiseState, dt: f32, input: &Input) {
     state.frames.push(dt * 1000.0);
 
     let mut controls = state.driver.read(input, dt);
+    // Full key at speed asks the tyres for what they have, not three times more — `steer_for_speed`.
+    controls.steer = state.rig.steer_for_speed(world, controls.steer);
     if let Some(rr) = state.rails.as_mut() {
         rr.race.tick(dt);
         // On the line until the lights go: the brake held, the wheel free.
@@ -1250,6 +1256,11 @@ fn update(world: &mut World, state: &mut CruiseState, dt: f32, input: &Input) {
     }
     diagnose(world, state, pose);
 
+    if let Some(rr) = state.rails.as_ref() {
+        if let Some(own) = &rr.demo {
+            state.rig.steer_visual(own.steer(&rr.line, state.rig.wheelbase()));
+        }
+    }
     state.rig.sync_visuals(world, pose, dt);
     // `NFS_WATCH=<k>`: the camera follows rival `k` instead of you — the way to see a rail drive the
     // city without having to keep up with it.

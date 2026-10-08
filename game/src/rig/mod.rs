@@ -252,6 +252,9 @@ pub struct CarRig {
     /// Accumulated wheel rotation, radians. Visual only — the controller does not model wheel spin,
     /// so this is integrated from road speed.
     spin: f32,
+    /// The front wheels' angle for a car with no controller to ask — a placed one — radians,
+    /// positive to the left. See [`Self::steer_visual`].
+    visual_steer: f32,
 }
 
 /// Build a car from its `GEOMETRY.BIN` and stand it in the world at `place`.
@@ -373,7 +376,21 @@ pub fn spawn_car(
     // 103 km/h ceiling is its corners" was measured with `nfs_top`, which drives `update_vehicle`
     // without this rig — so the one place the damping lived was the one place nobody had timed.
     rb.linear_damping = 0.0;
-    rb.angular_damping = 1.8;
+    // **Angular damping 1.0, down from the 1.8 that came over with the first import.** Like the
+    // linear damping above it had no reason beside it, and it is a torque against every yaw rate —
+    // in a steady corner the front tyres pay for it in lateral force. It cannot simply go: with
+    // none at all the car spins on the bench at 100 km/h and half input. Measured on `nfs_bench`'s
+    // steady circles and keyboard taps, with the road's real friction (see `scene::road`):
+    //
+    // | `angular_damping` | most lateral grip | keyboard tap at 90 km/h | spins |
+    // |---|---|---|---|
+    // | 1.8 (was) | 0.84 g | 2.0° slip, 22.9°/s | none |
+    // | **1.0** | 0.87 g | 2.7° slip, 25.2°/s | none |
+    // | 0.5 | 0.89 g | 3.4° slip, 26.9°/s | none |
+    // | 0 | 0.91 g | 4.7° slip, 29.1°/s | at 100 km/h, half input |
+    //
+    // 1.0 is the most rotation that stays stable everywhere measured with margin to spare.
+    rb.angular_damping = 1.0;
     rb.calculate_box_inertia(size.x, size.y, size.z);
     rb.center_of_mass = Vec3::new(0.0, -size.y * 0.1, 0.0);
     rb.lock_rotation_x = false;
@@ -396,6 +413,7 @@ pub fn spawn_car(
             suspension_stiffness: 45000.0,
             suspension_damping: 3500.0,
             wheel_mass: 25.0,
+            pacejka_lat: tyre_lateral(),
             ..Default::default()
         });
     }
@@ -442,9 +460,29 @@ pub fn spawn_car(
         warned_nowhere: false,
         tune,
         spin: 0.0,
+        visual_steer: 0.0,
     };
     rig.announce();
     rig
+}
+
+/// The tyre's lateral curve, as Pacejka `B, C, D, E`. `NFS_TYRE="b,c,d,e"` overrides it.
+///
+/// The record carries no tyre grip (`gizmo_nfs::globalb`: "aero, brakes and tyre grip are not in
+/// this file"), so this is the game's own choice, not a reading. It is the engine's default — the
+/// *longitudinal* shape, `C = 1.9`, used for both axes — and that is a measured choice rather than
+/// an unmade one: on `nfs_bench`'s steady circles a real lateral shape (`C = 1.4`) and an earlier
+/// peak (`B = 12, E = 0.5`) hold the same grip within 0.05 g. When the car felt it had none, the
+/// cause was the road's friction (`scene::road`), not this curve.
+fn tyre_lateral() -> gizmo::physics::vehicle::PacejkaParams {
+    let mut p = gizmo::physics::vehicle::PacejkaParams::default();
+    if let Ok(v) = std::env::var("NFS_TYRE") {
+        let n: Vec<f32> = v.split(',').filter_map(|x| x.trim().parse().ok()).collect();
+        if let [b, c, d, e] = n[..] {
+            p = gizmo::physics::vehicle::PacejkaParams { b, c, d, e };
+        }
+    }
+    p
 }
 
 /// The neutral white texture every flat material samples, from the caller's own cache (the engine
@@ -452,6 +490,16 @@ pub fn spawn_car(
 fn renderer_white(renderer: &Renderer, assets: &mut AssetManager) -> std::sync::Arc<gizmo::wgpu::BindGroup> {
     assets.create_white_texture(&renderer.device, &renderer.queue, &renderer.scene.texture_bind_group_layout)
 }
+
+/// The lateral acceleration the steering assist aims a full key at, in m/s² — about what the car
+/// holds on the bench (0.84-0.87 g at 70-100 km/h).
+const ASSIST_LIMIT: f32 = 8.0;
+/// The front tyre's slip angle at its most force, in radians: about 5°, read off the bench's
+/// steady circles at 70 and 100 km/h.
+const ASSIST_SLIP: f32 = 0.087;
+/// How far past the limit a full key may ask. A little, so the car can be made to slide on
+/// purpose; not much, or the key is back to being a switch.
+const ASSIST_MARGIN: f32 = 1.15;
 
 /// What the edge fence did this step, and what it was looking at.
 ///
@@ -562,6 +610,33 @@ impl CarRig {
         transforms
             .get(self.chassis)
             .map(|t| Pose { position: t.position, rotation: t.rotation, speed })
+    }
+
+    /// A player's steering input scaled to the speed the car is doing, so a full key at speed asks
+    /// the front tyres for about as much as they have and not three times more.
+    ///
+    /// **Why the keyboard needs it.** The lock is one angle at every speed — 25° — and the key
+    /// reaches it in a sixth of a second. Measured on `nfs_bench`, the front tyres give their most
+    /// at about 13° at 40 km/h, 7-13° at 70 and 6.5° at 100; past that the force *falls*, and a
+    /// full key at 70 km/h turns the car less than a half one (0.69 g against 0.78 g) — which
+    /// a driver feels as the car sliding wide however hard he steers. The angle that reaches the
+    /// limit is the geometry of the circle plus the tyre's own slip, `L · a / v² + α`, and this
+    /// gives the key that much and a margin more. Below about 35 km/h the full lock is left alone.
+    ///
+    /// For a human only: the pilot computes its own steering and is measured as it stands.
+    /// `NFS_STEERASSIST=0` turns it off.
+    #[must_use]
+    pub fn steer_for_speed(&self, world: &World, steer: f32) -> f32 {
+        if std::env::var("NFS_STEERASSIST").is_ok_and(|v| v == "0") {
+            return steer;
+        }
+        let vehicles = world.borrow::<VehicleController>();
+        let Some(v) = vehicles.get(self.chassis) else { return steer };
+        let speed = (v.current_speed_kmh / 3.6).abs().max(1.0);
+        let wheelbase = if v.tuning.wheelbase > 0.5 { v.tuning.wheelbase } else { 2.6 };
+        let lock = v.max_steering_angle.max(1e-3);
+        let reach = (wheelbase * ASSIST_LIMIT / (speed * speed) + ASSIST_SLIP) * ASSIST_MARGIN;
+        steer * (reach / lock).min(1.0)
     }
 
     /// Hand this frame's controls to the vehicle controller.
@@ -932,6 +1007,18 @@ impl CarRig {
         }
     }
 
+    /// Turn a placed car's front wheels to `angle` radians (positive left) on the next
+    /// [`Self::sync_visuals`]. A driven car's wheels follow its controller and ignore this.
+    pub fn steer_visual(&mut self, angle: f32) {
+        self.visual_steer = angle;
+    }
+
+    /// The wheelbase the car was built with, in metres — from its record where there is one.
+    #[must_use]
+    pub fn wheelbase(&self) -> f32 {
+        self.tune.as_ref().map_or(2.6, |t| t.tuning.wheelbase).max(0.5)
+    }
+
     /// Move every visual entity onto the chassis: the body rigidly, the wheels with spin and steer.
     ///
     /// It takes no steering argument. It used to take the driver's input and re-derive an angle
@@ -956,7 +1043,8 @@ impl CarRig {
             vehicles
                 .get(self.chassis)
                 .map(|v| v.wheels.iter().map(|w| w.steering_angle).collect())
-                .unwrap_or_default()
+                // A placed car has no controller; its rail says how the wheels should point.
+                .unwrap_or_else(|| vec![self.visual_steer; self.wheels.len()])
         };
 
         self.spin += (pose.speed / self.radius.max(0.05)) * dt;

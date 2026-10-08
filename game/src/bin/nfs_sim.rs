@@ -1712,7 +1712,9 @@ async fn run() {
         let at_cell = Transform::new(cell.origin);
         let entity = world.spawn();
         nfsu2::geom::add_transform(&mut world, entity, at_cell);
-        let collider = Collider::trimesh(cell.vertices, cell.indices);
+        // The road's own material on the collider itself: the wheel reads that, not the component
+        // beside it — see `scene::road`.
+        let collider = nfsu2::scene::road(Collider::trimesh(cell.vertices, cell.indices));
         world.add_component(entity, RigidBody::new_static());
         world.add_component(entity, Velocity::default());
         world.add_component(entity, collider.clone());

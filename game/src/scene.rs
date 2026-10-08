@@ -246,3 +246,17 @@ pub fn car_path(default: &str) -> String {
         .or_else(|| std::env::var("NFSU2_CAR").ok())
         .unwrap_or_else(|| default.to_string())
 }
+
+/// A collider the cars drive on, made of what roads are made of.
+///
+/// **The wheel reads the collider's own material, not the `PhysicsMaterial` component.** The
+/// engine's suspension raycast takes `Collider::material.dynamic_friction` from the collider it
+/// hits and scales every tyre force by it over asphalt's 0.65. Every ground collider in this game
+/// was built with the default material — friction 0.5 — and given a `PhysicsMaterial::ASPHALT`
+/// component beside it that the wheel never looks at, so every tyre held 0.5 / 0.65 = **77 %** of
+/// its grip, on every road and every test plane. Measured on the bench (`nfs_bench`): the wheels
+/// reported a surface friction of 0.5 with the asphalt component in place.
+#[must_use]
+pub fn road(collider: Collider) -> Collider {
+    collider.with_material(gizmo::physics::components::PhysicsMaterial::ASPHALT)
+}

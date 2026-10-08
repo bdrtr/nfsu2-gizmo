@@ -155,20 +155,20 @@ fn setup_scene(world: &mut World, renderer: &gizmo::renderer::Renderer) -> RaceS
     world.add_component(ground, MeshRenderer::new());
     world.add_component(ground, RigidBody::new_static());
     world.add_component(ground, Velocity::default());
-    world.add_component(ground, Collider::offset_box(
+    world.add_component(ground, nfsu2::scene::road(Collider::offset_box(
             Vec3::new(0.0, -GROUND_THICKNESS / 2.0, 0.0),
             Vec3::new(GROUND_SIZE / 2.0, GROUND_THICKNESS / 2.0, GROUND_SIZE / 2.0),
-        ));
+        )));
     world.add_component(ground, gizmo::physics::components::PhysicsMaterial::ASPHALT);
     phys.add_body(
         gizmo::physics::BodyHandle::from_id(ground.id()),
         RigidBody::new_static(),
         Transform::new(Vec3::ZERO),
         Velocity::default(),
-        Collider::offset_box(
+        nfsu2::scene::road(Collider::offset_box(
             Vec3::new(0.0, -GROUND_THICKNESS / 2.0, 0.0),
             Vec3::new(GROUND_SIZE / 2.0, GROUND_THICKNESS / 2.0, GROUND_SIZE / 2.0),
-        ),
+        )),
     );
 
     // ── Track ribbon: a banked oval that is actually **driven on** ──
@@ -196,7 +196,7 @@ fn setup_scene(world: &mut World, renderer: &gizmo::renderer::Renderer) -> RaceS
     let tri_verts: Vec<Vec3> =
         track.visual.iter().map(|v| Vec3::new(v.position[0], v.position[1], v.position[2])).collect();
     let tri_indices: Vec<u32> = (0..tri_verts.len() as u32).collect();
-    let track_collider = Collider::trimesh(tri_verts, tri_indices);
+    let track_collider = nfsu2::scene::road(Collider::trimesh(tri_verts, tri_indices));
     world.add_component(track_ent, RigidBody::new_static());
     world.add_component(track_ent, Velocity::default());
     world.add_component(track_ent, track_collider.clone());
@@ -279,6 +279,8 @@ fn update(world: &mut World, state: &mut RaceState, dt: f32, input: &Input) {
     state.cur_time += dt;
 
     let mut controls = state.driver.read(input, dt);
+    // Full key at speed asks the tyres for what they have, not three times more — `steer_for_speed`.
+    controls.steer = state.rig.steer_for_speed(world, controls.steer);
     if state.autodrive {
         controls.throttle = 1.0;
         // Steer toward the next checkpoint so it actually laps the track.

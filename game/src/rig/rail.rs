@@ -401,6 +401,16 @@ impl RaceLine {
         self.curve[i] + (self.curve[j] - self.curve[i]) * f
     }
 
+    /// How hard the line turns at a distance along it, 1/m, **signed**: positive to the left — the
+    /// sign the vehicle controller gives a steering angle.
+    #[must_use]
+    pub fn turn_at(&self, d: f32) -> f32 {
+        const SPAN: f32 = 4.0;
+        let (a, b) = (self.tangent(d - SPAN), self.tangent(d + SPAN));
+        let (a, b) = (Vec3::new(a.x, 0.0, a.z).normalize_or_zero(), Vec3::new(b.x, 0.0, b.z).normalize_or_zero());
+        a.cross(b).y.atan2(a.dot(b)) / (2.0 * SPAN)
+    }
+
     /// The unit direction of travel at a distance along the line, pitch included.
     #[must_use]
     pub fn tangent(&self, d: f32) -> Vec3 {
@@ -920,6 +930,9 @@ pub struct Rail {
     cap: Option<f32>,
     /// Whether a car alongside stops it moving across this step.
     boxed: bool,
+    /// How fast it is moving across, m/s, positive to the right — what turns its nose a little
+    /// into a lane change instead of sliding it sideways.
+    lane_v: f32,
 }
 
 /// Something on the line a rail must not drive into that is not itself a rail — the player.
@@ -963,6 +976,7 @@ impl Rail {
             held_for: 0.0,
             cap: None,
             boxed: false,
+            lane_v: 0.0,
         }
     }
 
@@ -1089,10 +1103,12 @@ impl Rail {
             self.s = line.length;
             self.v = 0.0;
         }
+        let before = self.lane;
         if !self.boxed {
             let reach = LANE_RATE * dt;
             self.lane += (self.lane_goal - self.lane).clamp(-reach, reach);
         }
+        self.lane_v = (self.lane - before) / dt.max(1e-6);
     }
 
     /// Where the car stands: the chassis position and rotation, with the chassis `ride` metres
@@ -1111,7 +1127,18 @@ impl Rail {
         let at = line.point(self.s) + flat * self.lane + up * ride;
         // Columns are where the car's own axes go: X right, Y up, Z back (forward is −Z).
         let rot = Quat::from_mat3(&Mat3::from_cols(right, up, -t));
-        (at, rot)
+        // Into a lane change nose first: the car points where it is going, not where the line
+        // does. Positive about up is a turn to the left, and moving right is a turn to the right.
+        let yaw = -self.lane_v.atan2(self.v.max(1.0));
+        (at, Quat::from_axis_angle(up, yaw) * rot)
+    }
+
+    /// The angle a car with this wheelbase would have its front wheels at to drive the line here,
+    /// radians, positive to the left — for drawing the wheels, which a placed car has nothing
+    /// else to turn.
+    #[must_use]
+    pub fn steer(&self, line: &RaceLine, wheelbase: f32) -> f32 {
+        (wheelbase * line.turn_at(self.s)).atan()
     }
 }
 
@@ -1407,6 +1434,17 @@ mod tests {
         assert!((s - (len + 12.0)).abs() < 1.0, "{s} against {}", len + 12.0);
         // 200 m from the circle is nowhere on it.
         assert_eq!(line.track(Vec3::new(250.0, 0.0, 0.0), 5.0), None);
+    }
+
+    /// The signed curvature reads a right-hand circle as negative and at its own radius — the sign
+    /// the wheels are drawn with, where getting it backwards points them out of the corner.
+    #[test]
+    fn a_right_hand_circle_turns_right() {
+        let l = limits();
+        let line = RaceLine::from_points(circle(40.0, 126), true, &l).unwrap();
+        // `circle` runs from +X towards +Z, which with Y up is clockwise seen from above.
+        let k = line.turn_at(30.0);
+        assert!((k + 1.0 / 40.0).abs() < 0.002, "{k}");
     }
 
     /// A fast car behind a slow one in the same lane never drives into it, and gets past it.

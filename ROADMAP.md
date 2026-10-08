@@ -7477,3 +7477,79 @@ da yarış aynı yarış.
 - `Pilot::place` ve `nfs_sim` hâlâ anahattın sırasını kullanıyor: üç sprint ve iki devre pilot için ters.
 - Motor pini (`550a7dfd`) motorun `main`'inin 105 commit gerisinde; metin ve `gizmo-ui` çizimi
   orada. HUD egui ile çizildiği için bugün gerekmiyor.
+
+## "Arabalar iyi hissettirmiyor: yavaş ve sürekli kayıyor" — ölçüldü, üç sebep (2026-10-08)
+
+Oyuncunun ilk sürüşünden gelen geri bildirim. Tahmin yerine bir yol tutuş tezgâhı yazıldı
+(`nfs_bench`): dyno'nun düz asfalt düzleminde sabit hız + sabit direksiyonla daireler, 60-120 km/h'de
+klavyeyle yarım saniyelik bir dokunuş, ve tam gaz kalkış. Ölçülenler: yanal ivme, yarıçap, ve
+**kayma açısı** (burnun baktığı yönle gidilen yön arasındaki açı — sürücünün "kayıyor" dediği şey).
+
+**"Kayma" savrulma değil, düz gitme (understeer).** Kayma açısı her yerde 1-2°: araba kuyruk
+atmıyor, tam gazda bile (0,07°). Kayan şey virajın dışına doğru araba: 70 km/h'de girdi 0,25 →
+6,0 m/s², tam kilit → **5,3 m/s²** — direksiyonu çevirdikçe araba *daha az* dönüyor. Tavan 0,62 g.
+
+### 1. Lastik, asfaltın sürtünmesini hiç görmüyordu: her lastik %77 tutuyordu
+
+Lastik modeli Pacejka, tepe katsayısı 1,0 — kâğıt üstünde ~1 g. Tezgâhın durağan teşhisi yüklerin
+doğru olduğunu söyledi (tekerlekler ağırlığın %99'u, şasi kutusu yerden 45 cm yukarıda), ve
+tekerleklerin gördüğü yüzey sürtünmesinin **0,5** olduğunu. Motorun tekerlek ışını sürtünmeyi
+çarptığı **collider'ın kendi `material` alanından** okuyor ve her lastik kuvvetini `μ / 0,65` ile
+ölçekliyor. Oyundaki her zemin collider'ı (şehrin 380 hücresi, her test düzlemi) varsayılan
+malzemeyle — 0,5 — kuruluyor ve yanına tekerleğin hiç bakmadığı bir `PhysicsMaterial::ASPHALT`
+bileşeni konuyordu. `scene::road` collider'a asfaltı veriyor: tavan **0,62 → 0,84 g**.
+
+Lastik eğrisinin şekli suçlu değildi: gerçek bir yanal şekil (`C = 1,4`) ve daha erken bir tepe
+(`B = 12, E = 0,5`) aynı tutuşu 0,05 g içinde veriyor. Motorun varsayılanı kaldı; `NFS_TYRE=b,c,d,e`
+düğmesi ölçümüyle duruyor.
+
+### 2. Klavye direksiyonu her hızda 25°
+
+Kilit hızdan bağımsız ve tuş ona 0,17 s'de varıyor. Ön lastikler en çok kuvveti 40 km/h'de ~13°,
+70'te 7-13°, 100'de 6,5°'de veriyor; ötesinde kuvvet **düşüyor**. `CarRig::steer_for_speed` tam
+tuşu limite giden açıya indiriyor — dairenin geometrisi artı lastiğin kendi kayması,
+`(L·a/v² + 5°) × 1,15` — ve yalnız insan için (pilot kendi direksiyonunu hesaplıyor):
+
+| hız | tam tuş, önce | tam tuş, şimdi |
+|---|---|---|
+| 40 km/h | 28° · 0,50 g | 17,9° · **0,76 g** |
+| 70 km/h | 28° · 0,54 g | 9,8° · **0,83 g** |
+| 100 km/h | 28° · 0,57 g | 7,8° · **0,87 g** |
+| 130 km/h | — | 7,0° · **0,91 g** |
+
+(İlk iki sütun eski zemin sürtünmesiyle; üçüncüsü üç düzeltmenin hepsiyle.) Klavye dokunuşu artık
+2-4° kayma ve 26-37°/s sapma hızı veriyor — araba daha çabuk dönüyor ve yine toparlıyor.
+
+### 3. `angular_damping` 1,8 → 1,0
+
+İlk içe aktarmadan gelen ikinci gerekçesiz sabit: her sapma hızına karşı bir tork, virajda ön
+lastiklerin ödediği. Tamamen kaldırılamıyor — sıfırda araba 100 km/h'de yarım girdide dönüyor.
+
+| `angular_damping` | en çok tutuş | 90 km/h dokunuş | dönme |
+|---|---|---|---|
+| 1,8 (önceki) | 0,84 g | 2,0° · 22,9°/s | yok |
+| **1,0** | 0,87 g | 2,7° · 25,2°/s | yok |
+| 0,5 | 0,89 g | 3,4° · 26,9°/s | yok |
+| 0 | 0,91 g | 4,7° · 29,1°/s | 100 km/h, yarım girdi |
+
+### Rakipler de
+
+Dyno aynı düzlemde ölçtüğü için rayların yanal sınırı kendiliğinden **6,1 → 8,1 m/s²**: 105 yarışta
+şehirde birincinin ortalaması 67 → 72 km/h, 840/840 hâlâ bitiriyor, temas 1.360 adım. Ve iki görsel
+"kayma" kaynağı kapandı: yerleştirilmiş arabanın ön tekerlekleri hiç dönmüyordu (soruyu soracak
+kontrolcüsü yok — artık hattın işaretli eğriliğinden `atan(L·κ)`), ve şerit değiştiren ray burnunu
+çevirmeden yana kayıyordu (artık gittiği yöne bakıyor).
+
+### Pilot da kazandı
+
+Üç düzeltme sürüş fiziğini değiştirdiği için sekiz-rota süpürmesi yeniden koşuldu. Sönümlemenin
+kalktığı tabana karşı: **waypoint +275** (sağlam, en büyük tek rota +73), furthest **+442 m**,
+ilerlemesi duran araba −4, kursu hiç bırakmayan +3. Sönümlemeden *önceki* — 95 km/h'lik araba —
+tabana karşı −42, yani gürültü tabanının (±37) kenarında: pilot iki katı hızlı bir arabayla eski
+ilerlemesini geri aldı. Pilot sayıları için yeni taban bu commit.
+
+### Değişmeyen: "yavaş"ın güç tarafı
+
+0-100 hâlâ ~10 s, son hız 221 km/h — stok bir KA24DE'nin kendisi. Tutuş ve direksiyon virajları
+hızlandırdı; düzlükte daha hızlı bir araba istenirse yol, 2026-08-20'de ölçülen "arcade katsayısı"
+(tork ×1,5 → 0-100 ~8 s): veriye sadakatten vazgeçmek bir proje kararı, ölçüm sonucu değil.
