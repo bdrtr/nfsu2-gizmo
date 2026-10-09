@@ -23,7 +23,7 @@
 //! The runs are deterministic, as the sim is, so a car measures the same every time.
 
 use super::drive::{Controls, FIXED_DT};
-use super::{spawn_car, CarRig, Placement};
+use super::{build_car, CarRig, Placement};
 use crate::geom::add_transform;
 use gizmo::physics::world::PhysicsWorld;
 use gizmo::prelude::*;
@@ -238,7 +238,9 @@ impl Bench {
             Velocity::default(),
             collider,
         );
-        let rig = spawn_car(&mut world, renderer, assets, &mut phys, car_path, Placement::origin());
+        // Built quietly: a measurement makes a fresh car per manoeuvre, and the race that asked for
+        // it has already announced this one — `Self::announce` is there for a caller that has not.
+        let rig = build_car(&mut world, renderer, assets, &mut phys, car_path, Placement::origin());
         world.insert_resource(phys);
         // `NFS_DYNO_DAMPING=<x>` / `NFS_DYNO_ANGDAMP=<x>`: the chassis' linear and angular damping
         // replaced, for the bench only — so each one's share of a number can be read directly.
@@ -254,6 +256,11 @@ impl Bench {
             }
         }
         Self { world, rig, t: 0.0 }
+    }
+
+    /// Print the car's `car ready` / `handling` lines, which the bench builds without.
+    pub fn announce(&self) {
+        self.rig.announce();
     }
 
     /// One physics step with these controls.
@@ -355,13 +362,15 @@ impl Bench {
         self.rig.steer_for_speed(&self.world, steer)
     }
 
-    /// The front wheels' steering angles, radians, as the controller applied them.
+    /// The steering angle, radians: the input times the lock, the one angle the controller splits
+    /// between the two front wheels by Ackermann.
+    ///
+    /// Not a wheel's own angle. The inner wheel turns more than this and the outer one less — at
+    /// full lock in a left turn the left front reads 28° against a 25° lock — so reading either
+    /// one makes a lock look bigger than it is, and more so the harder the car is steered.
     pub fn steer_angle(&self) -> f32 {
         let vehicles = self.world.borrow::<gizmo::physics::vehicle::VehicleController>();
-        vehicles
-            .get(self.rig.chassis)
-            .and_then(|v| v.wheels.first().map(|w| w.steering_angle))
-            .unwrap_or(0.0)
+        vehicles.get(self.rig.chassis).map_or(0.0, |v| v.steering_input * v.max_steering_angle)
     }
 }
 

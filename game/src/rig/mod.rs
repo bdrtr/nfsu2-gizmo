@@ -274,6 +274,21 @@ pub fn spawn_car(
     path: &str,
     place: Placement,
 ) -> CarRig {
+    let rig = build_car(world, renderer, assets, phys, path, place);
+    rig.announce();
+    rig
+}
+
+/// [`spawn_car`] without its `car ready` / `handling` lines — for the dyno's bench, which builds
+/// the same car once per manoeuvre and would print them every time.
+fn build_car(
+    world: &mut World,
+    renderer: &Renderer,
+    assets: &mut AssetManager,
+    phys: &mut PhysicsWorld,
+    path: &str,
+    place: Placement,
+) -> CarRig {
     let bytes = std::fs::read(path).unwrap_or_else(|e| panic!("cannot read {path}: {e}"));
     let all = parse_geometry(&bytes).expect("parse GEOMETRY.BIN");
     let tpk = crate::assets::load_tpk_beside(path); // TEXTURES.BIN next to the model, if present
@@ -445,7 +460,7 @@ pub fn spawn_car(
         collider,
     );
 
-    let rig = CarRig {
+    CarRig {
         chassis: chassis.id(),
         visuals,
         wheels,
@@ -461,9 +476,7 @@ pub fn spawn_car(
         tune,
         spin: 0.0,
         visual_steer: 0.0,
-    };
-    rig.announce();
-    rig
+    }
 }
 
 /// The tyre's lateral curve, as Pacejka `B, C, D, E`. `NFS_TYRE="b,c,d,e"` overrides it.
@@ -617,8 +630,8 @@ impl CarRig {
     ///
     /// **Why the keyboard needs it.** The lock is one angle at every speed — 25° — and the key
     /// reaches it in a sixth of a second. Measured on `nfs_bench`, the front tyres give their most
-    /// at about 13° at 40 km/h, 7-13° at 70 and 6.5° at 100; past that the force *falls*, and a
-    /// full key at 70 km/h turns the car less than a half one (0.69 g against 0.78 g) — which
+    /// at about 12.6° at 40 km/h, 6.3-12.6° at 70 and 6.3° at 100; past that the force *falls*,
+    /// and a full key at 70 km/h turns the car less than a half one (0.72 g against 0.81 g) — which
     /// a driver feels as the car sliding wide however hard he steers. The angle that reaches the
     /// limit is the geometry of the circle plus the tyre's own slip, `L · a / v² + α`, and this
     /// gives the key that much and a margin more. Below about 35 km/h the full lock is left alone.
