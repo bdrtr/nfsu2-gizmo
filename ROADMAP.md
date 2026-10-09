@@ -7553,3 +7553,27 @@ ilerlemesini geri aldı. Pilot sayıları için yeni taban bu commit.
 0-100 hâlâ ~10 s, son hız 221 km/h — stok bir KA24DE'nin kendisi. Tutuş ve direksiyon virajları
 hızlandırdı; düzlükte daha hızlı bir araba istenirse yol, 2026-08-20'de ölçülen "arcade katsayısı"
 (tork ×1,5 → 0-100 ~8 s): veriye sadakatten vazgeçmek bir proje kararı, ölçüm sonucu değil.
+
+## Sıradaki: "istediğim kadar gerçekçi değil" (2026-10-09)
+
+Düzeltmelerden sonraki sürüşün geri bildirimi. Sorulunca dört alanın **dördü de** işaretlendi —
+sürüş hissi, hız hissi, rakipler, görüntü — ve hedef **"ikisinin arası"**: gerçekçi bir fizik
+temeli, NFSU2'nin akıcılığıyla. Sürüş kaydı: yarış bitirilmeden kapatıldı, bir kez "dünyanın
+dışında → son zemine" kurtarması (874,9 / 22,6 / 1079,3).
+
+Okunan ve plan olarak kalan, etkisi yüksekten düşüğe:
+
+1. **Görüntü.** Yolun 0,5 m üstündeki pembe rota şeridi (`city::ribbon`) ve sol üstteki teknik
+   yazılar yarışta hata ayıklama artığı; yarışta kapalı, düğmeyle açık olmalı. Yerine gerçek HUD:
+   hız, vites, devir.
+2. **Sürüş hissi.** Tekerlek görselleri gövdeye **sabit**: `sync_visuals` onları `w.local`'a koyuyor,
+   süspansiyon boyunu (`Wheel::suspension_length`) hiç okumuyor — gövde yattığında tekerlek de
+   yatıyor, yol hissi görünmüyor. Gövde yalpası ve frende burun eğilmesi `nfs_bench`'te ölçülmeli.
+3. **Hız hissi.** `ChaseCamera`: dikey görüş açısı sabit π/4, 6,5 m geride, takip sertliği 12/s —
+   hızla hiçbir şey değişmiyor. `Camera::fov` yazılabilir; hızla açılan görüş, kameranın uzaması,
+   yüksek hızda hafif titreşim. Motor sesi: `gizmo-audio`'nun `AudioManager`'ı pinde var
+   (`load_sound_bytes`, `play_looped`, `set_pitch`, `set_volume`) — devirden üretilmiş bir döngü
+   mümkün; NFSU2'nin kendi `.gin` sesleri M6'nın işi.
+4. **Rakipler.** Raylar kinematik: gövdeleri ne yatıyor ne eğiliyor (v²κ'dan yapay yalpa
+   verilebilir); sürüşleri kusursuz (tur içi hız ve çizgi değişkenliği, ara sıra geniş açılma);
+   çekişmeyi tutacak bir lastik bant yok; oyuncu çarptığında sonsuz kütleli bir duvar gibiler.
