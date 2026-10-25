@@ -7843,3 +7843,7 @@ Süspansiyon (sert viraj demiri, kayıttan yaylar) onu artırdı, tam downforce 
 0,3'e inince en yükseğe çıktı. Bu, NFSU2'nin downforce'u devrilmeye karşı kullandığı okumasıyla
 aynı yönde. Oyuncunun beğendiği his 0,3'te. Downforce'u ancak yan yatmayı geri indirecek kadar
 artırmak, sürüşle yeniden yargılanması gereken bir değişiklik olur.
+
+**Karar (2026-10-26): 0,3'te kalıyor.** Oyuncu yan yatmayı geri almak için downforce'u artırmak
+yerine hissi korumayı seçti. Oyundaki rakipler raylarda ve devrilmiyor; artış yalnız pilot
+süpürmesinde görünüyor. Yan yatma süpürmede bir gerileme gibi göründüğünde sebebi budur.
