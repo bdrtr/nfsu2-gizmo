@@ -418,9 +418,10 @@ fn build_car(
     let rest = (radius * 0.25).max(0.05);
     for (i, &mount) in mounts.iter().enumerate() {
         let (front, left) = (i < 2, mount.x < 0.0);
-        // The car's own spring and bump when its record is reachable, the engine's feel when it is
-        // not. See `AxleTune` for what each number is in the game.
+        // The car's own spring, bump and grip when its record is reachable, the engine's feel when
+        // it is not. See `AxleTune` for what each number is in the game.
         let axle = tune.as_ref().map(|t| t.axles[usize::from(!front)]);
+        let grip = axle.map_or(1.0, |a| a.grip_peak);
         vehicle.add_wheel(Wheel {
             attachment_local_pos: mount + Vec3::new(0.0, rest, 0.0),
             radius,
@@ -431,7 +432,8 @@ fn build_car(
             suspension_stiffness: axle.map_or(FALLBACK_SPRING_N_PER_M, |a| a.spring_n_per_m),
             suspension_damping: axle.map_or(FALLBACK_BUMP_NS_PER_M, |a| a.bump_ns_per_m),
             wheel_mass: 25.0,
-            pacejka_lat: tyre_lateral(),
+            pacejka_long: tyre_longitudinal(grip),
+            pacejka_lat: tyre_lateral(grip),
             ..Default::default()
         });
     }
@@ -487,23 +489,29 @@ const FALLBACK_SPRING_N_PER_M: f32 = 45_000.0;
 /// …and its bump damping, N·s/m.
 const FALLBACK_BUMP_NS_PER_M: f32 = 3_500.0;
 
-/// The tyre's lateral curve, as Pacejka `B, C, D, E`. `NFS_TYRE="b,c,d,e"` overrides it.
+/// The tyre's longitudinal curve: the engine's shape, with the record's peak grip as `D`.
+fn tyre_longitudinal(grip: f32) -> gizmo::physics::vehicle::PacejkaParams {
+    gizmo::physics::vehicle::PacejkaParams { d: grip, ..Default::default() }
+}
+
+/// The tyre's lateral curve, as Pacejka `B, C, D, E`. `NFS_TYRE="b,c,d,e"` overrides it whole.
 ///
-/// This is the engine's default — the *longitudinal* shape, `C = 1.9`, used for both axes — and
-/// that is a measured choice rather than an unmade one: on `nfs_bench`'s steady circles a real
-/// lateral shape (`C = 1.4`) and an earlier peak (`B = 12, E = 0.5`) hold the same grip within
-/// 0.05 g. When the car felt it had none, the cause was the road's friction (`scene::road`), not
-/// this curve.
+/// `D` — the peak, the friction coefficient the force never exceeds — is the record's peak grip,
+/// the lane `SPEED2.EXE` bounds its friction circle with (`AxleTune::grip_peak`): 1.70 on a 240SX's
+/// front, where the engine's default is 1.0. The *shape* is still the engine's — the longitudinal
+/// `C = 1.9`, used for both axes — because the game's own lateral curve is a table rather than a
+/// Pacejka set, and on `nfs_bench`'s steady circles a real lateral shape (`C = 1.4`) and an earlier
+/// peak (`B = 12, E = 0.5`) held the same grip within 0.05 g.
 ///
-/// **The record's grip is known and deliberately not used.** `D` is the peak friction coefficient,
-/// and the game's is `AxleTune::grip_peak` — 1.70 on a 240SX's front, against the engine's 1.0.
-/// Given it, the 240SX held 1.3 g and then spun in steady circles from 70 km/h at half lock, and the
-/// 70 km/h circle read wheel loads of `[0, 5205, 5551, 339]` N: both inside wheels off the ground.
-/// That is the engine being right — a 0.52 m centre of gravity over a 1.46 m track transfers
-/// `m·a·h/t` ≈ 5.4 kN at 1.27 g, all of one side's load — and NFSU2 not letting a car roll, by a
-/// means not yet read. Until that means is known the grip waits; see ROADMAP.
-fn tyre_lateral() -> gizmo::physics::vehicle::PacejkaParams {
-    let mut p = gizmo::physics::vehicle::PacejkaParams::default();
+/// **This grip needs the game's downforce, and is only safe with it.** Given alone, the 240SX
+/// held 1.3 g and then spun in steady circles from 70 km/h at half lock, its inside wheels off the
+/// ground (`[0, 5205, 5551, 339]` N) — the engine being right about a 0.52 m centre of gravity at
+/// 1.27 g. NFSU2 holds the same grip by pressing the car down in proportion to its speed
+/// ([`CarRig::apply_downforce`]); with that in place the same bench holds 2.0–2.3 g at 70–100 km/h,
+/// no spins, inside wheels at 0.4 kN rather than nothing — and a real 240SX logged in the game read
+/// 1.6–2.9 g and 0.5–0.7 kN.
+fn tyre_lateral(grip: f32) -> gizmo::physics::vehicle::PacejkaParams {
+    let mut p = gizmo::physics::vehicle::PacejkaParams { d: grip, ..Default::default() };
     if let Ok(v) = std::env::var("NFS_TYRE") {
         let n: Vec<f32> = v.split(',').filter_map(|x| x.trim().parse().ok()).collect();
         if let [b, c, d, e] = n[..] {
@@ -581,6 +589,56 @@ impl CarRig {
             let nm: Vec<String> = curve.iter().map(|(_, n)| format!("{n:>6.0}")).collect();
             println!("  curve {}   rpm", rpm.join(""));
             println!("        {}   Nm", nm.join(""));
+        }
+    }
+
+    /// NFSU2's downforce, which the engine's aero cannot express: **linear in speed**.
+    ///
+    /// `SPEED2.EXE`'s aero (`0x59E620`) pushes the body down by `(front + rear lane) · |v|`
+    /// kilonewtons — 0.299 kN per m/s on a 240SX, 8.3 kN at 100 km/h, 0.7 of the car's weight —
+    /// scaled by how straight the car is going, `max((v̂·forward)², 0.4)`, and by how upright it is.
+    /// The engine's `AeroPackage` is `½ρ·Cl·A·v²`, so no lift coefficient matches it at more than
+    /// one speed, and the force is applied here instead: between the controller and the
+    /// integration, as the change of velocity it causes this step.
+    ///
+    /// It is measured, not read alone. A real 240SX driven in the game with the process's memory
+    /// logged put its four wheel loads at **1.00 / 1.43 / 1.65 / 1.90 × its weight** at 20 / 60 /
+    /// 100 / 140 km/h, with no dependence on how hard it was cornering — and the formula gives
+    /// 1.00 / 1.41 / 1.69 / 1.97. That load is how the game holds its tyres' 1.7 friction coefficient
+    /// without lifting a wheel: a car pressed down at 1.7 × its weight has the vertical load to turn
+    /// at 1.7 g and still keep the inside tyres on the road.
+    ///
+    /// The game splits it between the axles and applies each at its own point; this applies the sum
+    /// through the centre of mass, which leaves out a pitch moment the two lanes nearly cancel
+    /// (0.145 against 0.154 on a 240SX).
+    pub fn apply_downforce(&self, world: &mut World, dt: f32) {
+        /// The share a car going sideways keeps (`0x7A1E4C`).
+        const SIDEWAYS: f32 = 0.4;
+        let Some(per_mps) = self.tune.as_ref().map(|t| t.downforce_n_per_mps) else { return };
+        if per_mps <= 0.0 {
+            return;
+        }
+        let Some(rotation) = world.borrow::<Transform>().get(self.chassis).map(|t| t.rotation)
+        else {
+            return;
+        };
+        let Some(mass) = world.borrow::<RigidBody>().get(self.chassis).map(|rb| rb.mass) else {
+            return;
+        };
+        if mass <= 0.0 {
+            return;
+        }
+        if let Some(mut v) = world.borrow_mut::<Velocity>().get_mut(self.chassis) {
+            let speed = v.linear.length();
+            if speed < 0.1 {
+                return;
+            }
+            let up = rotation.mul_vec3(Vec3::Y);
+            let forward = rotation.mul_vec3(Vec3::NEG_Z);
+            let along = (v.linear.dot(forward) / speed).max(0.0);
+            let facing = (along * along).max(SIDEWAYS);
+            let force = per_mps * speed * facing * up.y.max(0.0);
+            v.linear -= up * (force / mass * dt);
         }
     }
 

@@ -17,7 +17,7 @@ use gizmo::egui;
 use gizmo::physics::world::PhysicsWorld;
 use gizmo::prelude::*;
 use nfsu2::geom::add_transform;
-use nfsu2::rig::{spawn_car, CarRig, ChaseCamera, Driver, Placement, Rescue};
+use nfsu2::rig::{spawn_car, CarRig, ChaseCamera, Driver, Placement, Rescue, FIXED_DT};
 use nfsu2::scene;
 
 const DEFAULT_CAR: &str =
@@ -147,7 +147,8 @@ fn update(world: &mut World, state: &mut DriveState, dt: f32, input: &Input) {
         state.driver.reset();
     }
 
-    state.driver.step_physics(world, dt);
+    let rig = &state.rig;
+    state.driver.step_physics_with(world, dt, |w| rig.apply_downforce(w, FIXED_DT));
 
     let Some(pose) = state.rig.pose(world) else { return };
 

@@ -7704,3 +7704,47 @@ g'ye taşır, ama 1,7'ye yetmez. İkincisi süspansiyonun statik yükü sabit ol
 kendisiyle yapıyor. İkisi de tek başına açıklamıyor. Sıradaki adım ölçmek: oyunu çalıştırıp
 gerçek bir 240SX'in sabit dairedeki yanal ivmesini ve iç tekerlek yükünü okumak. Bu bir bellek
 okuması, ve kodun cevap veremediği yerde tek yol o. `AxleTune::grip_peak` hazır duruyor.
+
+### Cevap oyunun kendisinden geldi: downforce hızla doğrusal, ve tutuşu o taşıyor (2026-10-25)
+
+Kod gövdede bir hile göstermeyince oyun çalıştırıldı ve ölçüldü. `SPEED2.EXE` umu/Proton altında
+bir Python kaydedicinin alt işlemi olarak başlatıldı (`ptrace_scope=1`, yalnız ata okuyabilir).
+Kaydedici `/proc/<pid>/mem`'den Suspension nesnelerini vtable'larıyla (`0x7A210C`) buldu, oradan
+tekerleğe ve gövdeye geçti, saniyede 30 örnek aldı. Gerçek bir 240SX ≈ 67 s sürüldü, 141 km/h'ye
+kadar.
+
+**Dört tekerleğin toplam yükü, ağırlığın katı olarak:**
+
+| hız | ölçülen | `(0,145 + 0,154)·v` formülü |
+|---|---|---|
+| 0–40 km/h | 1,00 | 1,00 |
+| 40–80 km/h | 1,43 | 1,41 |
+| 80–120 km/h | 1,65 | 1,69 |
+| 120–160 km/h | 1,90 | 1,97 |
+
+Toplam yük yanal ivmeyle değişmiyor, yalnız hızla. Bu, `0x59E620`'deki aero kodunun okunuşuyla
+birebir aynı: kaydın downforce şeritleri **kN/(m/s)**, kuvvet `şerit · |v|` ve
+`max((v̂·ileri)², 0,4)` ile ölçekli. 100 km/h'de 8,3 kN, arabanın ağırlığının 0,7'si. Oyunun
+arabası bu yüzden devrilmiyor: 1,7 μ'lük tutuşu taşıyacak düşey yük ona hızla birlikte veriliyor.
+Kayıtta yanal ivme 1,6–2,9 g, iç tekerlek yükleri 0,5–0,7 kN.
+
+Motorun aerosu `½ρ·Cl·A·v²` ile hesaplıyor, hiçbir `Cl` doğrusal bir eğriyi birden fazla hızda
+tutturamaz. O yüzden kuvveti oyun uyguluyor: `CarRig::apply_downforce`, kontrolcü ile
+integrasyon arasında, beş fizik döngüsünün hepsinde (`nfs_drive`, `nfs_race`, `nfs_cruise`,
+`nfs_sim`, tezgâh). Ağırlık merkezinden uygulanıyor. Oyun ön ve arka aksa ayrı noktalardan
+veriyor, ama iki şerit neredeyse eşit (240SX 0,145 / 0,154), yani dışarıda kalan yunuslama
+momenti küçük.
+
+Downforce yerindeyken kaydın tepe tutuşu da açıldı (`AxleTune::grip_peak` → Pacejka `D`, iki
+eksende). `nfs_bench`, 240SX:
+
+| | tutuş 1,0, downforce yok | tutuş 1,7, downforce yok | **ikisi birden** |
+|---|---|---|---|
+| 70 km/h, yarım | 0,84 g | döndü | **2,05 g** |
+| 100 km/h, çeyrek | 0,90 g | döndü | **2,34 g** |
+| 70 km/h dairede iç yükler | 1,1 / 1,6 kN | 0 / 0,3 kN | 0,4 / 0,4 kN |
+
+Hiçbir dairede ve dokunuşta dönme yok. Aynada %2–5 yük farkı var (eskiden %0,4); en büyük kayma
+farkı 0,2°, izlenmeli. Sekiz-rota süpürmesi, bir önceki commit'e karşı: waypoint toplamı
+**358 → 405**, en uzak toplamı **5 965 → 6 627 m**, düşen 0 → 0. Gürültü tabanının (±37)
+üstünde. En büyük kazanç 4102'de (16 → 56); 4001 geriledi (50 → 39).

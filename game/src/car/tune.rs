@@ -9,10 +9,11 @@
 //! measured rather than assumed (see `gizmo_nfs::globalb`). Springs, bump damping, sway bars, brake
 //! torque and peak tyre grip **are** in the record — `SPEED2.EXE`'s own physics reads them, which is
 //! how they were named (`gizmo_nfs::Chassis`, and ROADMAP "Oyunun kendi süspansiyonu ve lastiği") —
-//! and [`AxleTune`] carries them to the wheels — all but the grip, which waits on a question about
-//! roll (see `rig::tyre_lateral`). Units are the record's tonnes-and-kilonewtons, so
+//! and [`AxleTune`] carries them to the wheels. The record's downforce goes in too, but not through
+//! the engine's aero, whose force grows with the square of speed where the game's grows with speed
+//! itself: [`crate::rig::CarRig::apply_downforce`]. Units are the record's tonnes-and-kilonewtons, so
 //! each is multiplied by a thousand on the way in. The steering lock is still not in the data, and
-//! aerodynamics stays at the engine's default: the record's downforce lanes have no unit yet.
+//! drag stays at the engine's default.
 //!
 //! Where the engine cannot say what the game says, the record's number goes in the nearest slot
 //! and the difference is written down in `MOTOR-NOTLARI.md`: one sway-bar rate for both axles,
@@ -202,9 +203,8 @@ pub struct AxleTune {
     /// rebound from it, so the record's rebound lane has nowhere to go.
     pub bump_ns_per_m: f32,
     /// Peak tyre grip, as a friction coefficient: the lane that bounds the game's friction circle.
-    /// A 240SX's front is 1.70; the engine's own tyre default is 1.0. **Carried, not yet applied** —
-    /// at this grip the engine's car lifts its inside wheels, and why NFSU2's does not is unread.
-    /// See `rig::tyre_lateral`.
+    /// A 240SX's front is 1.70; the engine's own tyre default is 1.0. It holds only together with
+    /// [`CarTune::downforce_n_per_mps`] — see `rig::tyre_lateral`.
     pub grip_peak: f32,
 }
 
@@ -223,6 +223,10 @@ pub struct CarTune {
     pub gears: usize,
     /// Front, then rear.
     pub axles: [AxleTune; 2],
+    /// Downforce per metre per second of speed, newtons: the record's two downforce lanes summed.
+    /// **Linear in speed, not quadratic** — see [`crate::rig::CarRig::apply_downforce`] for the
+    /// game's formula and the drive that measured it.
+    pub downforce_n_per_mps: f32,
 }
 
 /// The steering lock, in radians.
@@ -319,6 +323,7 @@ pub fn tune_from_record(
         body_m: handling.body_m,
         gears: gears.len(),
         axles,
+        downforce_n_per_mps: (chassis.downforce[0] + chassis.downforce[1]) * KILO,
     }
 }
 
@@ -446,6 +451,8 @@ mod tests {
         assert!((stock.tuning.anti_roll_stiffness - 35_500.0).abs() < 0.5);
         // 0.485 × 4 kN·m a wheel, four wheels, over the engine's 2 × max split.
         assert!((stock.tuning.max_brake_torque - 3_880.0).abs() < 0.5);
+        // 0.145 + 0.154 kN per m/s: 8.3 kN at 100 km/h.
+        assert!((stock.downforce_n_per_mps - 299.0).abs() < 0.5);
     }
 
     #[test]

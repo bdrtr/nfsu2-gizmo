@@ -267,6 +267,7 @@ impl Bench {
     pub fn step(&mut self, c: &Controls) {
         self.rig.drive(&mut self.world, c);
         gizmo::physics::vehicle_controller_system(&self.world, FIXED_DT);
+        self.rig.apply_downforce(&mut self.world, FIXED_DT);
         gizmo::physics::physics_step_system(&self.world, FIXED_DT);
         self.t += FIXED_DT;
     }

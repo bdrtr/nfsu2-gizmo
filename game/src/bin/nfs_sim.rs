@@ -2160,6 +2160,9 @@ async fn run() {
             }
         }
         gizmo::physics::vehicle_controller_system(&world, FIXED_DT);
+        for (rig, _) in field.iter() {
+            rig.apply_downforce(&mut world, FIXED_DT);
+        }
         // The fence, between the forces and the integration, so the step that would have carried a
         // car over the lip is the step that does not. NFS_FENCE=0 turns it off, which is the only
         // way to say what it is worth.

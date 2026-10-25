@@ -1151,6 +1151,10 @@ fn update(world: &mut World, state: &mut CruiseState, dt: f32, input: &Input) {
     let CruiseState { rig, driver, field, ground, rails, .. } = state;
     let demo = rails.as_ref().is_some_and(|r| r.demo.is_some());
     driver.step_physics_with(world, dt, |w| {
+        rig.apply_downforce(w, FIXED_DT);
+        for (r, _) in field.iter() {
+            r.apply_downforce(w, FIXED_DT);
+        }
         if let Some(p) = rig.pose(w).filter(|_| !demo) {
             rig.hold_at_edge(w, p, ground);
         }
