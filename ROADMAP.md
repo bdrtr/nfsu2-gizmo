@@ -7661,9 +7661,10 @@ sonuçlar eskisine çok yakın. Yay ve viraj demiri sonucu ancak bu kadar deği�
 lastiği yükle **doğrusal**: yük aktarımı aksın toplam tutuşunu değiştirmiyor.
 
 Sekiz-rota süpürmesi (240SX, rota başına 8 araba, 90 s), aynı oturumda önce ve sonra:
-waypoint toplamı 360 → 358, en uzak toplamı 5 926 → 5 965 m, düşen 0 → 0. Gürültü tabanı ±37
-waypoint, yani değişiklik süpürmeyi kıpırdatmıyor. Rota rota karışık: 4002 231 → 498 m, 4121
-31 → 25 waypoint.
+`SUMMARY waypoint=` toplamı 360 → 358, en uzak toplamı 5 926 → 5 965 m, düşen 0 → 0. **Dikkat:**
+bu, süpürmenin karar ölçüsü değil (araba başına "waypoints driven past", `tools/sweep-table.py`).
+Ham kayıtlar sonraki ölçümle üzerine yazıldığı için doğru ölçüyle yeniden okunamadı. Burada
+yalnız "düşen yok, kaba sayılar kıpırdamadı" anlamına gelir.
 
 **Tutuş taşınmadı, ve sebebi ölçüldü.** Kaydın tepe tutuşu (`μ_s` 1,70 / 1,67) Pacejka `D` olarak
 verilince araba 1,3 g tuttu. Ama 70 km/h'den itibaren yarım direksiyonda sabit dairede **döndü**.
@@ -7745,6 +7746,31 @@ eksende). `nfs_bench`, 240SX:
 | 70 km/h dairede iç yükler | 1,1 / 1,6 kN | 0 / 0,3 kN | 0,4 / 0,4 kN |
 
 Hiçbir dairede ve dokunuşta dönme yok. Aynada %2–5 yük farkı var (eskiden %0,4); en büyük kayma
-farkı 0,2°, izlenmeli. Sekiz-rota süpürmesi, bir önceki commit'e karşı: waypoint toplamı
-**358 → 405**, en uzak toplamı **5 965 → 6 627 m**, düşen 0 → 0. Gürültü tabanının (±37)
-üstünde. En büyük kazanç 4102'de (16 → 56); 4001 geriledi (50 → 39).
+farkı 0,2°, izlenmeli.
+
+**DÜZELTME (2026-10-26) — süpürme bir iyileşme göstermiyor.** Bu bölüm ve `0cf9252`'nin mesajı
+ilk yazıldığında süpürmeyi `SUMMARY waypoint=` ile okudu (358 → 405) ve "gürültünün üstünde"
+dedi. Karar ölçüsü o değil; araba başına "waypoints driven past" toplamı, `tools/sweep-table.py`
+ile. O ölçüyle, bir önceki commit'e karşı:
+
+| rota | önce | downforce + tutuş |
+|---|---|---|
+| 4001 | 403 | 332 |
+| 4002 | 73 | 48 |
+| 4021 | 134 | 194 |
+| 4041 | 278 | 265 |
+| 4061 | 284 | 244 |
+| 4081 | 153 | 148 |
+| 4102 | 107 | 308 |
+| 4121 | 88 | 145 |
+| toplam | 1 520 | 1 684 |
+
+`sweep-table.py`'nin hükmü: **TAŞINIYOR**. +164'ün tamamını ve fazlasını tek rota (4102, +201)
+taşıyor, önceki commit sekiz rotanın beşinde önde. Yani rakip pilotu için bu değişiklik karışık
+ve nötr civarı. Pilotun sabitleri eski, 0,9 g'lik arabaya göre ayarlıydı; 2 g tutan bir arabada
+yeniden bakılmaları gerekebilir. Sürüş hissinin hükmünü süpürme değil, oyuncunun sürüşü verir.
+
+`tools/nfsu2-memlog.py`, oyunun belleğinden ölçen kaydedici. `launch` oyunu kendi alt işlemi
+olarak başlatıyor (`ptrace_scope=1`). `log` örnek alıyor, `loads` yukarıdaki toplam yük
+tablosunu üretiyor. Kurulum yolları ortam değişkenlerinden okunuyor (`NFSU2_PREFIX`,
+`PROTONPATH`, `UMU_RUN`).
