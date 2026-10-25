@@ -7806,3 +7806,40 @@ hüküm **sağlam** — tam tutuş 8 rotanın 6'sında önde, düşen 0. Beklene
 pilot için bugünkü işlerin net etkisi sıfır civarında. Oyundaki rakipler raylarda gidiyor,
 oyuncunun sürüşünü bu süpürme ölçmüyor. Pilotun sabitleri 2 g'lik arabaya göre değil, 0,9 g'lik
 arabaya göre ayarlıydı ve öyle kaldı.
+
+### Pilot yeni tutuşa göre süpürüldü: iki kol da yerinde kalıyor, ve yan yatma üç katına çıktı (2026-10-26)
+
+Pilotun sabitleri 0,9 g'lik arabaya göre ayarlıydı; araba artık ≈ 1,2 g tutuyor. Tutuşa doğrudan
+bağlı iki kol, sekiz rota, `tools/sweep-table.py`, taban `ebc586e`:
+
+| kol | değer | toplam | hüküm |
+|---|---|---|---|
+| `GRIP` (viraj bütçesi, m/s²) | **8** | 1 536 | — |
+| | 10 | 1 496 | taşınıyor |
+| | 12 | 1 608 | taşınıyor (4121 +82, 4061 +71, 4041 −70) |
+| | 14 | 1 544 | taşınıyor |
+| `BRAKE_SPEED` | **9** | 1 536 | — |
+| | 11 | 1 484 | **9 sağlam önde** |
+| | 13 | 1 553 | taşınıyor |
+
+Hiçbiri tabanı sağlam geçmiyor, `GRIP` tekdüze bile değil (10 kötü, 12 iyi, 14 nötr). İkisi de
+yerinde kaldı. Bu pilotta viraj freninin eşikleri, lastiğin ne kadar tuttuğundan daha az şey
+belirliyor.
+
+**Bugünün tamamı, bugünden önceki commit'e (`72e6cb9`) karşı**, aynı oturumda derlenip
+koşuldu: 1 409 → **1 536**, hüküm **sağlam** (en büyük tek rota +97; taban 3/8'de önde). Düşen
+0 → 0.
+
+**Bedeli yan yatma.** Rota başına "yan yatarak geçen süre"nin ortalaması:
+
+| commit | yan yatma |
+|---|---|
+| `72e6cb9` bugünden önce | %1,35 |
+| `f33342d` kayıttan süspansiyon | %2,33 |
+| `0cf9252` tam tutuş + tam downforce | %1,76 |
+| `ebc586e` tutuş 0,7 + downforce 0,3 | **%4,16** |
+
+Süspansiyon (sert viraj demiri, kayıttan yaylar) onu artırdı, tam downforce geri indirdi. Downforce
+0,3'e inince en yükseğe çıktı. Bu, NFSU2'nin downforce'u devrilmeye karşı kullandığı okumasıyla
+aynı yönde. Oyuncunun beğendiği his 0,3'te. Downforce'u ancak yan yatmayı geri indirecek kadar
+artırmak, sürüşle yeniden yargılanması gereken bir değişiklik olur.
