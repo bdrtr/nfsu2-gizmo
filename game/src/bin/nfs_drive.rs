@@ -6,7 +6,7 @@
 //! record — is [`nfsu2::rig`]; what is here is the *scene*: a ground plane, two lights, and the
 //! HUD.
 //!
-//! Controls: **W/↑** accelerate · **S/↓** reverse · **A/D or ←/→** steer · **Space** brake ·
+//! Controls: **W/↑** accelerate · **S/↓** brake, then reverse · **A/D or ←/→** steer · **Space** handbrake ·
 //! **R** reset · **T** auto-shift · hold **right mouse** to orbit.
 //!
 //! ```bash
@@ -131,8 +131,9 @@ fn update(world: &mut World, state: &mut DriveState, dt: f32, input: &Input) {
     state.t += dt;
 
     let mut controls = state.driver.read(input, dt);
-    // Full key at speed asks the tyres for what they have, not three times more — `steer_for_speed`.
-    controls.steer = state.rig.steer_for_speed(world, controls.steer);
+    // The keyboard read the way NFSU2 reads it: steering scaled to the speed, Down brakes before it
+    // reverses, Space is the handbrake — `CarRig::for_human`.
+    controls = state.rig.for_human(world, controls);
     if state.autodrive {
         // A slow weave with the throttle down: enough to watch the suspension work and the wheels
         // steer without a hand on the keyboard, which is what the screenshot passes want.
@@ -148,7 +149,7 @@ fn update(world: &mut World, state: &mut DriveState, dt: f32, input: &Input) {
     }
 
     let rig = &state.rig;
-    state.driver.step_physics_with(world, dt, |w| rig.apply_downforce(w, FIXED_DT));
+    state.driver.step_physics_with(world, dt, |w| rig.between_step(w, FIXED_DT));
 
     let Some(pose) = state.rig.pose(world) else { return };
 
@@ -189,6 +190,6 @@ fn ui(world: &mut World, state: &mut DriveState, ctx: &egui::Context) {
         .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-30.0, -30.0))
         .show(ctx, |ui| {
             ui.heading(format!("{speed:.0} km/h"));
-            ui.label("W/S sür · A/D direksiyon · Space fren · R reset");
+            ui.label("W gaz · S fren/geri · A/D direksiyon · Space el freni · R reset");
         });
 }

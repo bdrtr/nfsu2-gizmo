@@ -13,7 +13,7 @@
 //! cargo run --release -p nfsu2 --bin nfs_cruise -- "$NFSU2_ROOT/TRACKS" "$NFSU2_ROOT/CARS/240SX/GEOMETRY.BIN"
 //! ```
 //!
-//! Controls: **W/↑** accelerate · **S/↓** reverse · **A/D or ←/→** steer · **Space** brake ·
+//! Controls: **W/↑** accelerate · **S/↓** brake, then reverse · **A/D or ←/→** steer · **Space** handbrake ·
 //! **R** back to the start · **Enter** run the race again · **T** auto-shift · hold **right mouse** to orbit · **F** print where
 //! the car is.
 //!
@@ -1083,8 +1083,9 @@ fn update(world: &mut World, state: &mut CruiseState, dt: f32, input: &Input) {
     state.frames.push(dt * 1000.0);
 
     let mut controls = state.driver.read(input, dt);
-    // Full key at speed asks the tyres for what they have, not three times more — `steer_for_speed`.
-    controls.steer = state.rig.steer_for_speed(world, controls.steer);
+    // The keyboard read the way NFSU2 reads it: steering scaled to the speed, Down brakes before it
+    // reverses, Space is the handbrake — `CarRig::for_human`.
+    controls = state.rig.for_human(world, controls);
     if let Some(rr) = state.rails.as_mut() {
         rr.race.tick(dt);
         // On the line until the lights go: the brake held, the wheel free.
@@ -1151,7 +1152,7 @@ fn update(world: &mut World, state: &mut CruiseState, dt: f32, input: &Input) {
     let CruiseState { rig, driver, field, ground, rails, .. } = state;
     let demo = rails.as_ref().is_some_and(|r| r.demo.is_some());
     driver.step_physics_with(world, dt, |w| {
-        rig.apply_downforce(w, FIXED_DT);
+        rig.between_step(w, FIXED_DT);
         for (r, _) in field.iter() {
             r.apply_downforce(w, FIXED_DT);
         }

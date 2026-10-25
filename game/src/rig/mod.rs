@@ -255,6 +255,9 @@ pub struct CarRig {
     /// The front wheels' angle for a car with no controller to ask — a placed one — radians,
     /// positive to the left. See [`Self::steer_visual`].
     visual_steer: f32,
+    /// Whether a human is holding the handbrake — set by [`Self::for_human`], acted on by
+    /// [`Self::between_step`].
+    handbrake: bool,
 }
 
 /// Build a car from its `GEOMETRY.BIN` and stand it in the world at `place`.
@@ -366,7 +369,13 @@ fn build_car(
     // whole nine-point torque curve on its own rpm axis, and the drivetrain. Without it the engine's
     // defaults stand, which is what every car in this game used to drive on.
     let tune = gb.info.as_ref().zip(gb.handling.as_ref()).map(|(info, h)| {
-        tune_from_record(info, h, Upgrades::from_env(), half_wheelbase * 2.0, half_track * 2.0)
+        let mut t =
+            tune_from_record(info, h, Upgrades::from_env(), half_wheelbase * 2.0, half_track * 2.0);
+        t.downforce_n_per_mps *= feel_scale("NFS_DOWNFORCE", FEEL_DOWNFORCE);
+        for a in &mut t.axles {
+            a.grip_peak *= feel_scale("NFS_GRIP", FEEL_GRIP);
+        }
+        t
     });
 
     // The record's own mass. 1200 kg was a stand-in for every car in the game, and `nfs_race` was
@@ -481,7 +490,25 @@ fn build_car(
         tune,
         spin: 0.0,
         visual_steer: 0.0,
+        handbrake: false,
     }
+}
+
+/// How much of the record's peak grip the tyres get. `NFS_GRIP` overrides it; 1.0 is the game's own.
+///
+/// **The game's numbers are the reference, not the target.** NFSU2 holds over 2 g at 100 km/h, a
+/// road car about 0.9, and the goal is a realistic base with NFSU2's flow. Driven 2026-10-26 on
+/// `nfs_drive`: the game's own 1.0 / 1.0 was "too sticky", 0.7 / 0.3 "better" and then, with the
+/// steering assist aimed at the car's own limit and a handbrake, "good". On the bench that is
+/// 1.13 g at 70 km/h, 1.25 g at 100 and 1.36 g at 130 — a sports car's grip that still grows with
+/// speed — with no spins.
+const FEEL_GRIP: f32 = 0.7;
+/// How much of the record's downforce the car gets. `NFS_DOWNFORCE` overrides it. See [`FEEL_GRIP`].
+const FEEL_DOWNFORCE: f32 = 0.3;
+
+/// A multiplier on one of the record's feel numbers: the environment's, else `default`.
+fn feel_scale(var: &str, default: f32) -> f32 {
+    std::env::var(var).ok().and_then(|v| v.parse::<f32>().ok()).filter(|k| *k >= 0.0).unwrap_or(default)
 }
 
 /// The spring rate a car gets when its record cannot be read, N/m.
@@ -498,7 +525,7 @@ fn tyre_longitudinal(grip: f32) -> gizmo::physics::vehicle::PacejkaParams {
 ///
 /// `D` — the peak, the friction coefficient the force never exceeds — is the record's peak grip,
 /// the lane `SPEED2.EXE` bounds its friction circle with (`AxleTune::grip_peak`): 1.70 on a 240SX's
-/// front, where the engine's default is 1.0. The *shape* is still the engine's — the longitudinal
+/// front, where the engine's default is 1.0 — times [`FEEL_GRIP`], so 1.19 as driven. The *shape* is still the engine's — the longitudinal
 /// `C = 1.9`, used for both axes — because the game's own lateral curve is a table rather than a
 /// Pacejka set, and on `nfs_bench`'s steady circles a real lateral shape (`C = 1.4`) and an earlier
 /// peak (`B = 12, E = 0.5`) held the same grip within 0.05 g.
@@ -527,9 +554,10 @@ fn renderer_white(renderer: &Renderer, assets: &mut AssetManager) -> std::sync::
     assets.create_white_texture(&renderer.device, &renderer.queue, &renderer.scene.texture_bind_group_layout)
 }
 
-/// The lateral acceleration the steering assist aims a full key at, in m/s² — about what the car
-/// holds on the bench (0.84-0.87 g at 70-100 km/h).
-const ASSIST_LIMIT: f32 = 8.0;
+/// The share of `grip · (g + downforce / mass)` a car actually holds in a steady circle, read off
+/// the bench: 0.84-0.87 g on the engine's 1.0 grip with no downforce (the constant 8.0 m/s² this
+/// replaced), and 0.83-0.87 of the estimate at the record's grip × 0.7 with downforce × 0.3.
+const ASSIST_EFFICIENCY: f32 = 0.85;
 /// The front tyre's slip angle at its most force, in radians: about 5°, read off the bench's
 /// steady circles at 70 and 100 km/h.
 const ASSIST_SLIP: f32 = 0.087;
@@ -721,8 +749,58 @@ impl CarRig {
         let speed = (v.current_speed_kmh / 3.6).abs().max(1.0);
         let wheelbase = if v.tuning.wheelbase > 0.5 { v.tuning.wheelbase } else { 2.6 };
         let lock = v.max_steering_angle.max(1e-3);
-        let reach = (wheelbase * ASSIST_LIMIT / (speed * speed) + ASSIST_SLIP) * ASSIST_MARGIN;
+        let reach = (wheelbase * self.lateral_limit(speed) / (speed * speed) + ASSIST_SLIP)
+            * ASSIST_MARGIN;
         steer * (reach / lock).min(1.0)
+    }
+
+    /// The lateral acceleration this car holds at `speed` m/s, in m/s² — what a full key is aimed at.
+    ///
+    /// It used to be one constant, 8 m/s², which was right for the engine's 1.0 tyre and nothing
+    /// else. Once the car carried its record's grip and the game's downforce it held 11-20 m/s², a
+    /// full key still asked for 9.2, and the driver felt the nose refuse to go in. So it is the
+    /// car's own front grip, its weight plus the downforce at this speed, and the bench's share.
+    #[must_use]
+    pub fn lateral_limit(&self, speed: f32) -> f32 {
+        const G: f32 = 9.8;
+        let Some(t) = &self.tune else { return ASSIST_EFFICIENCY * G };
+        let pressed = t.downforce_n_per_mps * speed / t.mass_kg.max(1.0);
+        ASSIST_EFFICIENCY * t.axles[0].grip_peak * (G + pressed)
+    }
+
+    /// A human's keyboard, read the way NFSU2 reads it.
+    ///
+    /// * The steering goes through [`Self::steer_for_speed`].
+    /// * **Down/S brakes while the car is moving forward**, and only reverses once it has stopped.
+    ///   The engine's own reverse at speed is a gear change, not a brake.
+    /// * **Space is the handbrake**: it locks the rear wheels ([`Self::between_step`]), which is
+    ///   what the game's own handbrake does — its lever torque (`gizmo_nfs::Chassis::handbrake`,
+    ///   × 10 kN·m) is several times what a wheel can carry, so a pulled lever is a locked wheel.
+    ///
+    /// For a human only; the pilot drives through [`Self::drive`] and is measured as it stands.
+    pub fn for_human(&mut self, world: &World, mut c: Controls) -> Controls {
+        c.steer = self.steer_for_speed(world, c.steer);
+        self.handbrake = c.brake > 0.0;
+        c.brake = 0.0;
+        let forward = self.pose(world).map_or(0.0, |p| p.speed);
+        if c.throttle < 0.0 && forward > 1.0 {
+            c.brake = -c.throttle;
+            c.throttle = 0.0;
+        }
+        c
+    }
+
+    /// What the player's car needs between the controller and the integration, every fixed step:
+    /// the game's downforce, and the handbrake.
+    pub fn between_step(&self, world: &mut World, dt: f32) {
+        self.apply_downforce(world, dt);
+        if self.handbrake {
+            if let Some(mut v) = world.borrow_mut::<VehicleController>().get_mut(self.chassis) {
+                for w in v.wheels.iter_mut().filter(|w| w.axle_type == Axle::Rear) {
+                    w.angular_velocity = 0.0;
+                }
+            }
+        }
     }
 
     /// Hand this frame's controls to the vehicle controller.

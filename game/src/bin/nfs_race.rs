@@ -5,7 +5,7 @@
 //! (`Collider::trimesh`) the vehicle suspension raycasts against, plus checkpoints and lap timing.
 //! The track is what this binary is; the car is the shared rig.
 //!
-//! Controls: **W/↑** accelerate · **S/↓** reverse · **A/D or ←/→** steer · **Space** brake ·
+//! Controls: **W/↑** accelerate · **S/↓** brake, then reverse · **A/D or ←/→** steer · **Space** handbrake ·
 //! **R** reset to the start line · **T** auto-shift · hold **right mouse** to orbit.
 //!
 //! ```bash
@@ -279,8 +279,9 @@ fn update(world: &mut World, state: &mut RaceState, dt: f32, input: &Input) {
     state.cur_time += dt;
 
     let mut controls = state.driver.read(input, dt);
-    // Full key at speed asks the tyres for what they have, not three times more — `steer_for_speed`.
-    controls.steer = state.rig.steer_for_speed(world, controls.steer);
+    // The keyboard read the way NFSU2 reads it: steering scaled to the speed, Down brakes before it
+    // reverses, Space is the handbrake — `CarRig::for_human`.
+    controls = state.rig.for_human(world, controls);
     if state.autodrive {
         controls.throttle = 1.0;
         // Steer toward the next checkpoint so it actually laps the track.
@@ -306,7 +307,7 @@ fn update(world: &mut World, state: &mut RaceState, dt: f32, input: &Input) {
     }
 
     let rig = &state.rig;
-    state.driver.step_physics_with(world, dt, |w| rig.apply_downforce(w, FIXED_DT));
+    state.driver.step_physics_with(world, dt, |w| rig.between_step(w, FIXED_DT));
 
     let Some(pose) = state.rig.pose(world) else { return };
 

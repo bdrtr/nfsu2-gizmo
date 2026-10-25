@@ -7774,3 +7774,34 @@ yeniden bakılmaları gerekebilir. Sürüş hissinin hükmünü süpürme değil
 olarak başlatıyor (`ptrace_scope=1`). `log` örnek alıyor, `loads` yukarıdaki toplam yük
 tablosunu üretiyor. Kurulum yolları ortam değişkenlerinden okunuyor (`NFSU2_PREFIX`,
 `PROTONPATH`, `UMU_RUN`).
+
+### Sürülerek ayarlandı: tutuş 0,7, downforce 0,3, direksiyon kendi sınırına, el freni (2026-10-26)
+
+`nfs_drive`'da oyuncunun hükmü, sırayla:
+
+1. NFSU2'nin kendisi (tutuş × 1,0, downforce × 1,0): **"daha iyi tutuyor ama çok yapışık"**.
+   Tezgâhta 100 km/h'de 2,1–2,3 g; bir yol arabası ≈ 0,9 g tutar.
+2. Ara değerler süpürüldü, hepsi kararlı. Tutuş × 0,7, downforce × 0,3 seçildi: 70 / 100 /
+   130 km/h'de 1,13 / 1,25 / 1,36 g. Hüküm: **"daha iyi ama dönüşler NFS gibi hissettirmiyor"**.
+   Hangi açıdan olduğu sorulunca: kaymıyor ve drift yok, burun içeri girmiyor, direksiyon
+   tepkisi farklı.
+3. İki sebep bulundu:
+   - **Direksiyon yardımı** (`steer_for_speed`) tam tuşta sabit 8 m/s² hedefliyordu. Bu
+     motorun 1,0'lık lastiğinin değeriydi; araba artık 11–13 m/s² tutarken tuş 9,2 istiyordu.
+     Hedef artık arabanın kendi sınırı (`CarRig::lateral_limit` = 0,85 · ön tutuş · (g +
+     downforce/kütle)). Tam tuşta direksiyon açısı 40 km/h'de 16,7° → 20,7°, 70'te 9,5° → 11,0°.
+   - **El freni yoktu.** Space bir ayak freniydi, S hızdayken geri vitese takıyordu. Artık insan
+     oyuncu için NFSU2 düzeni (`CarRig::for_human`): S/↓ hızdayken fren, dururken geri; Space el
+     freni, arka tekerlekleri kilitliyor (`CarRig::between_step`). Oyunun kendi el freni torku
+     (`şerit × 10 kN·m`) bir tekerleğin taşıyabileceğinin birkaç katı, yani orada da çekilen kol
+     kilitli tekerlek. Pilot bundan etkilenmiyor.
+
+   Hüküm: **"iyi"**. 0,7 / 0,3 varsayılan oldu (`FEEL_GRIP`, `FEEL_DOWNFORCE`). `NFS_GRIP` ve
+   `NFS_DOWNFORCE` deneme için üzerine yazıyor.
+
+**Süpürme (pilot, `sweep-table.py`), tam tutuşlu `0cf9252`'ye karşı:** 1 684 → **1 536**,
+hüküm **sağlam** — tam tutuş 8 rotanın 6'sında önde, düşen 0. Beklenen yön: pilotun arabası
+≈ 2 g'den ≈ 1,2 g'ye indi. 1 536, downforce'tan önceki ölçümle (1 520) neredeyse aynı; yani
+pilot için bugünkü işlerin net etkisi sıfır civarında. Oyundaki rakipler raylarda gidiyor,
+oyuncunun sürüşünü bu süpürme ölçmüyor. Pilotun sabitleri 2 g'lik arabaya göre değil, 0,9 g'lik
+arabaya göre ayarlıydı ve öyle kaldı.
