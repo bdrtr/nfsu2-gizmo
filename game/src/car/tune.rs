@@ -6,11 +6,17 @@
 //! [`VehicleTuning`].
 //!
 //! **What the file supplies and what it does not** is the whole of the design here, and it was
-//! measured rather than assumed (see `gizmo_nfs::globalb`). Braking, aerodynamics and anti-roll are
-//! *not in this game's data*: the one brake-shaped triple is exactly zero for all 15 traffic
-//! vehicles, and the only steering angles are a global ±43 identical in all 46 records — a field fed
-//! from either would give a bus and a Skyline the same number. Those stay at the engine's defaults
-//! and are marked here as invented, so nobody later reads them as NFSU2's.
+//! measured rather than assumed (see `gizmo_nfs::globalb`). Springs, bump damping, sway bars, brake
+//! torque and peak tyre grip **are** in the record — `SPEED2.EXE`'s own physics reads them, which is
+//! how they were named (`gizmo_nfs::Chassis`, and ROADMAP "Oyunun kendi süspansiyonu ve lastiği") —
+//! and [`AxleTune`] carries them to the wheels — all but the grip, which waits on a question about
+//! roll (see `rig::tyre_lateral`). Units are the record's tonnes-and-kilonewtons, so
+//! each is multiplied by a thousand on the way in. The steering lock is still not in the data, and
+//! aerodynamics stays at the engine's default: the record's downforce lanes have no unit yet.
+//!
+//! Where the engine cannot say what the game says, the record's number goes in the nearest slot
+//! and the difference is written down in `MOTOR-NOTLARI.md`: one sway-bar rate for both axles,
+//! rebound fixed at 2.5× bump, a fixed 60/40 brake split, and no separate sliding grip.
 //!
 //! One field lines up so exactly it is worth writing down: `VehicleTuning::gear_ratios` wants
 //! `[reverse, neutral, forward…]`, and that **is** the file's own eight-slot layout — reverse always
@@ -186,6 +192,22 @@ impl Drivetrain {
     }
 }
 
+/// One axle's suspension and tyre, in the engine's units, from the record's
+/// [`gizmo_nfs::Chassis`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct AxleTune {
+    /// Spring rate, N/m. The record's kN/m: a 240SX's front is 37,000.
+    pub spring_n_per_m: f32,
+    /// Bump damping, N·s/m — the lane the game uses while the wheel compresses. The engine derives
+    /// rebound from it, so the record's rebound lane has nowhere to go.
+    pub bump_ns_per_m: f32,
+    /// Peak tyre grip, as a friction coefficient: the lane that bounds the game's friction circle.
+    /// A 240SX's front is 1.70; the engine's own tyre default is 1.0. **Carried, not yet applied** —
+    /// at this grip the engine's car lifts its inside wheels, and why NFSU2's does not is unread.
+    /// See `rig::tyre_lateral`.
+    pub grip_peak: f32,
+}
+
 /// What a car's own record says about how it should drive.
 #[derive(Clone, Debug)]
 pub struct CarTune {
@@ -199,6 +221,8 @@ pub struct CarTune {
     pub body_m: [f32; 3],
     /// How many forward gears the selected gearbox has, for a HUD that wants to say so.
     pub gears: usize,
+    /// Front, then rear.
+    pub axles: [AxleTune; 2],
 }
 
 /// The steering lock, in radians.
@@ -270,14 +294,40 @@ pub fn tune_from_record(
     // upshift point for every car measured, which is a rule about this field and not about NFSU2.
     tuning.downshift_rpm = handling.engine.red_line_rpm * 0.5;
 
+    let chassis = &handling.chassis;
+    // The game's bar is `rate · (x − x of the other wheel)` per axle, which is the engine's formula;
+    // the engine has one rate for both axles, so it gets their mean. Traffic vehicles read 0 and
+    // get none, which is what their record says.
+    tuning.anti_roll_stiffness = (chassis.sway_bar[0] + chassis.sway_bar[1]) * 0.5 * KILO;
+    // The game's per-wheel brake torque at full pedal is the lane × 4 kN·m. The engine's
+    // `max_brake_torque` is split 0.6 / 0.6 / 0.4 / 0.4 over the four wheels — twice itself in
+    // total — so half the game's four-wheel total keeps the car's stopping torque the same. Traffic
+    // vehicles read 0, and a car with no brakes is not what that means; they keep the default.
+    if chassis.brake > 0.0 {
+        tuning.max_brake_torque = chassis.brake * BRAKE_KNM_PER_LANE * KILO * 4.0 * 0.5;
+    }
+    let axles = [0, 1].map(|a| AxleTune {
+        spring_n_per_m: chassis.spring[a] * KILO,
+        bump_ns_per_m: chassis.shock[a][0] * KILO,
+        grip_peak: chassis.tyre_grip[a][0],
+    });
+
     CarTune {
         tuning,
         mass_kg: info.mass_kg,
         drivetrain: Drivetrain::of(handling.rear_drive),
         body_m: handling.body_m,
         gears: gears.len(),
+        axles,
     }
 }
+
+/// The record's "kilo" convention: kilonewtons and tonnes to newtons and kilograms.
+const KILO: f32 = 1000.0;
+
+/// What `SPEED2.EXE` multiplies the brake lane by to get a wheel's torque at full pedal, in kN·m
+/// (`0x5A8280`). A constant of the game, not of the car.
+const BRAKE_KNM_PER_LANE: f32 = 4.0;
 
 /// The steering lock to give the controller. Its own function so the one invented number in this
 /// module has a name and a place to be argued with.
@@ -386,6 +436,16 @@ mod tests {
         }
         // …and the gearbox moved with it, which is the other half of what an upgrade buys.
         assert!(built.gears >= stock.gears);
+
+        // The chassis arrives in newtons: the 240SX's own spring, bump, bar, brake and grip.
+        let [front, rear] = stock.axles;
+        assert_eq!(front.spring_n_per_m, 37_000.0);
+        assert_eq!(rear.spring_n_per_m, 30_000.0);
+        assert!((front.bump_ns_per_m - 5_400.0).abs() < 0.5);
+        assert!((front.grip_peak - 1.70).abs() < 1e-4);
+        assert!((stock.tuning.anti_roll_stiffness - 35_500.0).abs() < 0.5);
+        // 0.485 × 4 kN·m a wheel, four wheels, over the engine's 2 × max split.
+        assert!((stock.tuning.max_brake_torque - 3_880.0).abs() < 0.5);
     }
 
     #[test]

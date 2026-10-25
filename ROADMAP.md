@@ -7647,3 +7647,60 @@ referans artık bu sayılar.
 PryHUB `Chassis`); μ_s/μ_k ayrımı ve çember; boyuna kuvvetin `tork/r` olması (yol arabası hissinin
 "kaymadan çeken" kısmı); yanal tablo (motorun Pacejka'sının yerine ya da ona uydurulan hedef eğri
 olarak). Motor pinli: lastik modelini değiştirmek motorun işi, açığı `MOTOR-NOTLARI.md`'ye.
+
+### Kayıttan motora: süspansiyon ve fren taşındı, tutuş bekliyor (2026-10-25)
+
+`car::tune::AxleTune` kaydın aks başına yayını ve bump sönümünü tekerleklere veriyor. Viraj
+demiri (iki aksın ortalaması) ve fren torku da `VehicleTuning`'e gidiyor. Fren torkunda toplam
+korunuyor: tekerlek başına `şerit × 4 kN·m`, motorun `2 × max` dağılımına bölünüyor; 240SX'te
+3 880 N·m, eskiden motor varsayılanı 1 500'dü. Trafik araçlarının fren şeridi 0, onlar motor
+varsayılanında kalıyor. Motorun karşılayamadıkları `MOTOR-NOTLARI.md` #16'da.
+
+`nfs_bench`, 240SX: sabit dairelerde yanal tutuş 0,87 → 0,90 g. Ayna ve dokunuş testleri temiz,
+sonuçlar eskisine çok yakın. Yay ve viraj demiri sonucu ancak bu kadar değiştiriyor, çünkü motorun
+lastiği yükle **doğrusal**: yük aktarımı aksın toplam tutuşunu değiştirmiyor.
+
+Sekiz-rota süpürmesi (240SX, rota başına 8 araba, 90 s), aynı oturumda önce ve sonra:
+waypoint toplamı 360 → 358, en uzak toplamı 5 926 → 5 965 m, düşen 0 → 0. Gürültü tabanı ±37
+waypoint, yani değişiklik süpürmeyi kıpırdatmıyor. Rota rota karışık: 4002 231 → 498 m, 4121
+31 → 25 waypoint.
+
+**Tutuş taşınmadı, ve sebebi ölçüldü.** Kaydın tepe tutuşu (`μ_s` 1,70 / 1,67) Pacejka `D` olarak
+verilince araba 1,3 g tuttu. Ama 70 km/h'den itibaren yarım direksiyonda sabit dairede **döndü**.
+70 km/h dairede tekerlek yükleri `[0, 5205, 5551, 339]` N çıktı, yani iki iç tekerlek havada. Tek
+tek geri alarak ayrıldı:
+
+| deneme | sonuç |
+|---|---|
+| hepsi kayıttan | 70 ve 100 km/h'de döndü |
+| tutuş 1,0 (gerisi kayıttan) | kararlı, 0,90 g |
+| viraj demiri 3 000 (tutuş kayıttan) | dönmedi ama dağınık; 100 km/h'de 3,9° kayma |
+| viraj demiri 12 000 | dönmedi, aynada %50 yük farkı |
+| yaylar eski (45 000 / 3 500) | yine döndü: yaylar suçsuz |
+| iki aksa eşit 1,7 | yine döndü: ön/arka oranı suçsuz |
+| boyuna `D` 1,0 | yine döndü: çekiş suçsuz |
+
+Motor doğru hesaplıyor. 0,52 m ağırlık merkezi ve 1,46 m iz genişliğiyle 1,27 g'de `m·a·h/t` ≈
+5,4 kN aktarılıyor, bu da bir tarafın yükünün tamamı. NFSU2'nin arabası aynı tutuşta yatmıyor:
+oyun devrilmeye izin vermiyor.
+
+**Nasıl yaptığı okundu ve "gövdede bir hile" değil.** Elenenler:
+
+- **Kuvvet uygulama noktası:** oyuncu arabası (`0x5B05AA`) her tekerleğin kuvvetini (lastik +
+  normal yük, `wheel+0x130`) temas noktasından eksi ağırlık merkezi kolu ile uyguluyor. Temas
+  yüksekliği `zemin + wheel+0x18C`, ve `+0x18C` kurucuda ve sıfırlamada 0. Motorla aynı.
+- **Tork ve atalet:** `AddForceAtPoint` (`0x59BB00`) torku düz `r × F` olarak ekliyor. Kuvvet
+  1 200 kN'da, tork 100 kN·m'de, açısal hız 250 rad/s'de kesiliyor; hiçbiri devreye girmez.
+  Atalet kutu formülünden. İkinci bir ters atalet tensörü var (`+0x1B0`, bayrakla), ama yalnız
+  dikey eksen (yaw) ataletini kaydın `+0x270`'iyle ölçekliyor; yalpaya dokunmuyor.
+- **Zemin ve genel ölçek:** zemin tablosu (`0x800EE0`, 29 × 0x98) statik ve asfalt (`SKID_ROAD`)
+  1,0. Toprak 0,97, çim 0,96. Genel ölçek `0x7FC718` 1,0 ve kodda hiç yazılmıyor. Yani yoldaki
+  etkin tepe tutuş gerçekten ≈ 1,7.
+
+Geriye kalan iki aday var. Birincisi geometri: NFSU2'de ağırlık merkezi tekerlek merkezinin
+0,16 m üstünde, zeminden ≈ 0,47 m, bizim gövdede 0,52 m. Bu devrilme eşiğini 1,40 g'den 1,55
+g'ye taşır, ama 1,7'ye yetmez. İkincisi süspansiyonun statik yükü sabit olarak eklemesi
+(`0x5AB990`): iç tekerlek yay terimi statik yükü yiyene kadar yerde kalıyor; motor bunu yayın
+kendisiyle yapıyor. İkisi de tek başına açıklamıyor. Sıradaki adım ölçmek: oyunu çalıştırıp
+gerçek bir 240SX'in sabit dairedeki yanal ivmesini ve iç tekerlek yükünü okumak. Bu bir bellek
+okuması, ve kodun cevap veremediği yerde tek yol o. `AxleTune::grip_peak` hazır duruyor.

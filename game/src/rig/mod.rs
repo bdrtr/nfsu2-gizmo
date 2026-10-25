@@ -418,6 +418,9 @@ fn build_car(
     let rest = (radius * 0.25).max(0.05);
     for (i, &mount) in mounts.iter().enumerate() {
         let (front, left) = (i < 2, mount.x < 0.0);
+        // The car's own spring and bump when its record is reachable, the engine's feel when it is
+        // not. See `AxleTune` for what each number is in the game.
+        let axle = tune.as_ref().map(|t| t.axles[usize::from(!front)]);
         vehicle.add_wheel(Wheel {
             attachment_local_pos: mount + Vec3::new(0.0, rest, 0.0),
             radius,
@@ -425,8 +428,8 @@ fn build_car(
             is_left: left,
             suspension_rest_length: rest,
             suspension_max_travel: (radius * 0.45).max(0.12),
-            suspension_stiffness: 45000.0,
-            suspension_damping: 3500.0,
+            suspension_stiffness: axle.map_or(FALLBACK_SPRING_N_PER_M, |a| a.spring_n_per_m),
+            suspension_damping: axle.map_or(FALLBACK_BUMP_NS_PER_M, |a| a.bump_ns_per_m),
             wheel_mass: 25.0,
             pacejka_lat: tyre_lateral(),
             ..Default::default()
@@ -479,14 +482,26 @@ fn build_car(
     }
 }
 
+/// The spring rate a car gets when its record cannot be read, N/m.
+const FALLBACK_SPRING_N_PER_M: f32 = 45_000.0;
+/// …and its bump damping, N·s/m.
+const FALLBACK_BUMP_NS_PER_M: f32 = 3_500.0;
+
 /// The tyre's lateral curve, as Pacejka `B, C, D, E`. `NFS_TYRE="b,c,d,e"` overrides it.
 ///
-/// The record carries no tyre grip (`gizmo_nfs::globalb`: "aero, brakes and tyre grip are not in
-/// this file"), so this is the game's own choice, not a reading. It is the engine's default — the
-/// *longitudinal* shape, `C = 1.9`, used for both axes — and that is a measured choice rather than
-/// an unmade one: on `nfs_bench`'s steady circles a real lateral shape (`C = 1.4`) and an earlier
-/// peak (`B = 12, E = 0.5`) hold the same grip within 0.05 g. When the car felt it had none, the
-/// cause was the road's friction (`scene::road`), not this curve.
+/// This is the engine's default — the *longitudinal* shape, `C = 1.9`, used for both axes — and
+/// that is a measured choice rather than an unmade one: on `nfs_bench`'s steady circles a real
+/// lateral shape (`C = 1.4`) and an earlier peak (`B = 12, E = 0.5`) hold the same grip within
+/// 0.05 g. When the car felt it had none, the cause was the road's friction (`scene::road`), not
+/// this curve.
+///
+/// **The record's grip is known and deliberately not used.** `D` is the peak friction coefficient,
+/// and the game's is `AxleTune::grip_peak` — 1.70 on a 240SX's front, against the engine's 1.0.
+/// Given it, the 240SX held 1.3 g and then spun in steady circles from 70 km/h at half lock, and the
+/// 70 km/h circle read wheel loads of `[0, 5205, 5551, 339]` N: both inside wheels off the ground.
+/// That is the engine being right — a 0.52 m centre of gravity over a 1.46 m track transfers
+/// `m·a·h/t` ≈ 5.4 kN at 1.27 g, all of one side's load — and NFSU2 not letting a car roll, by a
+/// means not yet read. Until that means is known the grip waits; see ROADMAP.
 fn tyre_lateral() -> gizmo::physics::vehicle::PacejkaParams {
     let mut p = gizmo::physics::vehicle::PacejkaParams::default();
     if let Ok(v) = std::env::var("NFS_TYRE") {
