@@ -7577,3 +7577,73 @@ Okunan ve plan olarak kalan, etkisi yüksekten düşüğe:
 4. **Rakipler.** Raylar kinematik: gövdeleri ne yatıyor ne eğiliyor (v²κ'dan yapay yalpa
    verilebilir); sürüşleri kusursuz (tur içi hız ve çizgi değişkenliği, ara sıra geniş açılma);
    çekişmeyi tutacak bir lastik bant yok; oyuncu çarptığında sonsuz kütleli bir duvar gibiler.
+
+## Oyunun kendi süspansiyonu ve lastiği: `SPEED2.EXE`'den okundu (2026-10-25)
+
+"Sürüş hissi"nin hedefi artık tahmin değil: NFSU2 v1.2'nin fizik kodu decompile edildi ve
+`CarTypeInfo` şeritlerinin **fizikte nasıl kullanıldığı** okundu. Gerçek kurulumdaki değerlerle
+(240SX, HUMMER, PEUGOT, MUSTANGGT, SKYLINE) sınandı. Adresler v1.2 içindir.
+
+**Birim sistemi: ton · metre · saniye · kN.** Kütle ton (`+0x220`), yerçekimi sabiti 9,8, kuvvetler
+kN, tork kN·m. Yay `37` = 37 kN/m. Gövde ataleti `m·(b²+c²)/12` kutu formülüyle `+0x224..+0x22c`
+boyutlarından (`0x5ac4f0`).
+
+**Fizik, kaydın kendisini değil kopyasını okur.** `0x5b4dc0` kaydın `+0x110..+0x3c0` aralığını
+(0x2b0 bayt) kopyalar, sonra takılı performans parçalarını lerp'le uygular (`0x5a6b50..0x5a74a0`).
+Hedef değerler `+0x650..+0x718` bloğunda: Dyno kaydırıcılarının üst uçlarının durduğu blok. Lastik
+`+0x650/+0x670`, fren `+0x6c0..+0x6c8`, direksiyon `+0x6cc`, süspansiyon `+0x6d0/+0x6f0`,
+ağırlık merkezi alçaltma `+0x710`, tekerlek alçaltma `+0x714/+0x718`.
+
+### Süspansiyon (`0x5a8790`, tekerlek başına bir nesne, kare başı)
+
+Aks başına 8 değer, ön `+0x280`, arka `+0x2a0`: `[p0 ilerleme, p1 yay, p2 bump, p3 rebound,
+p4 viraj demiri, p5 maks. sıkışma, p6 maks. uzama, p7 ?]`. 240SX ön: `[5.3, 37, 5.4, 5.6, 36,
+0.16, −0.16, 0.15]`.
+
+```
+x  = sıkışma (m), [p6, p5]'e kırpılır; x < p6 → tekerlek havada, kuvvet 0
+v  = (x − x_önceki) / dt
+F  = (max(x,0)·p0 + 1)·p1·x            ← ilerlemeli yay: sıkıştıkça sertleşir
+   + (v > 0 ? p2 : p3)·v               ← bump / rebound ayrı
+   + statik_yük                        ← aksın ağırlık payı (+ aero), 0x5ab990
+   + p4·(x − x_karşı_tekerlek)         ← viraj demiri: aynı akstaki eşle fark
+F  = max(F, 0)
+```
+
+Statik yük ayrı eklendiği için `x` statik konumdan ölçülür: yay arabayı taşımaz, yalnız sapmaya
+direnir. Sönüm oranı makul: 240SX çeyreği ≈ 0,3 t, `2√(k·m)` ≈ 6,7 kN·s/m, `p2 = 5,4` → ζ ≈ 0,8.
+`p7`'yi kuvvet kodu okumuyor; anlamı açık.
+
+### Lastik (`0x5a8280` kuvvet, `0x59d600` sürtünme çemberi, `0x59d510` yanal eğri)
+
+Aks başına 5 değer, ön `+0x1e0`, arka `+0x200`: `[α_tepe = 12 (derece), yük_norm = 1.0,
+yanal_ölçek = 1.0, μ_statik, μ_kayma]`. 240SX ön: `μ_s = 1.70`, `μ_k = 1.40`. PryHUB'ın
+`tyre_grip[a][0]/[1]`'i budur.
+
+- **Tutunma modu** (varsayılan): boyuna kuvvet **kayma eğrisi değil**, doğrudan `tork / r`. Yanal
+  kuvvet iki boyutlu bir tablodan gelir: `s = 6·α°/α_tepe` (0..6 kademe) ve `L = 0,8·Fz/yük_norm`
+  (0..10, adım 2). Tablolar `.data`'da sabit (`0x7fc744..0x7fc7bc`). Doygun kademe: `L = 2,4,6,8,10`
+  → `1,9  3,8  5,2  6,3  7,1`. Sonuç `× yanal_ölçek × 2,5` (kN). α ≥ α_tepe'de doyar, düşmez. Yük
+  duyarlılığı tablonun içinde: yük iki katına çıkınca kuvvet iki kat artmaz.
+- **Kayma modu:** `|r·ω − v| > 0,5 m/s` ya da kilitli tekerlek. Kuvvet kayma hızı vektörü
+  boyunca `μ_k·Fz`. (Kayma açısı eşiği de var ama radyanı 12'yle kıyaslıyor; pratikte hiç
+  tetiklenmez.)
+- **Sürtünme çemberi:** `|(Fx, Fy)| ≤ μ_s·Fz·zemin`. Gaz verirken `Fx` çembere girmeden ×1,5
+  sayılır. Çember kesmezse bu çarpan geri alınır, keserse alınmaz. Böylece sınırdayken gaz,
+  bileşke kuvveti boyuna yöne çeker ve yanal kuvvet daha çok kesilir: gazla arka kaydırmanın
+  (power oversteer) kaynağı bu.
+- **Fren:** tekerlek torku `+0x384 × pedal × 4` (kN·m), el freni `+0x388 × girdi × 10`
+  (`0x5a8280`, `0x59d400`). Fren torku `r·F + 0,1·|ω|`'yı aşarsa tekerlek kilitlenir (`ω = 0`).
+  **PryHUB'ın `Unproven::cg_height` dediği `+0x388` el freni torkudur.** `+0x38c` fren
+  yükseltmesiyle değişiyor (0,535 → 0,49); fren dengesi olması muhtemel, kanıtlanmadı.
+
+**Sağlama:** 240SX'te tekerlek başına yük ≈ 3 kN, `L ≈ 2,4`. Tablodan ≈ 2,2 × 2,5 ≈ 5,4 kN yanal,
+yani ≈ 1,8·Fz. Çember bunu `μ_s = 1,7`'de kesiyor: zemin çarpanı 1 iken tepe yanal ivme
+≈ 1,7 g. Zemin tablosu (`0x800f04`, kayıt 0x98) dosyada 1'lerle dolu; asıl değerler çalışma
+anında yükleniyor, okunmadı. Gizmo'daki sürekli kayma ve geç toparlanma hissinin karşılaştırılacağı
+referans artık bu sayılar.
+
+**Gizmo'ya taşınabilecekler, ucuzdan pahalıya:** ilerlemeli yay ve ayrı bump/rebound (veri hazır,
+PryHUB `Chassis`); μ_s/μ_k ayrımı ve çember; boyuna kuvvetin `tork/r` olması (yol arabası hissinin
+"kaymadan çeken" kısmı); yanal tablo (motorun Pacejka'sının yerine ya da ona uydurulan hedef eğri
+olarak). Motor pinli: lastik modelini değiştirmek motorun işi, açığı `MOTOR-NOTLARI.md`'ye.

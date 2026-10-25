@@ -210,8 +210,8 @@ pub struct CarTune {
 /// car steered exactly as before. It also reads 100 on every traffic vehicle against a bus's 75,
 /// and 60 on a HUMMER against 27 on a 106, which is the wrong way round for a lock.
 ///
-/// So this stays the engine's own feel, and `gizmo_nfs::Unproven::angle_284_deg` keeps the lane and
-/// the refutation. Tested, not unexamined.
+/// So this stays the engine's own feel. `SPEED2.EXE`'s tuning-slider code later named that lane:
+/// it is the front spring, `gizmo_nfs::Chassis::spring`. Tested, not unexamined.
 const STEERING_LOCK_RAD: f32 = 0.44;
 
 /// Build engine tuning from a car's own record.
