@@ -373,7 +373,7 @@ fn build_car(
             tune_from_record(info, h, Upgrades::from_env(), half_wheelbase * 2.0, half_track * 2.0);
         t.downforce_n_per_mps *= feel_scale("NFS_DOWNFORCE", FEEL_DOWNFORCE);
         for a in &mut t.axles {
-            a.grip_peak *= feel_scale("NFS_GRIP", FEEL_GRIP);
+            a.grip_peak *= feel_scale("NFS_TYRE_GRIP", FEEL_GRIP);
         }
         t
     });
@@ -494,7 +494,8 @@ fn build_car(
     }
 }
 
-/// How much of the record's peak grip the tyres get. `NFS_GRIP` overrides it; 1.0 is the game's own.
+/// How much of the record's peak grip the tyres get; 1.0 is the game's own. `NFS_TYRE_GRIP`
+/// overrides it — not `NFS_GRIP`, which is the pilot's corner budget and has a sweep history.
 ///
 /// **The game's numbers are the reference, not the target.** NFSU2 holds over 2 g at 100 km/h, a
 /// road car about 0.9, and the goal is a realistic base with NFSU2's flow. Driven 2026-10-26 on

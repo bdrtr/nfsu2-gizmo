@@ -7796,8 +7796,9 @@ tablosunu üretiyor. Kurulum yolları ortam değişkenlerinden okunuyor (`NFSU2_
      (`şerit × 10 kN·m`) bir tekerleğin taşıyabileceğinin birkaç katı, yani orada da çekilen kol
      kilitli tekerlek. Pilot bundan etkilenmiyor.
 
-   Hüküm: **"iyi"**. 0,7 / 0,3 varsayılan oldu (`FEEL_GRIP`, `FEEL_DOWNFORCE`). `NFS_GRIP` ve
-   `NFS_DOWNFORCE` deneme için üzerine yazıyor.
+   Hüküm: **"iyi"**. 0,7 / 0,3 varsayılan oldu (`FEEL_GRIP`, `FEEL_DOWNFORCE`). `NFS_TYRE_GRIP` ve
+   `NFS_DOWNFORCE` deneme için üzerine yazıyor. (İlk commit'te adı `NFS_GRIP`'ti; o ad pilotun viraj
+   bütçesinin, `pilot::GRIP`, ve süpürme geçmişi var — çakıştığı için değiştirildi.)
 
 **Süpürme (pilot, `sweep-table.py`), tam tutuşlu `0cf9252`'ye karşı:** 1 684 → **1 536**,
 hüküm **sağlam** — tam tutuş 8 rotanın 6'sında önde, düşen 0. Beklenen yön: pilotun arabası
