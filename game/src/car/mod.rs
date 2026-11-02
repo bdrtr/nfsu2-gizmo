@@ -19,7 +19,7 @@ pub use look::{body_palette, wheel_look, PbrLook};
 pub use skin::composite_over_paint;
 pub use wheel::{fit_wheel, wheel_mount, WheelFit, WheelSurface};
 
-use crate::geom::{bbox, build_mesh, build_mesh_items};
+use crate::geom::{bbox, build_mesh_items};
 use crate::parts::{group_of, select_car, CarConfig, Grp};
 use gizmo::prelude::*;
 use gizmo_nfs::{AssetHash, NfsMeshPart, NfsTexture, Tpk};
@@ -84,6 +84,32 @@ pub struct TexturedPart {
     pub composite_over: Option<[f32; 3]>,
 }
 
+/// Whether `p` is a detail the game positions at run time and the file leaves at the origin: the
+/// brake discs (one mesh per axle, to be hung inside each wheel) and the exhaust tip.
+///
+/// Every playable car in an install ships `EXHAUST_A`, `FRONT_BRAKE_A` and `REAR_BRAKE_A` modelled
+/// about the origin with an identity or rotation-only matrix — nothing in `GEOMETRY.BIN` says where
+/// they go. Drawn as body parts they all landed at the car's origin, which is the middle of its
+/// floor: half a metre of exhaust and two brake discs hanging under the car like a tow bar. Only
+/// an *unplaced* one is dropped (its placed centroid within 0.35 m of the origin), so a car whose
+/// file does place them keeps them. Names are matched on stems because they arrive truncated
+/// (`_FRONT_BRAK`).
+fn is_unplaced_runtime_detail(p: &NfsMeshPart) -> bool {
+    use gizmo_nfs::placement::{part_centroid, place_point, should_place};
+    let runtime = group_of(&p.name) == Grp::Exhaust
+        || p.name.contains("_FRONT_BRAK")
+        || p.name.contains("_REAR_BRAK");
+    if !runtime || p.positions.is_empty() {
+        return false;
+    }
+    let apply = should_place(&p.transform, &part_centroid(p));
+    let n = p.positions.len() as f32;
+    let c = p.positions.iter().fold(Vec3::ZERO, |acc, v| {
+        acc + Vec3::from(place_point(&p.transform, *v, apply)) / n
+    });
+    c.length() < 0.35
+}
+
 /// Assemble the default car's renderable visuals from parsed parts.
 ///
 /// Selects the showroom configuration ([`select_stock_car`]), merges each material group
@@ -107,8 +133,11 @@ where
     // structure (firewall, inner fenders) or a redundant shell that only pokes out through the
     // skin. Keyed off the *selected* body (KIT00 or a KITW## widebody), not a literal KIT00.
     let has_kit_body = stock.iter().any(|p| p.name.contains("_BODY") && !p.name.contains("_BASE"));
-    let body_like: Vec<&NfsMeshPart> =
-        stock.iter().copied().filter(|p| group_of(&p.name) != Grp::Wheel).collect();
+    let body_like: Vec<&NfsMeshPart> = stock
+        .iter()
+        .copied()
+        .filter(|p| group_of(&p.name) != Grp::Wheel && !is_unplaced_runtime_detail(p))
+        .collect();
     let paint_parts: Vec<&NfsMeshPart> =
         body_like.iter().copied().filter(|p| group_of(&p.name) == Grp::Paint).collect();
 
@@ -243,9 +272,23 @@ where
         // + rim atlas, whose UVs cover both. The whole wheel is one mesh; a small untextured hub
         // run just samples the same atlas, which reads fine.
         let wheel_tex = wp.materials.iter().find_map(|m| tpk.and_then(|t| t.texture(m.hash)).cloned());
-        // The parser already normalised the wheel's triangle strips to a clean list, so the whole
-        // wheel builds as one mesh (its runs all share the one tire/rim atlas).
-        if let Some(mesh) = build_mesh(device, &[wp], (wl + wh) * 0.5, "nfs_wheel") {
+        // The parser already normalised the wheel's triangle strips to a clean list, so the wheel
+        // builds as one mesh (its runs all share the one tire/rim atlas) — less its PLAINNOTHING
+        // filler. That run is a flat square the size of the tyre's bounding box, its corners
+        // 0.49 m out on a 0.34 m SKYLINE tyre; the game hides it, drawn opaque it is a black
+        // panel standing out past every tyre. The same filler the kit bodies already drop
+        // (`is_dropped_filler`), on the one part that never went through that filter.
+        let runs: Vec<(&NfsMeshPart, &[u32])> = if wp.materials.is_empty() {
+            vec![(wp, wp.indices.as_slice())]
+        } else {
+            wp.materials
+                .iter()
+                .filter(|m| !is_dropped_filler(m.shader.0, false))
+                .filter_map(|m| wp.indices.get(m.index_offset..m.index_offset + m.index_count))
+                .map(|slice| (wp, slice))
+                .collect()
+        };
+        if let Some(mesh) = build_mesh_items(device, &runs, (wl + wh) * 0.5, |_| 0.0, "nfs_wheel") {
             let surface = match wheel_tex {
                 Some(tex) => WheelSurface::Textured(tex),
                 None => WheelSurface::Flat(make_material(wheel_look())),

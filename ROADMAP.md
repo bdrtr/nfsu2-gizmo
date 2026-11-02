@@ -7927,3 +7927,24 @@ Tezgâh, 15 s tam gaz ve dönme:
 Ayna testindeki "AYNA DEĞİL" satırları PEUGOT ve SKYLINE'da değişiklikten önce de vardı (eski
 kodla koşuldu: PEUGOT 6/6, SKYLINE 5/6); bu işin sonucu değil, açık. PEUGOT'un sağ/sol kayma farkı
 önden çekişle azaldı (100 km/h yarım direksiyon 2,88° / 3,82° → 1,78° / 1,51°).
+
+### Tekerleğin yanındaki siyah kare ve altta "çeki demiri": iki çizim kusuru, ikisi de bu depoda (2026-11-03)
+
+SKYLINE sürülünce: "tekerler biraz garip, altında çeki demiri gibi bir şey var". İkisi de PryHUB
+değil, bu depo. Dosya doğru okunuyor, yanlış olan onu nasıl çizdiğimiz.
+
+**Tekerlek:** tekerlek tek mesh olarak kuruluyordu, üç malzeme koşusunun üçü de. Biri
+`PLAINNOTHING` dolgusu (SKYLINE'da 34 üçgen): lastiğin sınır kutusu boyunda düz bir kare, köşeleri
+eksenden 0,49 m'de, lastik 0,34 m. Oyun onu gizliyor; opak çizilince her tekerleğin altından
+taşan siyah bir levha. Gövdede aynı dolgu kit gövdelerinde zaten atılıyordu (`is_dropped_filler`);
+tekerlek o filtreden hiç geçmiyordu. Artık geçiyor.
+
+**Alttaki parça:** kurulumdaki her oynanabilir araba `EXHAUST_A`, `FRONT_BRAKE_A` ve `REAR_BRAKE_A`'yı
+orijin etrafında, birim ya da yalnız dönme matrisiyle taşıyor. Dosya nereye gittiklerini
+söylemiyor, oyun çalışırken koyuyor. Gövde parçası olarak çizilince orijine, yani zeminin ortasına
+düşüyorlardı. Artık yerleştirildikten sonra da orijinde (≤ 0,35 m) kalan egzoz ve fren
+parçaları gövdeden çıkarılıyor (`car::is_unplaced_runtime_detail`).
+
+Açık kalanlar: fren diskleri tekerleklerin içine asılmadı (tekerleğin içi boş görünür); egzozun
+yeri kayıtta çözülmedi, o PryHUB'ın işi. MUSTANGGT'nin `SPOILER_A`'sı da orijinde (0,07 m), ayrıca
+bakılmalı.
