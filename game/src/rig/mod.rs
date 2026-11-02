@@ -109,6 +109,47 @@ pub struct RigWheel {
     pub local: Vec3,
     /// Front axle, so it turns with the steering.
     pub front: bool,
+    /// How far the car's own weight compresses this wheel's spring at rest, metres
+    /// ([`static_settle`]). Where the wheel sits when nothing reports its strut: a car on rails has
+    /// no controller, and without this it would stand on fully extended springs, a hand higher than
+    /// the same car driven.
+    pub settle: f32,
+}
+
+/// Where the controller has this wheel's centre, in chassis space: the end of its strut.
+///
+/// The engine's own definition — the strut starts at `attachment_local_pos` and runs
+/// `suspension_length` along `direction_local` — rather than "the mount, lifted by the
+/// compression", which is the same point only while the strut points straight down and the
+/// attachment sits exactly one rest length over the mount, two things [`spawn_car`] happens to
+/// do today and nothing here should have to remember.
+#[must_use]
+pub fn strut_centre(w: &Wheel) -> Vec3 {
+    w.attachment_local_pos + w.direction_local.normalize_or_zero() * w.suspension_length
+}
+
+/// Each wheel's static spring compression, metres: its share of `weight` newtons over its spring
+/// rate. `mounts` in chassis space with the centre of mass at `z = 0`, front pair first; `springs`
+/// in N/m, same order.
+///
+/// The share is the lever rule along the wheelbase, half an axle per wheel — what holds a rigid
+/// body level on four springs at rest, with no aero load and the bump stops not reached. Sideways
+/// the record's mounts are symmetric, so it does not split an axle unevenly.
+#[must_use]
+pub fn static_settle(mounts: &[Vec3], springs: &[f32], weight: f32) -> Vec<f32> {
+    if mounts.len() != 4 || springs.len() != 4 {
+        return vec![0.0; mounts.len()];
+    }
+    let front = (mounts[0].z + mounts[1].z) / 2.0;
+    let rear = (mounts[2].z + mounts[3].z) / 2.0;
+    let base = rear - front;
+    let front_share = if base.abs() > 1e-3 { (rear / base).clamp(0.0, 1.0) } else { 0.5 };
+    (0..4)
+        .map(|i| {
+            let share = if i < 2 { front_share } else { 1.0 - front_share };
+            weight * share / 2.0 / springs[i].max(1.0)
+        })
+        .collect()
 }
 
 /// The chassis' state this frame: where it is, which way it faces, and how fast it is going.
@@ -355,7 +396,7 @@ fn build_car(
             let id = scene::spawn_mesh(world, mesh.clone(), wmat.clone(), Transform::new(Vec3::ZERO));
             // The first two are the front pair — the record's own order, and the one the vehicle
             // controller's axles are built in below.
-            wheels.push(RigWheel { id, local, front: i < 2 });
+            wheels.push(RigWheel { id, local, front: i < 2, settle: 0.0 });
         }
     }
 
@@ -457,6 +498,10 @@ fn build_car(
         }
     }
     vehicle.max_steering_angle = steering_lock();
+    let springs: Vec<f32> = vehicle.wheels.iter().map(|w| w.suspension_stiffness).collect();
+    for (w, s) in wheels.iter_mut().zip(static_settle(&mounts, &springs, mass * 9.81)) {
+        w.settle = s;
+    }
 
     let collider = Collider::offset_box(
         Vec3::new(0.0, size.y * 0.12, 0.0),
@@ -688,13 +733,15 @@ impl CarRig {
 
     /// How high the chassis rides over the road with every wheel just touching it, in metres —
     /// where a placed car's chassis goes. From the wheels the eye sees: their centres are a radius
-    /// above the road.
+    /// above the road, each lifted into the body by its spring's static compression
+    /// ([`RigWheel::settle`]) — so a car on rails stands as low as the same car driven.
     #[must_use]
     pub fn ride(&self) -> f32 {
         if self.wheels.is_empty() {
             return self.size.y * 0.5;
         }
-        let mean = self.wheels.iter().map(|w| w.local.y).sum::<f32>() / self.wheels.len() as f32;
+        let mean =
+            self.wheels.iter().map(|w| w.local.y + w.settle).sum::<f32>() / self.wheels.len() as f32;
         self.radius - mean
     }
 
@@ -1203,13 +1250,21 @@ impl CarRig {
         //
         // Reading the controller settles both and leaves no convention to get wrong: whatever the
         // physics steered with is what the eye sees.
-        let angles: Vec<f32> = {
+        //
+        // The same goes for where each wheel *is*. It used to sit at its mount whatever the strut
+        // was doing, so the wheels were bolted to the body: the body rolled and the wheels rolled
+        // with it, a bump moved the whole car, and at rest every wheel sat sunk into the road by
+        // the static compression of its spring. The controller states the strut's length every
+        // step, and [`strut_centre`] puts the wheel at its end.
+        let (angles, centres): (Vec<f32>, Vec<Option<Vec3>>) = {
             let vehicles = world.borrow::<VehicleController>();
             vehicles
                 .get(self.chassis)
-                .map(|v| v.wheels.iter().map(|w| w.steering_angle).collect())
-                // A placed car has no controller; its rail says how the wheels should point.
-                .unwrap_or_else(|| vec![self.visual_steer; self.wheels.len()])
+                .map(|v| v.wheels.iter().map(|w| (w.steering_angle, Some(strut_centre(w)))).unzip())
+                // A placed car has no controller: its rail says how the wheels should point, and
+                // they stand where its ride height was measured from: the mount, lifted by the
+                // spring's static compression ([`Self::ride`]).
+                .unwrap_or_else(|| (vec![self.visual_steer; self.wheels.len()], vec![None; self.wheels.len()]))
         };
 
         self.spin += (pose.speed / self.radius.max(0.05)) * dt;
@@ -1245,7 +1300,41 @@ impl CarRig {
                 Some(&a) if w.front => Quat::from_axis_angle(Vec3::Y, a) * spin * mirror,
                 _ => spin * mirror,
             };
-            place(w.id, pose.position + pose.rotation * w.local, pose.rotation * turn);
+            let local = centres.get(i).copied().flatten().unwrap_or(w.local + Vec3::Y * w.settle);
+            place(w.id, pose.position + pose.rotation * local, pose.rotation * turn);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The centre of mass a third of the way back: the front axle carries two thirds.
+    #[test]
+    fn settle_follows_the_lever_rule() {
+        let mounts = [
+            Vec3::new(-0.7, 0.0, -1.0),
+            Vec3::new(0.7, 0.0, -1.0),
+            Vec3::new(0.7, 0.0, 2.0),
+            Vec3::new(-0.7, 0.0, 2.0),
+        ];
+        let s = static_settle(&mounts, &[10_000.0, 10_000.0, 20_000.0, 20_000.0], 12_000.0);
+        // Front: 12 000 · 2/3 / 2 / 10 000 = 0.4 m; rear: 12 000 · 1/3 / 2 / 20 000 = 0.1 m.
+        assert!((s[0] - 0.4).abs() < 1e-5 && (s[1] - 0.4).abs() < 1e-5, "{s:?}");
+        assert!((s[2] - 0.1).abs() < 1e-5 && (s[3] - 0.1).abs() < 1e-5, "{s:?}");
+    }
+
+    /// A strut is its attachment plus its length along its direction, whatever the direction's
+    /// length.
+    #[test]
+    fn strut_centre_is_the_end_of_the_strut() {
+        let w = Wheel {
+            attachment_local_pos: Vec3::new(0.7, 0.1, -1.2),
+            direction_local: Vec3::new(0.0, -3.0, 0.0),
+            suspension_length: 0.05,
+            ..Default::default()
+        };
+        assert!((strut_centre(&w) - Vec3::new(0.7, 0.05, -1.2)).length() < 1e-6);
     }
 }

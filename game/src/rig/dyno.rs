@@ -342,6 +342,47 @@ impl Bench {
         })
     }
 
+    /// The bottom of every wheel over the plane, in metres, in the rig's order: placed at its mount
+    /// (where the eye used to see it) and at the end of its strut (where the controller has it,
+    /// [`super::strut_centre`]). Zero is a wheel standing on the road; negative is one sunk into it.
+    pub fn wheel_bottoms(&self) -> Vec<(f32, f32)> {
+        let tr = self.world.borrow::<Transform>();
+        let Some(t) = tr.get(self.rig.chassis) else { return Vec::new() };
+        let vehicles = self.world.borrow::<gizmo::physics::vehicle::VehicleController>();
+        let Some(v) = vehicles.get(self.rig.chassis) else { return Vec::new() };
+        let bottom = |local: Vec3| (t.position + t.rotation * local).y - self.rig.radius;
+        self.rig
+            .wheels
+            .iter()
+            .zip(&v.wheels)
+            .map(|(rw, w)| (bottom(rw.local), bottom(super::strut_centre(w))))
+            .collect()
+    }
+
+    /// Every strut's compression from its rest length, in metres, in the rig's order — how far the
+    /// wheel has moved up into the body.
+    pub fn travel(&self) -> Vec<f32> {
+        let vehicles = self.world.borrow::<gizmo::physics::vehicle::VehicleController>();
+        vehicles.get(self.rig.chassis).map_or_else(Vec::new, |v| {
+            v.wheels.iter().map(|w| w.suspension_rest_length - w.suspension_length).collect()
+        })
+    }
+
+    /// Every wheel's static compression as the rig computed it at spawn ([`super::static_settle`]),
+    /// metres — what a car on rails stands on, to be read against [`Self::travel`] at rest.
+    pub fn settle(&self) -> Vec<f32> {
+        self.rig.wheels.iter().map(|w| w.settle).collect()
+    }
+
+    /// The body's attitude, radians: roll, positive with the right side **down** (leaning right),
+    /// and pitch, positive with the nose **down**.
+    pub fn attitude(&self) -> (f32, f32) {
+        let (_, _, rot) = self.velocity();
+        let right = rot * Vec3::X;
+        let nose = rot * Vec3::NEG_Z;
+        (-right.y.clamp(-1.0, 1.0).asin(), -nose.y.clamp(-1.0, 1.0).asin())
+    }
+
     /// The chassis' mass in kilograms, as its rigid body has it.
     pub fn mass(&self) -> f32 {
         self.world.borrow::<RigidBody>().get(self.rig.chassis).map_or(0.0, |rb| rb.mass)

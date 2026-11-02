@@ -98,6 +98,11 @@ struct Circle {
     loads: Vec<f32>,
     /// The car's weight, newtons.
     weight: f32,
+    /// Body roll over the last three seconds, radians, positive leaning right
+    /// ([`Bench::attitude`]).
+    roll: f32,
+    /// Each strut's compression at the end, metres, in the rig's order.
+    travel: Vec<f32>,
 }
 
 /// Hold `kmh` for eight seconds, steering with what `steer` asks for at each step.
@@ -111,6 +116,7 @@ fn circle(
     let want = kmh / 3.6;
     let Some(mut b) = up_to(renderer, assets, car, want) else { return Outcome::Unreached };
     let mut acc = (0.0f32, 0.0f32, 0.0f32, 0usize);
+    let mut roll = 0.0f32;
     for i in 0..(8.0 / FIXED_DT) as usize {
         let (throttle, brake) = hold(&b, want);
         let steer = steer(&b);
@@ -124,6 +130,7 @@ fn circle(
             acc.1 += b.sideslip();
             acc.2 += b.speed();
             acc.3 += 1;
+            roll += b.attitude().0;
         }
     }
     let n = acc.3.max(1) as f32;
@@ -134,6 +141,8 @@ fn circle(
         angle: b.steer_angle(),
         loads: b.wheels().iter().map(|w| w.1).collect(),
         weight: b.mass() * 9.81,
+        roll: roll / n,
+        travel: b.travel(),
     })
 }
 
@@ -222,17 +231,60 @@ async fn run() {
             w.len(),
             w.iter().map(|x| x.2).collect::<Vec<_>>(),
         );
+        // Where the eye sees the wheels: at the mount (the old visual) or at the end of the strut.
+        let cm = |v: &[f32]| v.iter().map(|x| (x * 1000.0).round() / 10.0).collect::<Vec<_>>();
+        let bottoms = b.wheel_bottoms();
+        println!(
+            "   tekerlek tabanı düzlemin üstünde, cm: bağlantıda {:?} · şerit ucunda {:?} · sıkışma {:?} (raydaki araba için hesaplanan {:?}) · yalpa {:.2}° yunuslama {:.2}°",
+            cm(&bottoms.iter().map(|x| x.0).collect::<Vec<_>>()),
+            cm(&bottoms.iter().map(|x| x.1).collect::<Vec<_>>()),
+            cm(&b.travel()),
+            cm(&b.settle()),
+            b.attitude().0.to_degrees(),
+            b.attitude().1.to_degrees(),
+        );
     }
     // And in a steady 70 km/h circle at half input.
     match circle(&renderer, &mut assets, &car, 70.0, |_| 0.5) {
         Outcome::Unreached => {}
         Outcome::Spun => println!("   70 km/h dairede: DÖNDÜ (kayma > 29°)"),
         Outcome::Done(c) => println!(
-            "   70 km/h dairede: yükler {:?} N · toplam/ağırlık {:.2} · yanal {:.1} m/s²",
+            "   70 km/h dairede: yükler {:?} N · toplam/ağırlık {:.2} · yanal {:.1} m/s² · yalpa {:.2}° · sıkışma {:?} cm",
             c.loads.iter().map(|x| x.round()).collect::<Vec<_>>(),
             c.loads.iter().sum::<f32>() / c.weight,
-            c.lat.abs()
+            c.lat.abs(),
+            c.roll.to_degrees(),
+            c.travel.iter().map(|x| (x * 1000.0).round() / 10.0).collect::<Vec<_>>(),
         ),
+    }
+    // Pitch: full brake from 100 km/h and full throttle from rest, the most the nose dips and
+    // squats, and how far the struts move doing it.
+    if let Some(mut b) = up_to(&renderer, &mut assets, &car, 100.0 / 3.6) {
+        let (mut pitch, mut front) = (0.0f32, 0.0f32);
+        let t0 = b.t;
+        while b.forward_speed() > 1.0 && b.t - t0 < 10.0 {
+            b.step(&Controls { brake: 1.0, ..Controls::default() });
+            pitch = pitch.max(b.attitude().1);
+            let t = b.travel();
+            front = front.max((t[0] + t[1]) / 2.0 - (t[2] + t[3]) / 2.0);
+        }
+        println!(
+            "   100 km/h'den tam fren: burun en çok {:.2}° aşağı · ön şerit arkadan {:.1} cm fazla sıkışık",
+            pitch.to_degrees(),
+            front * 100.0
+        );
+    }
+    {
+        let mut b = Bench::new(&renderer, &mut assets, &car);
+        b.run(2.0, |_, _| Controls::default());
+        let base = b.attitude().1;
+        let mut squat = 0.0f32;
+        let t0 = b.t;
+        while b.t - t0 < 3.0 {
+            b.step(&Controls { throttle: 1.0, ..Controls::default() });
+            squat = squat.min(b.attitude().1 - base);
+        }
+        println!("   duruştan tam gaz: burun en çok {:.2}° yukarı", -squat.to_degrees());
     }
 
     println!("== sabit daire: hız · direksiyon girdisi → direksiyon açısı · yanal ivme · yarıçap · kayma açısı");

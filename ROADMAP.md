@@ -7847,3 +7847,43 @@ artırmak, sürüşle yeniden yargılanması gereken bir değişiklik olur.
 **Karar (2026-10-26): 0,3'te kalıyor.** Oyuncu yan yatmayı geri almak için downforce'u artırmak
 yerine hissi korumayı seçti. Oyundaki rakipler raylarda ve devrilmiyor; artış yalnız pilot
 süpürmesinde görünüyor. Yan yatma süpürmede bir gerileme gibi göründüğünde sebebi budur.
+
+### Tekerlekler artık şeridin ucunda: duruşta 8–10 cm yola gömülüydüler (2026-11-02)
+
+"Sıradaki" listesinin 2. maddesi. `sync_visuals` tekerlek görselini her zaman bağlantı noktasına
+(`RigWheel::local`) koyuyordu; kontrolcünün her adım bildirdiği şerit boyunu hiç okumuyordu.
+Gövde yattığında tekerlek de onunla yatıyordu, ve daha görünmez bir kusur vardı: kontrolcü
+tekerleği bağlantının `rest − suspension_length` kadar üstünde tutar, yani görsel tekerlek her
+yayın **statik sıkışması kadar yolun içindeydi**. Artık tekerlek motorun kendi tanımıyla,
+`attachment + direction · suspension_length` noktasında (`rig::strut_centre`).
+
+`nfs_bench`, düz asfalt, duruşta tekerlek tabanının düzlemden yüksekliği:
+
+| araba | bağlantıda (eski görsel) | şerit ucunda (yeni) |
+|---|---|---|
+| 240SX | −8,1 / −8,0 / −10,3 / −10,3 cm | 0,0 ×4 |
+| HUMMER | −11,5 / −11,5 / −14,4 / −14,4 cm | 0,0 ×4 |
+| SKYLINE | −9,2 / −9,3 / −8,6 / −8,6 cm | 0,0 ×4 |
+
+Raylardaki rakiplerin kontrolcüsü yok. Onlar için her tekerleğin statik sıkışması spawn'da
+hesaplanıyor (`rig::static_settle`: aks yükü kaldıraç kuralıyla, bölü yay sertliği) ve hem
+görsel tekerleğe hem `CarRig::ride`'a ekleniyor. Bu olmadan rakip, aynı arabanın sürülen
+halinden ~9 cm yüksekte, tam uzamış yaylar üstünde dururdu. Hesap ölçümü tutturuyor: 240SX
+7,9 / 10,2 cm (ölçülen 8,1 / 10,3), HUMMER 11,7 / 14,4 (11,5 / 14,4), SKYLINE 9,1 / 8,2
+(9,2 / 8,6).
+
+Tezgâh artık gövdenin duruşunu da ölçüyor (`Bench::attitude`, `travel`, `wheel_bottoms`):
+
+| | 240SX | SKYLINE |
+|---|---|---|
+| 70 km/h yarım direksiyon dairede yalpa | 1,47° (1,13 g) | 1,42° (1,23 g) |
+| aynı dairede şerit sıkışmaları | 2,8 / 7,1 / 10,3 / 6,2 cm | 7,8 / 12,1 / 12,6 / 8,2 cm |
+| 100 km/h'den tam frende burun dalışı | 1,05° | 1,38° |
+| duruştan tam gazda burun kalkışı | 0,50° | 0,52° |
+
+Yalpa küçük: bir yol arabası 1 g'de 3–5° yatar. Bu kaydın sert viraj demirinin sonucu (oyunun
+kendi değeri), ve görülen hareketin çoğu artık gövdenin değil tekerleklerin: iç ve dış tekerlek
+arasında 4–7 cm. Sürüşün hükmü: **"hareketler doğal"**.
+
+**Ayrıca bulundu, bu değişiklikten bağımsız:** HUMMER tezgâhta tam gazda hiç kıpırdamıyor
+(60 s, 0 km/h; 2 900 kg, dört çeker, 522 N·m). Değişiklikten önceki kodla da aynı. Açık.
