@@ -488,7 +488,21 @@ fn build_car(
         });
     }
     match &tune {
-        Some(t) => vehicle.tuning = t.tuning.clone(),
+        Some(t) => {
+            vehicle.tuning = t.tuning.clone();
+            // Not part of `tuning`: the controller keeps it beside it, and it was never handed over.
+            vehicle.drivetrain = t.drivetrain.engine();
+            // The controller reflects the whole flywheel, `I · ratio²`, onto **every** driven wheel
+            // rather than sharing it out, so the engine's inertia is counted once per driven wheel:
+            // twice on a two-wheel-driven car, four times on an all-wheel one. Measured on a
+            // SKYLINE, all-wheel drive took 15 s of full throttle from 142 km/h to 123. Scaled here
+            // to the two-wheel total, so all-wheel drive costs what the other two cost and the feel
+            // already driven on them stands; the overcount itself is `MOTOR-NOTLARI.md` #18.
+            let driven = vehicle.wheels.iter().filter(|w| vehicle.drivetrain.drives(&w.axle_type)).count();
+            if driven > 2 {
+                vehicle.flywheel_inertia *= 2.0 / driven as f32;
+            }
+        }
         None => {
             // No record reachable (a `GEOMETRY.BIN` copied out of an install). Geometry is still
             // known — it comes from the model — so only the engine is invented, and it says so.

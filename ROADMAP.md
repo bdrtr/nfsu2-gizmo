@@ -7886,4 +7886,44 @@ kendi değeri), ve görülen hareketin çoğu artık gövdenin değil tekerlekle
 arasında 4–7 cm. Sürüşün hükmü: **"hareketler doğal"**.
 
 **Ayrıca bulundu, bu değişiklikten bağımsız:** HUMMER tezgâhta tam gazda hiç kıpırdamıyor
-(60 s, 0 km/h; 2 900 kg, dört çeker, 522 N·m). Değişiklikten önceki kodla da aynı. Açık.
+(60 s, 0 km/h; 2 900 kg, dört çeker, 522 N·m). Değişiklikten önceki kodla da aynı. **Çözüldü,
+bir sonraki girdi.**
+
+### HUMMER kalkmıyordu: aktarma tipi kontrolcüye hiç verilmemiş, ve motorda iki boşluk (2026-11-02)
+
+Tezgâhta HUMMER 60 s tam gazda 0 km/h'de kaldı. `NFS_BENCH_TRACE=1` (yeni: kalkışta yarım
+saniyede bir vites, devir, tekerlekteki tork, tekerlek dönüşü) ayrımı verdi: tork **veriliyor**
+(2 509 N·m), arka tekerlekler dengede, ön tekerleklerin dönüşü her adım tam 0,000.
+
+**Oyunun hatası:** `CarTune::drivetrain` kayıttan okunuyor, `handling:` satırında basılıyordu,
+ama `VehicleController::drivetrain`'e hiç verilmemişti; motorun varsayılanı arkadan itiş.
+Kurulumdaki 44 aracın 32'si yanlış sürülüyordu: 8 önden çekişli (CELICA, CIVIC, FOCUS, GOLF,
+PEUGOT, RSX, SENTRA, TIBURON) ve 24 dört çekerli (oynanabilirlerden 3000GT, A3, ECLIPSE,
+ESCALADE, HUMMER, IMPREZAWRX, LANCEREVO8, NAVIGATOR, SKYLINE, TT; gerisi trafik). 12 arkadan
+itişli araç, 240SX dahil, değişmedi; pilot süpürmesi 240SX'le koştuğu için etkilenmiyor.
+Artık `car::tune::Drivetrain::engine`.
+
+**Neden yalnız HUMMER duruyordu** — `MOTOR-NOTLARI.md` #17: motorun "durgun tekerleği durdur"
+kuralı yerdeki tahriksiz tekerleği `v < 0,05·r` altında her adım sıfırlıyor, ve sıfır dönüşlü
+tekerlek o ölü bölgede fren gibi tutuyor. HUMMER'ın iki ön tekerleği ≈ 14 kN tutarken arka itiş
+≈ 6 kN; 240SX'te itiş ≈ 9 kN, ön aks ≈ 4 kN, kurtuluyordu. Dört çeker olunca tahriksiz tekerlek
+kalmıyor.
+
+**Dört çeker bir bedel ödüyordu** — #18: motor volan ataletini tahrikli her tekerleğe ayrı ayrı
+yansıtıyor. SKYLINE dört çeker olunca 15 s tam gazda 142 → 123 km/h düştü. Oyun tarafında
+`flywheel_inertia · 2/n`: dört çeker iki çekerle aynı toplamı taşıyor, SKYLINE yine 142 km/h.
+İki çekerdeki 2× sayım bilerek kaldı, his ve süpürme tabanı onunla.
+
+Tezgâh, 15 s tam gaz ve dönme:
+
+| araba | aktarma | önce | sonra | dönen |
+|---|---|---|---|---|
+| HUMMER | dört çeker | **0 km/h** | 120 km/h | 0 |
+| SKYLINE | dört çeker | 142 | 142 | 0 |
+| IMPREZAWRX | dört çeker | — | 147 | 0 |
+| PEUGOT | önden | 133 | 133 | 0 |
+| CIVIC | önden | — | 118 | 0 |
+
+Ayna testindeki "AYNA DEĞİL" satırları PEUGOT ve SKYLINE'da değişiklikten önce de vardı (eski
+kodla koşuldu: PEUGOT 6/6, SKYLINE 5/6); bu işin sonucu değil, açık. PEUGOT'un sağ/sol kayma farkı
+önden çekişle azaldı (100 km/h yarım direksiyon 2,88° / 3,82° → 1,78° / 1,51°).

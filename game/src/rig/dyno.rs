@@ -383,6 +383,12 @@ impl Bench {
         (-right.y.clamp(-1.0, 1.0).asin(), -nose.y.clamp(-1.0, 1.0).asin())
     }
 
+    /// Gear, engine rpm, total drive torque at the wheels and mean wheel spin — see
+    /// [`super::CarRig::drivetrain`].
+    pub fn drivetrain(&self) -> (usize, f32, f32, f32) {
+        self.rig.drivetrain(&self.world)
+    }
+
     /// The chassis' mass in kilograms, as its rigid body has it.
     pub fn mass(&self) -> f32 {
         self.world.borrow::<RigidBody>().get(self.rig.chassis).map_or(0.0, |rb| rb.mass)

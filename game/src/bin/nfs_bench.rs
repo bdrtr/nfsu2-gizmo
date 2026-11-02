@@ -59,8 +59,22 @@ fn up_to(renderer: &Renderer, assets: &mut AssetManager, car: &str, speed: f32) 
     let mut b = Bench::new(renderer, assets, car);
     b.run(2.0, |_, _| Controls::default());
     let start = b.t;
+    // `NFS_BENCH_TRACE=1`: what the drivetrain delivers on the way up, twice a second — the line
+    // that says whether a car that will not move is given no drive or cannot use it.
+    let trace = std::env::var("NFS_BENCH_TRACE").is_ok();
+    let mut next = start;
     while b.forward_speed() < speed - 0.3 && b.t - start < 60.0 {
         b.step(&Controls { throttle: 1.0, ..Controls::default() });
+        if trace && b.t >= next && b.t - start < 6.0 {
+            next += 0.5;
+            let (gear, rpm, torque, spin) = b.drivetrain();
+            println!(
+                "   iz t={:.1} · {:.1} km/h · vites {gear} · {rpm:.0} rpm · tork {torque:.0} N·m · dönüş {spin:.1} rad/s · yerde {}/4",
+                b.t - start,
+                b.forward_speed() * 3.6,
+                b.wheels().iter().filter(|w| w.0).count()
+            );
+        }
     }
     if b.forward_speed() < speed - 0.3 {
         println!(

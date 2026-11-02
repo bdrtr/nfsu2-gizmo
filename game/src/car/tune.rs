@@ -191,6 +191,21 @@ impl Drivetrain {
             Self::All
         }
     }
+
+    /// The vehicle controller's own name for it.
+    ///
+    /// The record's split was read, named and printed for months without ever reaching the
+    /// controller, whose default is rear drive: the front-driven PEUGOT and CIVIC were pushed from
+    /// behind, and the four-wheel-driven HUMMER did not move at all (`ROADMAP.md`, 2026-11-02).
+    #[must_use]
+    pub fn engine(self) -> gizmo::physics::vehicle::Drivetrain {
+        use gizmo::physics::vehicle::Drivetrain as E;
+        match self {
+            Self::Front => E::Fwd,
+            Self::Rear => E::Rwd,
+            Self::All => E::Awd,
+        }
+    }
 }
 
 /// One axle's suspension and tyre, in the engine's units, from the record's
@@ -460,5 +475,8 @@ mod tests {
         assert_eq!(Drivetrain::of(0.0), Drivetrain::Front);
         assert_eq!(Drivetrain::of(1.0), Drivetrain::Rear);
         assert_eq!(Drivetrain::of(0.5), Drivetrain::All);
+        use gizmo::physics::vehicle::{Axle, Drivetrain as E};
+        assert_eq!(Drivetrain::Front.engine(), E::Fwd);
+        assert!(Drivetrain::All.engine().drives(&Axle::Front) && Drivetrain::All.engine().drives(&Axle::Rear));
     }
 }
