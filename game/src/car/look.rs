@@ -53,6 +53,12 @@ pub fn wheel_look() -> PbrLook {
     PbrLook::new([0.09, 0.09, 0.10], 0.70, 0.20)
 }
 
+/// A brake disc with no texture of its own: worn cast iron.
+#[must_use]
+pub fn brake_look() -> PbrLook {
+    PbrLook::new([0.42, 0.42, 0.44], 0.45, 0.85)
+}
+
 /// Roughness/metallic to pair with a texture for a given material group.
 pub(crate) fn group_pbr(group: Grp) -> (f32, f32) {
     body_palette([0.0; 3])

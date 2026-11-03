@@ -158,6 +158,24 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
             spawn(&mut world, wheel_mesh.clone(), wmat.clone(), t);
         }
     }
+    // The brakes inside the wheels, front pair first (the record's order).
+    let brakes = car.brakes.each_mut().map(|b| {
+        b.take().map(|(mesh, surface)| {
+            let m = scene::wheel_material(
+                surface,
+                &mut tex,
+                |bg| two(Material::new(bg).with_pbr(Vec4::new(1.0, 1.0, 1.0, 1.0), 0.45, 0.85)),
+                |look| mat(look.rgb, look.roughness, look.metallic),
+            );
+            (mesh, m)
+        })
+    });
+    for (i, mount) in scene::wheel_mounts(cti.as_ref(), fit, car_center, ch).into_iter().enumerate() {
+        if let Some((mesh, m)) = &brakes[usize::from(i >= 2)] {
+            let t = Transform::new(mount).with_rotation(scene::wheel_mirror(mount));
+            spawn(&mut world, mesh.clone(), m.clone(), t);
+        }
+    }
 
     scene::add_lights(
         &mut world,

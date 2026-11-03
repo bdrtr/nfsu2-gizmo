@@ -7947,4 +7947,31 @@ parçaları gövdeden çıkarılıyor (`car::is_unplaced_runtime_detail`).
 
 Açık kalanlar: fren diskleri tekerleklerin içine asılmadı (tekerleğin içi boş görünür); egzozun
 yeri kayıtta çözülmedi, o PryHUB'ın işi. MUSTANGGT'nin `SPOILER_A`'sı da orijinde (0,07 m), ayrıca
-bakılmalı.
+bakılmalı. **Üçü de kapandı, bir sonraki girdi.**
+
+### Dosya yerini söylüyormuş: konum işaretçileri, ve tezgâhın aynası motordan (2026-11-03)
+
+**Egzoz, fren, kanat.** `GEOMETRY.BIN`'in ayrıştırılmayan chunk'larından `0x0013401A` bir konum
+işaretçisi tablosu: kayıt başına ad hash'i + 4×4 matris, kurulumdaki 28 456 kaydın hepsi aynı
+düzende. Adlar dosyada yok, hash var; aday isimleri hash'leyerek ve `SPEED2.EXE`'nin dizgeleriyle
+eşleştirerek çözüldü: arka tamponda `LEFT_EXHAUST` / `RIGHT_EXHAUST` (biri ya da ikisi: 240SX ve
+HUMMER tek, 350Z ve MUSTANGGT çift çıkış), tekerlekte `MARKER_BRAKE` (tekerleğin kendi uzayında,
+240SX'te 9 cm içeride), `BASE`'de `SPOILER`. Son ikisinin doğrulaması dosyanın kendisinde:
+SKYLINE'ın *yerleştirilmiş* kanadının matrisi tam olarak `SPOILER` işaretçisinin ötelemesini
+taşıyor (−2,17 / 0 / 0,787 ↔ −2,17 / 0 / 0,79).
+
+PryHUB okuyor (`NfsMeshPart::markers`, `marker("…")`), bu depo kullanıyor (`car::mount`):
+yerleştirilmemiş egzoz her egzoz işaretçisine, yerleştirilmemiş kanat `SPOILER`'a asılıyor, fren
+diskleri ön ve arka için ayrı mesh olarak tekerlek çerçevesinde `MARKER_BRAKE`'e konup her
+tekerleğe — tekerleğin konumu, direksiyonu ve aynasıyla, ama dönüşü olmadan — bağlanıyor.
+Egzoz ve frende parçanın kendi dönmesi atılıyor: 350Z'nin egzozunda ve SKYLINE'ın arka freninde
+o dönme boruyu dikine, diski yatay çeviriyor; ham geometri zaten doğru eksende.
+
+**Tezgâhın "AYNA DEĞİL"i** (`MOTOR-NOTLARI.md` #19). Geometri simetrik (görsel merkez 0,0000,
+tekerlekler ±aynı), ve fark yükler ortalanınca da kalıyor (PEUGOT %7–12, yanal %5'e kadar).
+Sebep motorun tekerlekleri sırayla işlemesi: her tekerleğin kuvveti gövdenin hızına hemen
+yazılıyor, sonraki tekerlek güncellenmiş hızı görüyor. Her aksın sol/sağ sırası yer değiştirilince
+sol ve sağ sonuçlar **birebir** yer değiştirdi. Oyun tarafında temiz çaresi yok; motorda
+kuvvetleri biriktirip bir kez uygulamak gerekiyor. Tezgâh artık daire yüklerini de son üç saniyenin
+ortalamasıyla okuyor (eskiden tek örnek) ve `NFS_BENCH_TRACE=1` ile tekerlek yüklerini basıyor.
+

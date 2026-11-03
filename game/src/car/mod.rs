@@ -13,9 +13,10 @@ mod look;
 mod shader;
 pub mod tune;
 mod skin;
+pub mod mount;
 mod wheel;
 
-pub use look::{body_palette, wheel_look, PbrLook};
+pub use look::{body_palette, brake_look, wheel_look, PbrLook};
 pub use skin::composite_over_paint;
 pub use wheel::{fit_wheel, wheel_mount, WheelFit, WheelSurface};
 
@@ -60,6 +61,10 @@ pub struct CarVisuals {
     pub wheel: Option<(Mesh, WheelSurface)>,
     /// Wheel radius and corner offsets.
     pub wheel_fit: WheelFit,
+    /// The brake discs, front then rear, in the wheel mesh's own frame — hung on the wheel's
+    /// `MARKER_BRAKE` ([`mount`]). The caller places each with its wheel's position, steer and
+    /// mirror but **not** its spin: the caliper does not turn with the wheel.
+    pub brakes: [Option<(Mesh, WheelSurface)>; 2],
 }
 
 /// A merged mesh sharing one decoded texture, ready for the caller to upload and material-ise.
@@ -82,32 +87,6 @@ pub struct TexturedPart {
     /// paint shows through where the overlay is transparent. `None` for a detail texture that is
     /// its own full colour (light lenses, tyres, badging).
     pub composite_over: Option<[f32; 3]>,
-}
-
-/// Whether `p` is a detail the game positions at run time and the file leaves at the origin: the
-/// brake discs (one mesh per axle, to be hung inside each wheel) and the exhaust tip.
-///
-/// Every playable car in an install ships `EXHAUST_A`, `FRONT_BRAKE_A` and `REAR_BRAKE_A` modelled
-/// about the origin with an identity or rotation-only matrix — nothing in `GEOMETRY.BIN` says where
-/// they go. Drawn as body parts they all landed at the car's origin, which is the middle of its
-/// floor: half a metre of exhaust and two brake discs hanging under the car like a tow bar. Only
-/// an *unplaced* one is dropped (its placed centroid within 0.35 m of the origin), so a car whose
-/// file does place them keeps them. Names are matched on stems because they arrive truncated
-/// (`_FRONT_BRAK`).
-fn is_unplaced_runtime_detail(p: &NfsMeshPart) -> bool {
-    use gizmo_nfs::placement::{part_centroid, place_point, should_place};
-    let runtime = group_of(&p.name) == Grp::Exhaust
-        || p.name.contains("_FRONT_BRAK")
-        || p.name.contains("_REAR_BRAK");
-    if !runtime || p.positions.is_empty() {
-        return false;
-    }
-    let apply = should_place(&p.transform, &part_centroid(p));
-    let n = p.positions.len() as f32;
-    let c = p.positions.iter().fold(Vec3::ZERO, |acc, v| {
-        acc + Vec3::from(place_point(&p.transform, *v, apply)) / n
-    });
-    c.length() < 0.35
 }
 
 /// Assemble the default car's renderable visuals from parsed parts.
@@ -133,10 +112,16 @@ where
     // structure (firewall, inner fenders) or a redundant shell that only pokes out through the
     // skin. Keyed off the *selected* body (KIT00 or a KITW## widebody), not a literal KIT00.
     let has_kit_body = stock.iter().any(|p| p.name.contains("_BODY") && !p.name.contains("_BASE"));
+    // The parts the file leaves at the origin: the exhaust and an unplaced spoiler are hung on
+    // their markers and join the body; the brakes are built below, in the wheel's frame. The
+    // originals are never drawn — at the origin they are the middle of the car's floor.
+    let hung = mount::hang_body_parts(&stock);
     let body_like: Vec<&NfsMeshPart> = stock
         .iter()
         .copied()
-        .filter(|p| group_of(&p.name) != Grp::Wheel && !is_unplaced_runtime_detail(p))
+        .filter(|p| group_of(&p.name) != Grp::Wheel)
+        .filter(|p| !(mount::Mount::of(&p.name).is_some() && mount::is_unplaced(p)))
+        .chain(hung.iter())
         .collect();
     let paint_parts: Vec<&NfsMeshPart> =
         body_like.iter().copied().filter(|p| group_of(&p.name) == Grp::Paint).collect();
@@ -263,6 +248,7 @@ where
     }
 
     let mut wheel = None;
+    let mut brakes = [None, None];
     let mut wheel_fit =
         WheelFit { radius: 0.31, half_wheelbase: length * 0.36, half_track: width * 0.42 };
     if let Some(wp) = stock.iter().copied().find(|p| group_of(&p.name) == Grp::Wheel) {
@@ -295,9 +281,42 @@ where
             };
             wheel = Some((mesh, surface));
         }
+        // The brakes, in the same frame as the wheel mesh: raw geometry moved by the wheel's own
+        // `MARKER_BRAKE`, recentred by the wheel's centre. Surfaced like the wheel — the first run
+        // whose texture resolves, else flat metal.
+        let at = wp.marker("MARKER_BRAKE").map_or([0.0; 3], gizmo_nfs::NfsMarker::position);
+        for (slot, front) in [(0, true), (1, false)] {
+            let Some(bp) = stock
+                .iter()
+                .copied()
+                .find(|p| mount::Mount::of(&p.name) == Some(mount::Mount::Brake(front)) && mount::is_unplaced(p))
+            else {
+                continue;
+            };
+            let b = mount::raw_at(bp, at);
+            let runs: Vec<(&NfsMeshPart, &[u32])> = if b.materials.is_empty() {
+                vec![(&b, b.indices.as_slice())]
+            } else {
+                b.materials
+                    .iter()
+                    .filter(|m| !is_dropped_filler(m.shader.0, false))
+                    .filter_map(|m| b.indices.get(m.index_offset..m.index_offset + m.index_count))
+                    .map(|slice| (&b, slice))
+                    .collect()
+            };
+            let label = if front { "nfs_brake_front" } else { "nfs_brake_rear" };
+            if let Some(mesh) = build_mesh_items(device, &runs, (wl + wh) * 0.5, |_| 0.0, label) {
+                let tex = b.materials.iter().find_map(|m| tpk.and_then(|t| t.texture(m.hash)).cloned());
+                let surface = match tex {
+                    Some(t) => WheelSurface::Textured(t),
+                    None => WheelSurface::Flat(make_material(brake_look())),
+                };
+                brakes[slot] = Some((mesh, surface));
+            }
+        }
     }
 
     // No cabin filler is emitted: BASE supplies the real interior geometry (routed per-shader)
     // and the windscreen glass covers the openings, so the old hollow-shell box is obsolete.
-    CarVisuals { groups, textured, center, width, height, length, wheel, wheel_fit }
+    CarVisuals { groups, textured, center, width, height, length, wheel, wheel_fit, brakes }
 }

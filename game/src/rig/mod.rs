@@ -109,6 +109,9 @@ pub struct RigWheel {
     pub local: Vec3,
     /// Front axle, so it turns with the steering.
     pub front: bool,
+    /// The brake disc hung inside this wheel, if the car models one: placed with the wheel's
+    /// position, steer and mirror, but not its spin.
+    pub brake: Option<u32>,
     /// How far the car's own weight compresses this wheel's spring at rest, metres
     /// ([`static_settle`]). Where the wheel sits when nothing reports its strut: a car on rails has
     /// no controller, and without this it would stand on fully extended springs, a hand higher than
@@ -376,6 +379,18 @@ fn build_car(
         );
         (mesh, m)
     });
+    // The brakes, surfaced the way the wheel is: front then rear.
+    let brakes = car.brakes.each_mut().map(|b| {
+        b.take().map(|(mesh, surface)| {
+            let m = scene::wheel_material(
+                surface,
+                &mut tex,
+                |bg| Material::new(bg).with_pbr(Vec4::new(1.0, 1.0, 1.0, 1.0), 0.45, 0.85).with_double_sided(true),
+                flat,
+            );
+            (mesh, m)
+        })
+    });
     let visuals = scene::spawn_body(world, &mut car, &mut tex, |bg, tint, rough, metal| {
         Material::new(bg)
             .with_pbr(Vec4::new(tint[0], tint[1], tint[2], 1.0), rough, metal)
@@ -396,7 +411,10 @@ fn build_car(
             let id = scene::spawn_mesh(world, mesh.clone(), wmat.clone(), Transform::new(Vec3::ZERO));
             // The first two are the front pair — the record's own order, and the one the vehicle
             // controller's axles are built in below.
-            wheels.push(RigWheel { id, local, front: i < 2, settle: 0.0 });
+            let brake = brakes[usize::from(i >= 2)].as_ref().map(|(bm, bmat)| {
+                scene::spawn_mesh(world, bm.clone(), bmat.clone(), Transform::new(Vec3::ZERO))
+            });
+            wheels.push(RigWheel { id, local, front: i < 2, settle: 0.0, brake });
         }
     }
 
@@ -1310,12 +1328,17 @@ impl CarRig {
             let mirror = scene::wheel_mirror(w.local);
             // Sign as the controller writes it: positive is left, about the chassis up axis. The
             // rig's wheels are built in the controller's order, so `i` indexes both.
-            let turn = match angles.get(i) {
-                Some(&a) if w.front => Quat::from_axis_angle(Vec3::Y, a) * spin * mirror,
-                _ => spin * mirror,
+            let steer = match angles.get(i) {
+                Some(&a) if w.front => Quat::from_axis_angle(Vec3::Y, a),
+                _ => Quat::IDENTITY,
             };
             let local = centres.get(i).copied().flatten().unwrap_or(w.local + Vec3::Y * w.settle);
-            place(w.id, pose.position + pose.rotation * local, pose.rotation * turn);
+            let at = pose.position + pose.rotation * local;
+            place(w.id, at, pose.rotation * steer * spin * mirror);
+            // The caliper does not roll: the brake takes everything the wheel does except `spin`.
+            if let Some(b) = w.brake {
+                place(b, at, pose.rotation * steer * mirror);
+            }
         }
     }
 }

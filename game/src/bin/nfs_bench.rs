@@ -107,8 +107,9 @@ struct Circle {
     speed: f32,
     /// The steering angle, radians, positive to the left.
     angle: f32,
-    /// Each wheel's suspension force at the end, newtons, in the rig's order — the front pair
-    /// first.
+    /// Each wheel's suspension force over the same last three seconds, newtons, in the rig's
+    /// order — the front pair first. Averaged like the rest: a single sample at the end caught the
+    /// suspension mid-oscillation, which read as a side-to-side difference of several per cent.
     loads: Vec<f32>,
     /// The car's weight, newtons.
     weight: f32,
@@ -131,6 +132,7 @@ fn circle(
     let Some(mut b) = up_to(renderer, assets, car, want) else { return Outcome::Unreached };
     let mut acc = (0.0f32, 0.0f32, 0.0f32, 0usize);
     let mut roll = 0.0f32;
+    let mut loads = vec![0.0f32; 4];
     for i in 0..(8.0 / FIXED_DT) as usize {
         let (throttle, brake) = hold(&b, want);
         let steer = steer(&b);
@@ -145,6 +147,9 @@ fn circle(
             acc.2 += b.speed();
             acc.3 += 1;
             roll += b.attitude().0;
+            for (sum, w) in loads.iter_mut().zip(b.wheels()) {
+                *sum += w.1;
+            }
         }
     }
     let n = acc.3.max(1) as f32;
@@ -153,7 +158,7 @@ fn circle(
         slip: acc.1 / n,
         speed: acc.2 / n,
         angle: b.steer_angle(),
-        loads: b.wheels().iter().map(|w| w.1).collect(),
+        loads: loads.iter().map(|x| x / n).collect(),
         weight: b.mass() * 9.81,
         roll: roll / n,
         travel: b.travel(),
@@ -364,8 +369,12 @@ async fn run() {
         println!("   15 s sonra {:.0} km/h · en büyük kayma {:.2}°", b.forward_speed() * 3.6, slip.to_degrees());
     }
 
-    // A mirror image should differ only by rounding. A few per cent is a mount the file has off
-    // centre; more is something on the wrong side.
+    // A mirror image should differ only by rounding. It does not, and the cause is known
+    // (`MOTOR-NOTLARI.md` #19): the controller applies each wheel's force to the chassis velocity
+    // before computing the next wheel's, so the result depends on the wheel order, and no order
+    // of four corners is its own mirror image. Swapping each axle's pair swaps the left and right
+    // results exactly. Up to ~12 % in loads and ~5 % in lateral grip on some cars; an "AYNA DEĞİL"
+    // of that size is that, not a mount on the wrong side — which would be far larger.
     const MIRROR_TOL: f32 = 0.03;
     println!("== ayna: aynı manevra sola (+) ve sağa (−) · sağdaki soldakinin aynası olmalı");
     for (kmh, steer) in [(40.0f32, 1.0f32), (70.0, 0.25), (70.0, 0.5), (100.0, 0.5)] {
@@ -398,6 +407,10 @@ async fn run() {
             loads * 100.0,
             if off <= MIRROR_TOL { "ayna" } else { "AYNA DEĞİL" }
         );
+        if std::env::var("NFS_BENCH_TRACE").is_ok() {
+            let r0 = |v: &[f32]| v.iter().map(|x| x.round()).collect::<Vec<_>>();
+            println!("      yükler sol {:?} · sağ {:?} N (sıra: ön çift, arka çift)", r0(&l.loads), r0(&r.loads));
+        }
     }
     for kmh in [60.0f32, 90.0] {
         let (Some(l), Some(r)) = (

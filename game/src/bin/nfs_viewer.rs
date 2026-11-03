@@ -96,6 +96,12 @@ fn main() {
                 let m = scene::wheel_material(surface, &mut tex, |bg| textured(bg, [1.0; 3], 0.7, 0.2), make_material);
                 (mesh, m)
             });
+            let brakes = car.brakes.each_mut().map(|b| {
+                b.take().map(|(mesh, surface)| {
+                    let m = scene::wheel_material(surface, &mut tex, |bg| textured(bg, [1.0; 3], 0.45, 0.85), make_material);
+                    (mesh, m)
+                })
+            });
             scene::spawn_body(scene.world, &mut car, &mut tex, textured);
 
             // Four static wheels at the fitted corners (lower half tucked into the arch).
@@ -103,6 +109,14 @@ fn main() {
                 for mount in scene::wheel_mounts(gb.info.as_ref(), car.wheel_fit, car.center, car.height) {
                     let t = Transform::new(mount).with_rotation(scene::wheel_mirror(mount));
                     scene::spawn_mesh(scene.world, mesh.clone(), wmat.clone(), t);
+                }
+            }
+            // The brakes inside them, front pair first (the record's order).
+            let mounts = scene::wheel_mounts(gb.info.as_ref(), car.wheel_fit, car.center, car.height);
+            for (i, mount) in mounts.into_iter().enumerate() {
+                if let Some((mesh, m)) = &brakes[usize::from(i >= 2)] {
+                    let t = Transform::new(mount).with_rotation(scene::wheel_mirror(mount));
+                    scene::spawn_mesh(scene.world, mesh.clone(), m.clone(), t);
                 }
             }
         })
