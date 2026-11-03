@@ -7975,3 +7975,64 @@ sol ve sağ sonuçlar **birebir** yer değiştirdi. Oyun tarafında temiz çares
 kuvvetleri biriktirip bir kez uygulamak gerekiyor. Tezgâh artık daire yüklerini de son üç saniyenin
 ortalamasıyla okuyor (eskiden tek örnek) ve `NFS_BENCH_TRACE=1` ile tekerlek yüklerini basıyor.
 
+
+### Görüntü: yarış ekranında yalnız oyuncunun göreceği şey kaldı (2026-11-03)
+
+"Gerçekçi değil" listesinin 1. maddesi. `nfs_cruise`'da sol üstteki obje/hücre/üçgen/fps
+sayaçları, sol alttaki rota düzeltmesi ve yoldaki rota şeridi artık **varsayılanda kapalı**;
+**F3** açıp kapatıyor, `NFS_DEBUG=1` açık başlatıyor. Şerit motorun kendi `IsHidden` işaretiyle
+gizleniyor (çizim listesi onu gölgesiyle birlikte atlıyor). Parkur dışı ve harita kenarı uyarıları,
+geri sayım, sıra, tur ve süre oyunun parçası olduğu için yerinde.
+
+Sağ alttaki `"{hız} km/h"` yazısının yerine bir gösterge geldi (`nfsu2::hud`): büyük hız, vites
+harfi (`R`/`N`/`1`…, `current_gear`'ın indeksinden), bin devirde çentikli devir çubuğu; vites
+büyütme devrinden (`upshift_rpm`) sonrası kırmızı zemin, ibre oraya girince çubuk ve vites harfi
+kırmızı. `nfs_drive`, `nfs_race` ve `nfs_cruise` aynı göstergeyi kullanıyor; rayda giden demo
+arabada (`NFS_DEMO`) motor çalışmadığı için yalnız hız var.
+
+Rota şeridi F3 açıkken çiziliyor (Paths4001'de 15. hatta görüldü); gridde ve ilk virajda
+görünmemesi orada yarışın kendi hattının değil başka bir yolun olmasından — bir kusur değil.
+
+### Hız hissi: görüş açısı, titreşim, motor sesi (2026-11-03)
+
+Listenin 3. maddesi. Kamera artık hızı biliyor (`rig::chase`, yalnız takip modunda; fareyle bakış ve
+`NFS_SHOTCAM` sabit kalıyor):
+
+- **Görüş açısı** 36 km/h'nin altında 45°, 252 km/h'de 62°; arası smoothstep, hedefe saniyede
+  2,5 hızla yaklaşıyor — sert frende görüş bir saniyede kapanıyor. 104 km/h'de 49° ölçüldü (F3
+  görünümü `görüş` satırında yazıyor).
+- **Titreşim** 90 km/h'de başlıyor, 252 km/h'de 0,2° genliğe çıkıyor: üç eşölçüsüz sinüsün
+  toplamı, kare hızıyla örtüşüp atlamasın diye gürültü değil. Bakışa yazılırken ekleniyor, nişana
+  geri beslenmiyor.
+- Hızla geri çekilme zaten vardı: takip kamerası hedefine `lag` hızıyla yaklaştığı için `v / lag`
+  metre geride kalıyor (90 km/h'de 2 m, 180'de 4 m).
+
+**Motor sesi** (`nfsu2::sound`): oyunun `.gin` sesleri M6'nın işi; o gelene kadar devirden
+sentezlenmiş iki döngü — 1500 ve 4500 devir, dört silindirin ateşleme harmonikleri, krank
+frekansında gurultu, ateşleme başına sönen gürültü — `rpm / kayıt_devri` perdesinde çalınıyor ve
+2200–3800 devir arasında eşit güçle birbirine geçiyor. Düzey gazla ve devirle yükseliyor, gaz
+kesilince düşüyor ama susmuyor. `nfs_drive`, `nfs_race`, `nfs_cruise`; cihaz yoksa ya da
+`NFS_MUTE=1` ise sessiz.
+
+Sayılar ilk tahmin; sürülerek ayarlanacak.
+
+### Rakipler: gövde hareketi, kusurlu tempo, lastik bant (2026-11-03)
+
+Listenin 4. maddesi, çarpışma hariç. Hepsi `rig::rail`'de:
+
+- **Gövde yatıyor ve eğiliyor.** Yanal yük `v² · turn_at(s)`'ten, boyuna yük hız değişiminden;
+  derece başına g tezgâhta oyuncunun kendi arabasından ölçülen (yalpa 1,15°/g, dalış 0,98°/g), 0,25 s
+  gecikmeyle. Yani bir rakip aynı yükte oyuncunun arabası kadar yatıyor — az, çünkü oyunun viraj
+  demiri sert; büyütmek istenirse ikisi birlikte büyümeli.
+- **Tempo nefes alıyor.** Her rakibin `PACE`'i 600–1100 m dalga boyunda, kendi fazında ±%2,5
+  dalgalanıyor (`pace_here`). Sabit tempolu bir ray her düzlükte yanındakine aynı hızla yaklaşıyor
+  ya da uzaklaşıyordu; artık sıralar yol boyunca değişiyor.
+- **Lastik bant.** Oyuncunun 300 m gerisindeki rakip %5'e kadar hızlı, 300 m önündeki %5'e kadar
+  yavaş (`rail::catch_up`), hiçbiri hattın sınırının %98'ini geçmiyor. Demo'da oyuncunun yerine kendi
+  rayı sayılıyor; `nfs_rail`'de oyuncu yok, lastik bant devre dışı.
+
+`nfs_rail` 105 yarışta: 840/840 hâlâ bitiriyor, temas adımı 1.360 → 1.372.
+
+Açık: oyuncu bir rakibe çarptığında rakip gövdesi kinematik olduğu için sonsuz kütleli bir duvar
+gibi davranıyor. Oyun tarafında temas anında rakibin rayına hız ve yanal itme verilebilir, ama
+çarpışmanın ilk karesindeki sekmeyi bu değiştirmez.

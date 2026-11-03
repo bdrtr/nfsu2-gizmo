@@ -107,6 +107,41 @@ const TANGENT_SPAN: f32 = 3.0;
 /// further back.
 pub const PACE: [f32; 8] = [0.90, 0.92, 0.89, 0.93, 0.91, 0.94, 0.88, 0.95];
 
+/// How much a rival's pace breathes over a lap, as a fraction of it: ±2.5 %, each car on its own
+/// rhythm ([`Rail::wobble`]). A rail at a fixed fraction of the limit is a metronome — it gains or
+/// loses on the car beside it at exactly the same rate on every straight, and a pass that has not
+/// happened by the first corner never does. People are faster here and slower there.
+const WOBBLE: f32 = 0.025;
+/// The wavelength of that breathing is between these, metres along the line.
+const WOBBLE_MIN: f32 = 600.0;
+const WOBBLE_SPREAD: f32 = 500.0;
+
+/// The catch-up ("lastik bant"): a rival this far behind the player drives up to [`CATCH_UP`]
+/// faster, one this far ahead up to [`CATCH_DOWN`] slower, linear in between, metres.
+///
+/// What every arcade racer does and NFSU2 did: without it a race is decided by the first corner —
+/// a player who gets away is alone for ten minutes, one who falls behind never sees the field
+/// again. Small on purpose: at 300 m it is a few km/h, which closes a gap over a lap and does not
+/// teleport anybody.
+const CATCH_SPAN: f32 = 300.0;
+const CATCH_UP: f32 = 0.05;
+const CATCH_DOWN: f32 = 0.05;
+/// Whatever pace, wobble and catch-up add up to, a rail never drives closer to the line's limit
+/// than this — 1.0 is the car's theoretical best on the line, which no person drives.
+const PACE_CEIL: f32 = 0.98;
+
+/// How far the body leans per g of cornering and pitches per g of braking or acceleration, radians.
+///
+/// **Read off the player's own car on the bench**, not chosen: 1.42° at 1.23 g on the circle,
+/// 1.38° of dive under a 13.8 m/s² stop (`ROADMAP.md`, 2026-11-02) — so a rival leans exactly as
+/// much as the same car does when the player drives it. Small, because the game's own anti-roll bars
+/// are stiff; a road car would lean three times as far.
+const ROLL_PER_G: f32 = 1.15 * std::f32::consts::PI / 180.0;
+const PITCH_PER_G: f32 = 0.98 * std::f32::consts::PI / 180.0;
+/// How quickly the body follows, seconds: a sprung mass does not lean the instant the load arrives.
+const ATTITUDE_LAG: f32 = 0.25;
+const G: f32 = 9.81;
+
 /// How far either side of the line a rival settles, in metres. Two lanes, so two cars can be side
 /// by side and one can pass another.
 pub const LANE: f32 = 1.6;
@@ -933,6 +968,14 @@ pub struct Rail {
     /// How fast it is moving across, m/s, positive to the right — what turns its nose a little
     /// into a lane change instead of sliding it sideways.
     lane_v: f32,
+    /// This car's pace rhythm: wavelength (m) and phase (rad) — see [`WOBBLE`].
+    wobble: (f32, f32),
+    /// The catch-up multiplier [`catch_up`] last set, 1.0 when nothing has.
+    catch_up: f32,
+    /// The body's lean, radians: roll (positive = left side down) and pitch (positive = nose up),
+    /// each lagging the load that causes it by [`ATTITUDE_LAG`].
+    roll: f32,
+    pitch: f32,
 }
 
 /// Something on the line a rail must not drive into that is not itself a rail — the player.
@@ -977,7 +1020,31 @@ impl Rail {
             cap: None,
             boxed: false,
             lane_v: 0.0,
+            // From the pace, which is per-car: any per-car number would do, and this one is already
+            // in hand without widening the signature.
+            wobble: (
+                WOBBLE_MIN + (pace * 104_729.0).fract() * WOBBLE_SPREAD,
+                (pace * 7_919.0).fract() * std::f32::consts::TAU,
+            ),
+            catch_up: 1.0,
+            roll: 0.0,
+            pitch: 0.0,
         }
+    }
+
+    /// The fraction of the line's limit this car drives at here: its [`PACE`], breathing with
+    /// [`WOBBLE`], times the catch-up, never past [`PACE_CEIL`].
+    #[must_use]
+    pub fn pace_here(&self) -> f32 {
+        let (len, phase) = self.wobble;
+        let breath = 1.0 + WOBBLE * (std::f32::consts::TAU * self.s / len + phase).sin();
+        (self.pace * breath * self.catch_up).min(PACE_CEIL)
+    }
+
+    /// The body's lean now, (roll, pitch) radians — see [`Self::pose`].
+    #[must_use]
+    pub fn attitude(&self) -> (f32, f32) {
+        (self.roll, self.pitch)
     }
 
     /// A whole grid on the line: one rail per slot, `paces` handed out in slot order.
@@ -1081,7 +1148,7 @@ impl Rail {
             self.v = 0.0;
             return;
         }
-        let mut want = line.speed_at(self.s) * self.pace;
+        let mut want = line.speed_at(self.s) * self.pace_here();
         if let Some(c) = self.cap {
             want = want.min(c);
         }
@@ -1090,11 +1157,21 @@ impl Rail {
             let left = (line.length - self.s).max(0.0);
             want = want.min((2.0 * limits.brake * left).sqrt());
         }
+        let v0 = self.v;
         self.v = if self.v < want {
             (self.v + limits.accel_at(self.v) * dt).min(want)
         } else {
             (self.v - limits.brake * dt).max(want)
         };
+        // The loads the body leans under: along the line from the change of speed, across it from
+        // speed² × curvature (positive = to the left, the way the line turns).
+        let along = (self.v - v0) / dt.max(1e-6);
+        let across = self.v * self.v * line.turn_at(self.s);
+        let k = 1.0 - (-dt / ATTITUDE_LAG).exp();
+        // A left turn pushes the body out to the right: right side down, which is negative roll.
+        self.roll += (-ROLL_PER_G * across / G - self.roll) * k;
+        // Braking dips the nose (negative pitch), accelerating lifts it.
+        self.pitch += (PITCH_PER_G * along / G - self.pitch) * k;
         self.s += self.v * dt;
         if !self.closed && self.s >= line.length {
             // Stopped by the end of the line, and stopped means a speed of nothing: a car parked
@@ -1115,8 +1192,10 @@ impl Rail {
     /// over the road.
     ///
     /// Forward is the line's tangent, pitch included, and up is square to it in the vertical plane
-    /// through it — so a car climbs a ramp nose up and does not lean into a corner, which a rail
-    /// with no suspension should not pretend to.
+    /// through it — so a car climbs a ramp nose up. On top of that the body leans as the player's
+    /// own car does under the same loads ([`ROLL_PER_G`], [`PITCH_PER_G`]): out of a corner, nose
+    /// down under the brakes, back on the throttle. It used to stand bolt upright through all of
+    /// it, which read as a model on a stick.
     #[must_use]
     pub fn pose(&self, line: &RaceLine, ride: f32) -> (Vec3, Quat) {
         let t = line.tangent(self.s);
@@ -1130,7 +1209,9 @@ impl Rail {
         // Into a lane change nose first: the car points where it is going, not where the line
         // does. Positive about up is a turn to the left, and moving right is a turn to the right.
         let yaw = -self.lane_v.atan2(self.v.max(1.0));
-        (at, Quat::from_axis_angle(up, yaw) * rot)
+        // In the body's own frame: roll about its back axis (+Z), pitch about its right (+X).
+        let lean = Quat::from_rotation_z(self.roll) * Quat::from_rotation_x(self.pitch);
+        (at, Quat::from_axis_angle(up, yaw) * rot * lean)
     }
 
     /// The angle a car with this wheelbase would have its front wheels at to drive the line here,
@@ -1139,6 +1220,15 @@ impl Rail {
     #[must_use]
     pub fn steer(&self, line: &RaceLine, wheelbase: f32) -> f32 {
         (wheelbase * line.turn_at(self.s)).atan()
+    }
+}
+
+/// Sets every rail's catch-up against the player at `player_s` (distance along the same line,
+/// unwrapped the way a rail's is): behind the player faster, ahead slower — see [`CATCH_SPAN`].
+pub fn catch_up(field: &mut [Rail], player_s: f32) {
+    for r in field {
+        let gap = ((r.s - player_s) / CATCH_SPAN).clamp(-1.0, 1.0);
+        r.catch_up = 1.0 - gap * if gap < 0.0 { CATCH_UP } else { CATCH_DOWN };
     }
 }
 
@@ -1205,7 +1295,7 @@ pub fn advance(
                     (v + DROP_BACK * room).max(0.0)
                 }
             });
-            let want = line.speed_at(me.s) * me.pace;
+            let want = line.speed_at(me.s) * me.pace_here();
             let held = cap.is_some_and(|c| c < want * 0.97);
             let goal = me.lane_goal;
             let (s_me, v_me) = (me.s, me.v);
@@ -1448,6 +1538,60 @@ mod tests {
     }
 
     /// A fast car behind a slow one in the same lane never drives into it, and gets past it.
+    #[test]
+    fn the_body_leans_out_of_a_corner_and_dips_under_the_brakes() {
+        let lim = limits();
+        // A left-hand circle (anticlockwise seen from above, the way `circle` runs), driven at pace.
+        let line = RaceLine::from_points(circle(60.0, 180), true, &lim).expect("a line");
+        let turn = line.turn_at(10.0).signum();
+        let mut r = Rail::place(&line, line.point(0.0), line.tangent(0.0), 0.0, 0.9);
+        for _ in 0..600 {
+            r.step(&line, &lim, 1.0 / 60.0, false);
+        }
+        let (roll, _) = r.attitude();
+        assert!(roll != 0.0 && roll.signum() == -turn, "leans away from the turn: roll {roll}, turn {turn}");
+        let lateral_g = r.speed().powi(2) / 60.0 / G;
+        assert!((roll.abs() - ROLL_PER_G * lateral_g).abs() < ROLL_PER_G * 0.2, "as far as the bench car does");
+
+        // Straight line, full stop from speed: the nose goes down while it brakes.
+        let straight: Vec<Vec3> = (0..400).map(|i| Vec3::new(0.0, 0.0, -(i as f32) * 2.0)).collect();
+        let line = RaceLine::from_points(straight, false, &lim).expect("a line");
+        let mut r = Rail::place(&line, line.point(0.0), line.tangent(0.0), 0.0, 0.9);
+        let mut lifted = false;
+        let mut dipped = false;
+        for _ in 0..3000 {
+            r.step(&line, &lim, 1.0 / 60.0, false);
+            lifted |= r.attitude().1 > PITCH_PER_G * 0.05;
+            dipped |= r.attitude().1 < -PITCH_PER_G * 0.3;
+        }
+        assert!(lifted, "the nose rises as it pulls away");
+        assert!(dipped, "and dips as it stops for the end of the line");
+    }
+
+    #[test]
+    fn pace_breathes_and_catch_up_pulls_towards_the_player() {
+        let lim = limits();
+        let line = RaceLine::from_points(circle(200.0, 400), true, &lim).expect("a line");
+        let mut r = Rail::place(&line, line.point(0.0), line.tangent(0.0), 0.0, 0.92);
+        let paces: Vec<f32> = (0..200)
+            .map(|i| {
+                r.s = i as f32 * 10.0;
+                r.pace_here()
+            })
+            .collect();
+        let (lo, hi) = paces.iter().fold((f32::MAX, f32::MIN), |(a, b), p| (a.min(*p), b.max(*p)));
+        assert!(hi - lo > 0.92 * WOBBLE, "it breathes: {lo}..{hi}");
+        assert!(hi <= PACE_CEIL);
+
+        let mut field = vec![r.clone(), r.clone()];
+        field[0].s = 0.0;
+        field[1].s = 1000.0;
+        let base: Vec<f32> = field.iter().map(Rail::pace_here).collect();
+        catch_up(&mut field, 500.0);
+        assert!(field[0].pace_here() > base[0], "behind the player: faster");
+        assert!(field[1].pace_here() < base[1], "ahead of the player: slower");
+    }
+
     #[test]
     fn traffic_is_followed_and_then_passed() {
         let l = limits();

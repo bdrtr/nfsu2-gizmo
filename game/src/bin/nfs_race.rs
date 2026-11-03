@@ -26,6 +26,8 @@ const N_CHECKPOINTS: usize = 12;
 const CP_RADIUS: f32 = 9.0;
 
 struct RaceState {
+    /// The engine's voice; `None` with no audio device or under `NFS_MUTE=1`.
+    engine: Option<nfsu2::sound::EngineSound>,
     rig: CarRig,
     driver: Driver,
     camera: ChaseCamera,
@@ -262,6 +264,7 @@ fn setup_scene(world: &mut World, renderer: &gizmo::renderer::Renderer) -> RaceS
     );
 
     RaceState {
+        engine: nfsu2::sound::EngineSound::start(),
         rig,
         driver: Driver::new(),
         camera,
@@ -298,6 +301,11 @@ fn update(world: &mut World, state: &mut RaceState, dt: f32, input: &Input) {
         controls.steer = state.driver.steer;
     }
     state.rig.drive(world, &controls);
+    if let Some(engine) = state.engine.as_mut() {
+        if let Some(v) = world.borrow::<gizmo::physics::vehicle::VehicleController>().get(state.rig.chassis) {
+            engine.follow(v, dt);
+        }
+    }
 
     if input.is_key_just_pressed(KeyCode::KeyR as u32) {
         state.rig.reset(world);
@@ -385,11 +393,6 @@ fn diagnose(world: &World, state: &mut RaceState, pose: nfsu2::rig::Pose) {
 }
 
 fn ui(world: &mut World, state: &mut RaceState, ctx: &egui::Context) {
-    let speed = world
-        .borrow::<gizmo::physics::vehicle::VehicleController>()
-        .get(state.rig.chassis)
-        .map(|v| v.current_speed_kmh.abs())
-        .unwrap_or(0.0);
     egui::Area::new(egui::Id::new("hud"))
         .anchor(egui::Align2::LEFT_TOP, egui::vec2(24.0, 24.0))
         .show(ctx, |ui| {
@@ -399,11 +402,9 @@ fn ui(world: &mut World, state: &mut RaceState, ctx: &egui::Context) {
                 ui.label(format!("En iyi: {:>5.1} s", state.best_time));
             }
             ui.label(format!("Checkpoint: {}/{}", state.next_cp, N_CHECKPOINTS));
-        });
-    egui::Area::new(egui::Id::new("spd"))
-        .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-30.0, -30.0))
-        .show(ctx, |ui| {
-            ui.heading(format!("{speed:.0} km/h"));
             ui.label("W/S · A/D · Space · R");
         });
+    if let Some(v) = world.borrow::<gizmo::physics::vehicle::VehicleController>().get(state.rig.chassis) {
+        nfsu2::hud::show(ctx, &nfsu2::hud::Dash::of(v));
+    }
 }

@@ -15,7 +15,7 @@
 //!
 //! Controls: **W/↑** accelerate · **S/↓** brake, then reverse · **A/D or ←/→** steer · **Space** handbrake ·
 //! **R** back to the start · **Enter** run the race again · **T** auto-shift · hold **right mouse** to orbit · **F** print where
-//! the car is.
+//! the car is · **F3** the technical overlay (counters, course fix, the race line on the road).
 //!
 //! Env: `NFS_FREEROAM=1` **serbest dolaşım** — Bayview with no race in it: loads `STREAML4RA.BUN`
 //! (the one region of the eight that is the city), starts on the free-roam grid, draws no line and
@@ -27,7 +27,7 @@
 //! and a result · `NFS_DEMO=1` with it, your car rides a rail too — the race runs itself, start to
 //! result · `NFS_RIVALDRIVER=pilot` drive the rivals with the simulated pilot instead · `NFS_AT="x,y,z"` where to start — downtown sits near `y ≈ 27` and the airport near
 //! `y ≈ -11`, so the height matters as much as the place · `NFS_BUDGET=<n>` caps objects,
-//! nearest-first · `NFS_DIAG=1` prints the physics' own view once a second · plus everything
+//! nearest-first · `NFS_DEBUG=1` start with the F3 overlay on · `NFS_DIAG=1` prints the physics' own view once a second · plus everything
 //! [`nfsu2::rig`] reads (`NFS_PAINT`, `NFS_KIT`, `NFS_ENGINE`, `NFS_SHOTCAM`, …).
 
 use gizmo::egui;
@@ -101,6 +101,8 @@ const OUT_OF_BOUNDS_GRACE: f32 = 5.0;
 const OUT_OF_BOUNDS_LOOKAHEAD: f32 = 2.0;
 
 struct CruiseState {
+    /// The engine's voice; `None` with no audio device or under `NFS_MUTE=1`.
+    engine: Option<nfsu2::sound::EngineSound>,
     rig: CarRig,
     driver: Driver,
     camera: ChaseCamera,
@@ -147,6 +149,12 @@ struct CruiseState {
     /// below roughly eight thousand renderables and telling the caller to measure their own scene
     /// instead of quoting the band. This is that measurement.
     frames: Vec<f32>,
+    /// The technical overlay: the cell and frame counters, the course fix and the race line drawn
+    /// on the road. Off by default — in a race they are debugging leftovers, not a HUD — and on
+    /// under `NFS_DEBUG=1` or with **F3**.
+    debug: bool,
+    /// The race line's entity, shown and hidden with [`Self::debug`].
+    race_line: Option<u32>,
 }
 
 /// How many frames the timing window keeps. One second at 60 Hz, so a stutter shows as a p95 that
@@ -347,6 +355,9 @@ impl RailRace {
         let me = Obstacle { s: self.player_s, lane: self.player_lane, v: self.player_v };
         let before: Vec<(Vec3, Quat)> =
             self.rigs.iter().enumerate().map(|(k, g)| self.shown(k, g.ride())).collect();
+        // The field is pulled towards the player — the demo's own rail stands in for one.
+        let player_s = self.demo.as_ref().map_or(self.player_s, |own| own.s());
+        rail::catch_up(&mut self.field, player_s);
         match self.demo.take() {
             // In the demo the player is a rail among rails, so it goes into the same traffic.
             Some(own) => {
@@ -772,6 +783,7 @@ fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> CruiseState
         &renderer.queue,
         &renderer.scene.texture_bind_group_layout,
     );
+    let mut race_line = None;
     {
         let mut tex = Textures {
             assets: &mut assets,
@@ -819,7 +831,7 @@ fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> CruiseState
                 let mesh = Mesh::from_vertices(&renderer.device, &verts, String::from("course"));
                 let material =
                     Material::new(white.clone()).with_unlit(Vec4::new(0.95, 0.15, 0.15, 1.0));
-                scene::spawn_mesh(world, mesh, material, Transform::new(Vec3::ZERO));
+                race_line = Some(scene::spawn_mesh(world, mesh, material, Transform::new(Vec3::ZERO)));
             }
         }
 
@@ -1036,9 +1048,14 @@ fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> CruiseState
     let camera =
         ChaseCamera::spawn(world, rig.start.position + Vec3::new(0.0, 4.0, 10.0), 0.5, 20_000.0);
 
+    let debug = std::env::var("NFS_DEBUG").is_ok_and(|v| v != "0");
+    if let Some(id) = race_line {
+        set_drawn(world, id, debug);
+    }
     println!("cruising at {:?} — {} meshes drawn", rig.start.position, stats.meshes);
     println!("bounds: {} cells with ground", bounds.cells());
     CruiseState {
+        engine: nfsu2::sound::EngineSound::start(),
         ground,
         walls,
         rig,
@@ -1059,6 +1076,20 @@ fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> CruiseState
         net,
         waypoints: course_line,
         frames: Vec::with_capacity(FRAME_WINDOW),
+        debug,
+        race_line,
+    }
+}
+
+/// Draws or hides a debugging mesh, through the engine's own `IsHidden` marker: skipped whole by
+/// the draw list, shadow included.
+fn set_drawn(world: &mut World, id: u32, drawn: bool) {
+    use gizmo::core::component::IsHidden;
+    let Some(e) = world.get_entity(id) else { return };
+    if drawn {
+        world.remove_component::<IsHidden>(e);
+    } else {
+        world.add_component(e, IsHidden);
     }
 }
 
@@ -1095,6 +1126,11 @@ fn update(world: &mut World, state: &mut CruiseState, dt: f32, input: &Input) {
         }
     }
     state.rig.drive(world, &controls);
+    if let Some(engine) = state.engine.as_mut() {
+        if let Some(v) = world.borrow::<gizmo::physics::vehicle::VehicleController>().get(state.rig.chassis) {
+            engine.follow(v, dt);
+        }
+    }
 
     // The rivals. Same `drive` the player's controls go through — a pilot that reached past it
     // into physics would be racing a different car from the one on screen.
@@ -1256,6 +1292,12 @@ fn update(world: &mut World, state: &mut CruiseState, dt: f32, input: &Input) {
         }
     }
 
+    if input.is_key_just_pressed(KeyCode::F3 as u32) {
+        state.debug = !state.debug;
+        if let Some(id) = state.race_line {
+            set_drawn(world, id, state.debug);
+        }
+    }
     if input.is_key_just_pressed(KeyCode::KeyF as u32) {
         println!("NFS_AT=\"{:.0},{:.0},{:.0}\"", pose.position.x, pose.position.y, pose.position.z);
     }
@@ -1376,32 +1418,26 @@ fn diagnose(world: &World, state: &mut CruiseState, pose: nfsu2::rig::Pose) {
 }
 
 fn ui(world: &mut World, state: &mut CruiseState, ctx: &egui::Context) {
-    let speed = match state.rails.as_ref().and_then(|r| r.demo.as_ref()) {
-        Some(own) => own.speed() * 3.6,
+    let dash = match state.rails.as_ref().and_then(|r| r.demo.as_ref()) {
+        Some(own) => Some(nfsu2::hud::Dash::speed_only(own.speed() * 3.6)),
         None => world
             .borrow::<gizmo::physics::vehicle::VehicleController>()
             .get(state.rig.chassis)
-            .map(|v| v.current_speed_kmh.abs())
-            .unwrap_or(0.0),
+            .map(nfsu2::hud::Dash::of),
     };
-    let s = &state.stats;
-    egui::Area::new(egui::Id::new("city"))
-        .anchor(egui::Align2::LEFT_TOP, egui::vec2(24.0, 24.0))
-        .show(ctx, |ui| {
-            ui.label(format!("{} obje · {} mesh · {} backdrop", s.objects, s.meshes, s.backdrop));
-            ui.label(format!("{} hücre · {} üçgen ({} sürülebilir)", s.cells, s.triangles, s.drivable));
-            if state.free_roam {
-                ui.label(format!(
-                    "SERBEST DOLAŞIM · free roam · {} nokta (NFS_SPOT=0..{})",
-                    state.spots,
-                    state.spots.saturating_sub(1)
-                ));
-            }
-            if let Some((med, p95)) = frame_ms(&state.frames) {
-                ui.label(format!("{med:.1} ms · p95 {p95:.1} ms · {:.0} fps", 1000.0 / med));
-            }
-            ui.label("W/S · A/D · Space · R · F konumu yazdırır");
-        });
+    if state.debug {
+        debug_ui(state, ctx);
+    } else {
+        egui::Area::new(egui::Id::new("keys"))
+            .anchor(egui::Align2::LEFT_BOTTOM, egui::vec2(24.0, -24.0))
+            .show(ctx, |ui| {
+                ui.label(
+                    egui::RichText::new("W/S · A/D · Space el freni · R başa · Enter yeniden · F3 teknik")
+                        .size(12.0)
+                        .color(egui::Color32::from_gray(150)),
+                );
+            });
+    }
     // The warning is the point of the grace period — a countdown nobody sees is just a delay.
     if state.out_for > 0.0 || state.heading_out {
         egui::Area::new(egui::Id::new("oob"))
@@ -1417,21 +1453,7 @@ fn ui(world: &mut World, state: &mut CruiseState, ctx: &egui::Context) {
                 }
             });
     }
-    // Where the race is, when there is one. The distance is shown rather than a bare on/off,
-    // because a corridor half-width is a judgement and a number lets it be argued with.
     if let Some(c) = &state.course {
-        egui::Area::new(egui::Id::new("course"))
-            .anchor(egui::Align2::LEFT_BOTTOM, egui::vec2(24.0, -24.0))
-            .show(ctx, |ui| {
-                ui.label(format!("rota {} · koridor ±{COURSE_HALF_WIDTH:.0} m", c.name));
-                match c.fix {
-                    None => ui.label("Bu yarışın ağı buraya ulaşmıyor · off the race network"),
-                    Some(f) => ui.label(format!(
-                        "hat {} · {:.0} m · mesafe {:.0}",
-                        f.path, f.distance, f.progress
-                    )),
-                };
-            });
         if c.off_for > 0.0 {
             egui::Area::new(egui::Id::new("offcourse"))
                 .anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 140.0))
@@ -1449,14 +1471,47 @@ fn ui(world: &mut World, state: &mut CruiseState, ctx: &egui::Context) {
     if let Some(rr) = &state.rails {
         race_ui(rr, ctx);
     }
+    if let Some(d) = dash {
+        nfsu2::hud::show(ctx, &d);
+    }
+}
 
-    egui::Area::new(egui::Id::new("spd"))
-        .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-30.0, -30.0))
+/// The technical overlay (**F3**, `NFS_DEBUG=1`): what the city cost and where the car is on the
+/// race's own network.
+fn debug_ui(state: &CruiseState, ctx: &egui::Context) {
+    let s = &state.stats;
+    egui::Area::new(egui::Id::new("city"))
+        .anchor(egui::Align2::LEFT_TOP, egui::vec2(24.0, 24.0))
         .show(ctx, |ui| {
-            // Never wrapped: an area pinned to the right edge has no width of its own, and "60
-            // km/h" came out as three lines.
-            ui.add(egui::Label::new(egui::RichText::new(format!("{speed:.0} km/h")).heading()).extend());
+            ui.label(format!("{} obje · {} mesh · {} backdrop", s.objects, s.meshes, s.backdrop));
+            ui.label(format!("{} hücre · {} üçgen ({} sürülebilir)", s.cells, s.triangles, s.drivable));
+            if state.free_roam {
+                ui.label(format!(
+                    "SERBEST DOLAŞIM · free roam · {} nokta (NFS_SPOT=0..{})",
+                    state.spots,
+                    state.spots.saturating_sub(1)
+                ));
+            }
+            if let Some((med, p95)) = frame_ms(&state.frames) {
+                ui.label(format!("{med:.1} ms · p95 {p95:.1} ms · {:.0} fps", 1000.0 / med));
+            }
+            ui.label(format!("görüş {:.0}°", state.camera.fov.to_degrees()));
+            ui.label("W/S · A/D · Space · R · F konumu yazdırır · F3 kapatır");
         });
+    if let Some(c) = &state.course {
+        egui::Area::new(egui::Id::new("course"))
+            .anchor(egui::Align2::LEFT_BOTTOM, egui::vec2(24.0, -24.0))
+            .show(ctx, |ui| {
+                ui.label(format!("rota {} · koridor ±{COURSE_HALF_WIDTH:.0} m", c.name));
+                match c.fix {
+                    None => ui.label("Bu yarışın ağı buraya ulaşmıyor · off the race network"),
+                    Some(f) => ui.label(format!(
+                        "hat {} · {:.0} m · mesafe {:.0}",
+                        f.path, f.distance, f.progress
+                    )),
+                };
+            });
+    }
 }
 
 /// The race's own HUD: the countdown, where you are in the order, how much is left, and at the end

@@ -23,9 +23,11 @@
 pub mod assets;
 pub mod car;
 pub mod geom;
+pub mod hud;
 pub mod race;
 pub mod rig;
 pub mod scene;
+pub mod sound;
 pub mod world;
 
 /// Part classification and configuration — pure policy that lives in the parser crate (so the
