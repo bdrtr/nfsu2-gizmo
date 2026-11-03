@@ -205,6 +205,37 @@ impl Limits {
     }
 }
 
+/// What one rear-end collision did, read off [`Bench::crash`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Crash {
+    /// Forward speeds, m/s: the player and the rail just before they met, and both at the end.
+    pub player_before: f32,
+    pub player_after: f32,
+    pub rail_before: f32,
+    pub rail_after: f32,
+    /// Seconds the two were touching.
+    pub touching: f32,
+    /// The deepest the boxes went into each other, metres.
+    pub overlap: f32,
+    /// The player's lowest forward speed while in contact — negative is a bounce backwards.
+    pub player_lowest: f32,
+    /// The player's largest yaw rate during the run, rad/s.
+    pub yaw: f32,
+}
+
+impl Crash {
+    /// The two cars' momentum, end against start, as a fraction — 1.0 is all of it kept, which is
+    /// what two bodies trading speed do and a body hitting a wall does not.
+    #[must_use]
+    pub fn momentum_kept(&self) -> f32 {
+        let before = self.player_before + self.rail_before;
+        if before.abs() < 1e-3 {
+            return 1.0;
+        }
+        (self.player_after + self.rail_after) / before
+    }
+}
+
 /// One car on one plane, stepped the way the race steps its cars.
 ///
 /// Public so a measurement binary can script its own manoeuvres on the same plane the dyno uses.
@@ -258,6 +289,95 @@ impl Bench {
         Self { world, rig, t: 0.0 }
     }
 
+    /// The player at `player` m/s driving into the back of the same car on rails at `rail` m/s,
+    /// coasting, for `seconds` — resolved the way the race resolves it ([`super::bump`]), or with
+    /// `solver` the old way: the rail's body left in the engine's solver as a kinematic wall.
+    ///
+    /// `None` when the car never reaches `player` m/s.
+    pub fn crash(
+        renderer: &Renderer,
+        assets: &mut AssetManager,
+        car_path: &str,
+        player: f32,
+        rail: f32,
+        seconds: f32,
+        solver: bool,
+    ) -> Option<Crash> {
+        use super::rail::{RaceLine, Rail};
+        let mut b = Self::new(renderer, assets, car_path);
+        // Up to speed in a straight line.
+        let full = Controls { throttle: 1.0, ..Controls::default() };
+        while b.forward_speed() < player {
+            if b.t > 60.0 {
+                return None;
+            }
+            b.step(&full);
+        }
+        let pose = b.rig.pose(&b.world)?;
+        let forward = (pose.rotation * Vec3::NEG_Z).with_y(0.0).normalize_or_zero();
+        let ground = Vec3::new(pose.position.x, 0.0, pose.position.z);
+        let points: Vec<Vec3> = (0..1500).map(|i| ground + forward * (i as f32 * 2.0 - 20.0)).collect();
+        let limits = Limits { accel: vec![3.0; 80], top: 80.0, brake: 10.0, grip: 10.0 };
+        let line = RaceLine::from_points(points, false, &limits)?;
+        // A car's length and a metre of air in front of the player's nose.
+        let gap = b.rig.size.z + 1.0;
+        let pace = rail / line.speed_at(20.0 + gap).max(1.0);
+        let mut field = vec![Rail::place(&line, ground + forward * gap, forward, 0.0, pace).with_speed(rail)];
+        let mut phys = b.world.remove_resource::<PhysicsWorld>()?;
+        let rival = build_car(&mut b.world, renderer, assets, &mut phys, car_path, Placement::origin());
+        b.world.insert_resource(phys);
+        rival.make_kinematic(&mut b.world);
+        if solver {
+            if let Some(mut c) = b.world.borrow_mut::<Collider>().get_mut(rival.chassis) {
+                c.collision_layer = gizmo::physics::components::CollisionLayer::default();
+            }
+        }
+        let rivals = [rival];
+        let placed = field[0].pose(&line, rivals[0].ride());
+        rivals[0].place(&mut b.world, placed, placed, FIXED_DT);
+
+        let mut out = Crash {
+            player_before: b.forward_speed(),
+            player_after: 0.0,
+            rail_before: field[0].speed(),
+            rail_after: 0.0,
+            touching: 0.0,
+            overlap: 0.0,
+            player_lowest: f32::MAX,
+            yaw: 0.0,
+        };
+        let coast = Controls::default();
+        let end = b.t + seconds;
+        while b.t < end {
+            let hits = if solver {
+                Vec::new()
+            } else {
+                super::bump::player_vs_rails(&mut b.world, &b.rig, &rivals, &mut field, &line, FIXED_DT)
+            };
+            // Touching, by the same test either way, so the two runs are measured alike.
+            let touching = match (b.rig.bump_body(&b.world, None), rivals[0].bump_body(&b.world, Some(field[0].velocity(&line)))) {
+                (Some(me), Some(them)) => super::bump::contact(&me, &them),
+                _ => None,
+            };
+            if let Some(c) = touching.or(hits.first().map(|h| h.1)) {
+                out.touching += FIXED_DT;
+                out.overlap = out.overlap.max(c.depth);
+                out.player_lowest = out.player_lowest.min(b.forward_speed());
+            }
+            let was = field[0].pose(&line, rivals[0].ride());
+            field[0].step(&line, &limits, FIXED_DT, false);
+            rivals[0].place(&mut b.world, was, field[0].pose(&line, rivals[0].ride()), FIXED_DT);
+            b.step(&coast);
+            out.yaw = out.yaw.max(b.yaw_rate().abs());
+        }
+        out.player_after = b.forward_speed();
+        out.rail_after = field[0].speed();
+        if out.player_lowest == f32::MAX {
+            out.player_lowest = out.player_after;
+        }
+        Some(out)
+    }
+
     /// Print the car's `car ready` / `handling` lines, which the bench builds without.
     pub fn announce(&self) {
         self.rig.announce();
@@ -266,7 +386,7 @@ impl Bench {
     /// One physics step with these controls.
     pub fn step(&mut self, c: &Controls) {
         self.rig.drive(&mut self.world, c);
-        gizmo::physics::vehicle_controller_system(&self.world, FIXED_DT);
+        super::drive::vehicle_step(&mut self.world, FIXED_DT);
         self.rig.apply_downforce(&mut self.world, FIXED_DT);
         gizmo::physics::physics_step_system(&self.world, FIXED_DT);
         self.t += FIXED_DT;

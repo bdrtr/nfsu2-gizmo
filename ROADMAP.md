@@ -8036,3 +8036,42 @@ Listenin 4. maddesi, çarpışma hariç. Hepsi `rig::rail`'de:
 Açık: oyuncu bir rakibe çarptığında rakip gövdesi kinematik olduğu için sonsuz kütleli bir duvar
 gibi davranıyor. Oyun tarafında temas anında rakibin rayına hız ve yanal itme verilebilir, ama
 çarpışmanın ilk karesindeki sekmeyi bu değiştirmez.
+
+### Çarpışma ve ayna: ikisinin cevabı da `SPEED2.EXE`'de (2026-11-03)
+
+Açık kalan iki kusur REA ile oyunun kendisinden okunarak kapatıldı. Adresler hafızada ve
+`MOTOR-NOTLARI.md` #19/#20'de.
+
+**Rakibe çarpınca duvar.** Raydaki rakip kinematik bir gövde, ve motorun çözücüsü için kinematik
+gövde sonsuz kütleli. Tezgâh (`NFS_BENCH=crash nfs_bench`) bunun "duvar gibi"den de kötü olduğunu
+gösterdi: 15 m/s ile duran bir rakibe çarpan oyuncu −90 m/s'ye fırlatılıyor ve 58 rad/s dönüyordu.
+Oyunun araba–araba çözücüsü `0x5af0e0`: standart iki gövdeli impuls, esneklik **0,1**
+(`0x5a0c90`), ve iki yumuşatma — tek temas hafif arabanın hızını en fazla **0,3 m/s** değiştirir
+(`0x5af4c0`, oyunun 1/60 s'lik adımı başına), ve her araba impulsa en az **1,85 t** gibi tepki
+verir (`0x5a0b00`); impulsun dönmeye giden payı **0,4**. Çarpışma bir sekme değil, temas sürdükçe
+biriken bir itişme.
+
+`rig::bump` bunu oyuncu ile raylar arasında uyguluyor: rakibin collider'ı `CollisionLayer` ile
+çözücüden çıkarıldı, temas plan görünüşünde iki dikdörtgenin ayırma ekseniyle bulunuyor, örtüşme
+iki arabaya kütle payıyla geri alınıyor, ve rakibin payı rayına yazılıyor (`Rail::bump`: hız,
+çizgi boyunca kayma, sönen yana itme). İtilen ray 0,8 s fren yapmıyor — yapsaydı itişi geri verir,
+yaylı bir duvar olurdu (ilk denemede öyleydi: momentumun %56'sı).
+
+| çarpışma (m/s) | eski: oyuncu | eski: momentum | şimdi: oyuncu / rakip | şimdi: momentum |
+|---|---|---|---|---|
+| 20 → 15'lik rakip | 20 → 14,3 | %83 | 20 → 16,4 / 15 → 16,3 | %93 |
+| 25 → 10'luk rakip | 25 → **−2,0** (sekti), 1,64 rad/s | %23 | 25 → 17,1 / 10 → 17,0 | %97 |
+| 15 → duran rakip | 15 → **−55,7** (en düşük −90,9), 58 rad/s | — | 15 → 11,1, 0,39 rad/s | %74 |
+
+**Ayna (#19).** Oyun dört tekerleğin kuvvetini toplayıp adım başına bir kez integre ediyor:
+`AddForceAtPoint` `0x59bb00` yalnız `+0x110`/`+0x120` biriktiricilerine ekliyor, integratör
+onları harcayıp sıfırlıyor — sıra bağımsız. Motor bunu yapana kadar `rig::vehicle_step` her adımda
+her aksın sol/sağ tekerleğini kontrolcü çağrısının etrafında yer değiştiriyor ve geri alıyor; yan
+120 Hz'te işaret değiştiriyor. `NFS_BENCH=mirror nfs_bench`: PEUGOT ve 240SX'te her satır
+"ayna", iki ondalığa kadar (önce yüklerde %12'ye, yanal tutuşta %5'e kadar fark).
+`NFS_WHEELORDER=fixed` eski sırayı geri getiriyor.
+
+Etkisi ölçüldü. Pilot süpürmesi (`sweep-table.py`, sekiz rota, taban `NFS_WHEELORDER=fixed`):
+1 536 → 1 565, hüküm **taşınıyor** (4041 +67 tek başına) — pilot için nötr; taban son kayıttaki
+1 536'yla birebir. Dyno: fren 13,8 → 14,0 m/s², yanal tutunma 11,4 → 11,5 m/s²; `nfs_rail` 105
+yarışta 840/840 bitiriyor.

@@ -142,6 +142,18 @@ const PITCH_PER_G: f32 = 0.98 * std::f32::consts::PI / 180.0;
 const ATTITUDE_LAG: f32 = 0.25;
 const G: f32 = 9.81;
 
+/// How long a car pushed by a collision rolls on before it brakes back down to its pace, seconds,
+/// and how fast it slows meanwhile, m/s² — rolling resistance and drag, no brakes.
+const DAZED: f32 = 0.8;
+const COAST: f32 = 1.0;
+
+/// How fast a sideways shove from a collision dies away, per second: a car knocked across slides
+/// for about a second and is then back under the lane logic.
+const SHOVE_DECAY: f32 = 3.0;
+/// The furthest a collision may knock a rail off its line, metres either side. Past this it would be
+/// off the road the line was laid on, and a rail has no idea how to drive there.
+const SHOVE_LANE: f32 = 4.0;
+
 /// How far either side of the line a rival settles, in metres. Two lanes, so two cars can be side
 /// by side and one can pass another.
 pub const LANE: f32 = 1.6;
@@ -976,6 +988,12 @@ pub struct Rail {
     /// each lagging the load that causes it by [`ATTITUDE_LAG`].
     roll: f32,
     pitch: f32,
+    /// Sideways speed a collision left it with, m/s, positive to the right; dies away at
+    /// [`SHOVE_DECAY`] while the lane logic steers it back.
+    shove: f32,
+    /// Seconds left before a car a collision pushed faster than it wants to go starts braking back
+    /// down — see [`DAZED`].
+    dazed: f32,
 }
 
 /// Something on the line a rail must not drive into that is not itself a rail — the player.
@@ -1029,7 +1047,41 @@ impl Rail {
             catch_up: 1.0,
             roll: 0.0,
             pitch: 0.0,
+            shove: 0.0,
+            dazed: 0.0,
         }
+    }
+
+    /// What a collision did to this car ([`super::bump`]): a change of velocity `dv` and a
+    /// displacement `moved`, both world space. Along the line they become speed and distance;
+    /// across it, a sideways drift that dies away and a step out of its lane it then steers back
+    /// from.
+    pub fn bump(&mut self, line: &RaceLine, dv: Vec3, moved: Vec3) {
+        let t = line.tangent(self.s);
+        let along = Vec3::new(t.x, 0.0, t.z).normalize_or_zero();
+        let right = along.cross(Vec3::Y);
+        self.s += moved.dot(along);
+        self.lane = (self.lane + moved.dot(right)).clamp(-SHOVE_LANE, SHOVE_LANE);
+        self.v = (self.v + dv.dot(along)).max(0.0);
+        self.shove += dv.dot(right);
+        self.dazed = DAZED;
+    }
+
+    /// The car's velocity, world space: along the line at its speed, plus however fast it is
+    /// moving across.
+    #[must_use]
+    pub fn velocity(&self, line: &RaceLine) -> Vec3 {
+        let t = line.tangent(self.s);
+        let right = Vec3::new(t.x, 0.0, t.z).normalize_or_zero().cross(Vec3::Y);
+        t * self.v + right * self.lane_v
+    }
+
+    /// The same rail already moving at `v` m/s — for a bench that wants a car ahead at a known
+    /// speed rather than one starting from the grid.
+    #[must_use]
+    pub fn with_speed(mut self, v: f32) -> Self {
+        self.v = v.max(0.0);
+        self
     }
 
     /// The fraction of the line's limit this car drives at here: its [`PACE`], breathing with
@@ -1158,10 +1210,15 @@ impl Rail {
             want = want.min((2.0 * limits.brake * left).sqrt());
         }
         let v0 = self.v;
+        // Pushed faster than it wants to go, it rolls on for a moment before it brakes: a driver hit
+        // from behind does not stand on the brakes in the same instant, and a rail that did would
+        // hand the push straight back — the shove would be a spring, and the car a wall again.
+        let slowing = if self.dazed > 0.0 { COAST } else { limits.brake };
+        self.dazed = (self.dazed - dt).max(0.0);
         self.v = if self.v < want {
             (self.v + limits.accel_at(self.v) * dt).min(want)
         } else {
-            (self.v - limits.brake * dt).max(want)
+            (self.v - slowing * dt).max(want)
         };
         // The loads the body leans under: along the line from the change of speed, across it from
         // speed² × curvature (positive = to the left, the way the line turns).
@@ -1184,6 +1241,13 @@ impl Rail {
         if !self.boxed {
             let reach = LANE_RATE * dt;
             self.lane += (self.lane_goal - self.lane).clamp(-reach, reach);
+        }
+        if self.shove != 0.0 {
+            self.lane = (self.lane + self.shove * dt).clamp(-SHOVE_LANE, SHOVE_LANE);
+            self.shove *= (-SHOVE_DECAY * dt).exp();
+            if self.shove.abs() < 0.01 {
+                self.shove = 0.0;
+            }
         }
         self.lane_v = (self.lane - before) / dt.max(1e-6);
     }

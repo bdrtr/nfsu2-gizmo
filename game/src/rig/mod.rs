@@ -27,6 +27,7 @@
 //! a ground plane, `nfs_race` a track ribbon with checkpoints, and the city binary will hand
 //! [`crate::world::collision_cells`] to physics. All three then spawn one car the same way.
 
+pub mod bump;
 mod chase;
 mod drive;
 pub mod dyno;
@@ -36,7 +37,7 @@ pub mod rail;
 use crate::world::Ground;
 
 pub use chase::ChaseCamera;
-pub use drive::{Controls, Driver, FIXED_DT};
+pub use drive::{vehicle_step, Controls, Driver, FIXED_DT};
 pub use dyno::Limits;
 pub use pilot::Pilot;
 pub use rail::{Obstacle, RaceLine, Rail};
@@ -167,6 +168,10 @@ pub struct Pose {
     /// wants metres, so the conversion happens once, here.
     pub speed: f32,
 }
+
+/// The collision layer a car on rails sits on — with a mask of nothing, so the solver never pairs
+/// it with anything ([`CarRig::make_kinematic`]).
+pub const RAIL_LAYER: u32 = 2;
 
 /// How long all four wheels must stay down before that pose counts as ground worth returning to.
 ///
@@ -760,6 +765,52 @@ impl CarRig {
         }
         if let Some(e) = world.get_entity(self.chassis) {
             world.remove_component::<VehicleController>(e);
+        }
+        // Out of the solver altogether: to it a kinematic body is a wall of infinite mass, and the
+        // player met rivals as walls. Contacts with the player are resolved by [`bump`] instead,
+        // and rails keep their distance from each other by themselves.
+        if let Some(mut c) = world.borrow_mut::<Collider>().get_mut(self.chassis) {
+            c.collision_layer = gizmo::physics::components::CollisionLayer::new(RAIL_LAYER).with_mask(0);
+        }
+    }
+
+    /// This car as [`bump`] sees it: its collision box, how it moves, what it weighs. `velocity`
+    /// overrides the body's own — a rail's body carries the velocity of its last placement, and the
+    /// rail knows better.
+    #[must_use]
+    pub fn bump_body(&self, world: &World, velocity: Option<Vec3>) -> Option<bump::Body> {
+        let transforms = world.borrow::<Transform>();
+        let t = transforms.get(self.chassis)?;
+        let bodies = world.borrow::<RigidBody>();
+        let rb = bodies.get(self.chassis);
+        let vels = world.borrow::<Velocity>();
+        let v = vels.get(self.chassis);
+        let (mass, inertia) = match (rb, velocity) {
+            (Some(rb), None) if rb.mass > 0.0 => (rb.mass, rb.local_inertia),
+            _ => (self.tune.as_ref().map_or(1200.0, |t| t.mass_kg), Vec3::ZERO),
+        };
+        Some(bump::Body {
+            centre: t.position + t.rotation * Vec3::new(0.0, self.size.y * 0.12, 0.0),
+            rotation: t.rotation,
+            half: Vec3::new(self.size.x * 0.42, self.size.y * 0.3, self.size.z * 0.46),
+            velocity: velocity.unwrap_or_else(|| v.map_or(Vec3::ZERO, |v| v.linear)),
+            spin: if velocity.is_some() { Vec3::ZERO } else { v.map_or(Vec3::ZERO, |v| v.angular) },
+            mass,
+            inertia,
+        })
+    }
+
+    /// Apply what a contact did to this (driven) car: its velocity and spin, and the step apart.
+    pub fn take_bump(&self, world: &mut World, dv: Vec3, dw: Vec3, moved: Vec3) {
+        if let Some(mut v) = world.borrow_mut::<Velocity>().get_mut(self.chassis) {
+            v.linear += dv;
+            v.angular += dw;
+        }
+        if moved != Vec3::ZERO {
+            if let Some(mut t) = world.borrow_mut::<Transform>().get_mut(self.chassis) {
+                t.position += moved;
+                t.update_local_matrix();
+            }
         }
     }
 

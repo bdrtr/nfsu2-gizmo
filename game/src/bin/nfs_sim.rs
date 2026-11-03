@@ -2159,7 +2159,7 @@ async fn run() {
                 rig.drive(&mut world, &c);
             }
         }
-        gizmo::physics::vehicle_controller_system(&world, FIXED_DT);
+        nfsu2::rig::vehicle_step(&mut world, FIXED_DT);
         for (rig, _) in field.iter() {
             rig.apply_downforce(&mut world, FIXED_DT);
         }

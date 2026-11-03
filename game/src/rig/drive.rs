@@ -15,6 +15,66 @@ use gizmo::prelude::*;
 /// visibly vibrating on its springs. Four sub-steps per displayed frame is what stopped it.
 pub const FIXED_DT: f32 = 1.0 / 240.0;
 
+/// Which way round the next [`vehicle_step`] takes each axle's wheels.
+struct WheelOrder(bool);
+
+/// The engine's vehicle step, with each axle's left and right wheel taken in alternate order on
+/// alternate steps — the game-side answer to `MOTOR-NOTLARI.md` #19 until the engine has its own.
+///
+/// **What it fixes.** The controller applies each wheel's force to the body's velocity *at once*,
+/// and the next wheel reads its contact speed off the updated velocity (Gauss-Seidel); so the
+/// result depends on the order, and no fixed order of four corners is its own mirror — a car
+/// turned harder one way than the other, by up to 5 % in grip. NFSU2 does not have the problem:
+/// `RigidBody::AddForceAtPoint` (`0x59bb00`) only adds into the force and torque accumulators,
+/// which the integrator (`0x59c8xx`) spends once and clears, so four wheels in any order give one
+/// answer.
+///
+/// **How.** Swapping left and right on every other step makes the bias flip sign at 120 Hz, and
+/// what is left is second order. The swap is undone before the function returns, so nothing that
+/// reads `wheels[i]` between steps — the visuals, the bench, the handbrake — ever sees it, which
+/// was the objection to reordering on record. The engine pairs wheels by `axle_type` and `is_left`,
+/// never by index, so it does not see it either.
+///
+/// `NFS_WHEELORDER=fixed` turns it off — the engine's own fixed order — so what it is worth can be
+/// measured against what it replaced.
+pub fn vehicle_step(world: &mut World, dt: f32) {
+    static FIXED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if *FIXED.get_or_init(|| std::env::var("NFS_WHEELORDER").is_ok_and(|v| v == "fixed")) {
+        gizmo::physics::vehicle_controller_system(world, dt);
+        return;
+    }
+    if world.get_resource::<WheelOrder>().is_none() {
+        world.insert_resource(WheelOrder(true));
+    }
+    let flip = world.get_resource_mut::<WheelOrder>().is_some_and(|mut o| {
+        o.0 = !o.0;
+        o.0
+    });
+    if flip {
+        swap_sides(world);
+    }
+    gizmo::physics::vehicle_controller_system(world, dt);
+    if flip {
+        swap_sides(world);
+    }
+}
+
+/// Swap each axle's left and right wheel in every vehicle's list. Its own inverse.
+fn swap_sides(world: &mut World) {
+    use gizmo::physics::vehicle::{Axle, VehicleController};
+    let ids: Vec<u32> = world.borrow::<VehicleController>().entities().collect();
+    let mut vehicles = world.borrow_mut::<VehicleController>();
+    for id in ids {
+        let Some(mut vc) = vehicles.get_mut(id) else { continue };
+        for axle in [Axle::Front, Axle::Rear] {
+            let find = |left: bool| vc.wheels.iter().position(|w| w.axle_type == axle && w.is_left == left);
+            if let (Some(l), Some(r)) = (find(true), find(false)) {
+                vc.wheels.swap(l, r);
+            }
+        }
+    }
+}
+
 /// The most sub-steps one frame may run before giving up and letting time slip.
 ///
 /// Without it, a frame that stalls (a texture upload, a window drag) hands the accumulator a large
@@ -118,7 +178,7 @@ impl Driver {
         self.accum += dt.min(MAX_FRAME);
         let mut steps = 0;
         while self.accum >= FIXED_DT && steps < MAX_STEPS {
-            gizmo::physics::vehicle_controller_system(world, FIXED_DT);
+            vehicle_step(world, FIXED_DT);
             between(world);
             gizmo::physics::physics_step_system(world, FIXED_DT);
             self.accum -= FIXED_DT;

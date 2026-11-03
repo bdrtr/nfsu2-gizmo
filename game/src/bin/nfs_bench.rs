@@ -232,6 +232,36 @@ async fn run() {
     let renderer = Renderer::new_headless(64, 64, None).await;
     let mut assets = AssetManager::new();
 
+    // `NFS_BENCH=crash`: only the collision test — the player coasting into the back of a rival on
+    // rails, resolved the game's way and, beside it, the old way (the rail a kinematic wall in the
+    // engine's solver).
+    if std::env::var("NFS_BENCH").is_ok_and(|v| v == "mirror") {
+        mirror(&renderer, &mut assets, &car);
+        return;
+    }
+    if std::env::var("NFS_BENCH").is_ok_and(|v| v == "crash") {
+        println!("== çarpışma: oyuncu → rakip · hızlar m/s önce → sonra · temas süresi · en derin · oyuncunun en düşük hızı · momentum korunan · en büyük sapma");
+        for (player, rail) in [(20.0f32, 15.0f32), (25.0, 10.0), (15.0, 0.0)] {
+            for solver in [true, false] {
+                let Some(c) = Bench::crash(&renderer, &mut assets, &car, player, rail, 3.0, solver) else { continue };
+                println!(
+                    "   {:<7} oyuncu {:>5.1} → {:>5.1} · rakip {:>5.1} → {:>5.1} · {:.2} s · {:.2} m · en düşük {:>5.1} · momentum %{:.0} · sapma {:.2} rad/s",
+                    if solver { "eski" } else { "oyunun" },
+                    c.player_before,
+                    c.player_after,
+                    c.rail_before,
+                    c.rail_after,
+                    c.touching,
+                    c.overlap,
+                    c.player_lowest,
+                    c.momentum_kept() * 100.0,
+                    c.yaw,
+                );
+            }
+        }
+        return;
+    }
+
     // At rest: does the weight sit on the tyres?
     {
         let mut b = Bench::new(&renderer, &mut assets, &car);
@@ -369,17 +399,22 @@ async fn run() {
         println!("   15 s sonra {:.0} km/h · en büyük kayma {:.2}°", b.forward_speed() * 3.6, slip.to_degrees());
     }
 
-    // A mirror image should differ only by rounding. It does not, and the cause is known
-    // (`MOTOR-NOTLARI.md` #19): the controller applies each wheel's force to the chassis velocity
-    // before computing the next wheel's, so the result depends on the wheel order, and no order
-    // of four corners is its own mirror image. Swapping each axle's pair swaps the left and right
-    // results exactly. Up to ~12 % in loads and ~5 % in lateral grip on some cars; an "AYNA DEĞİL"
-    // of that size is that, not a mount on the wrong side — which would be far larger.
+    mirror(&renderer, &mut assets, &car);
+}
+
+/// Every manoeuvre to the left and to the right: the second should be the first's mirror image.
+fn mirror(renderer: &Renderer, assets: &mut AssetManager, car: &str) {
+    // A mirror image should differ only by rounding. It did not until 2026-11-03 (`MOTOR-NOTLARI.md`
+    // #19): the controller applies each wheel's force to the chassis velocity before computing the
+    // next wheel's, so the result depended on the wheel order — up to ~12 % in loads and ~5 % in
+    // lateral grip. `rig::vehicle_step` now alternates each axle's pair every step and every row
+    // here reads "ayna" to two decimals. `NFS_WHEELORDER=fixed` brings the old asymmetry back; an
+    // "AYNA DEĞİL" without it is something new — a mount on the wrong side would be far larger.
     const MIRROR_TOL: f32 = 0.03;
     println!("== ayna: aynı manevra sola (+) ve sağa (−) · sağdaki soldakinin aynası olmalı");
     for (kmh, steer) in [(40.0f32, 1.0f32), (70.0, 0.25), (70.0, 0.5), (100.0, 0.5)] {
-        let left = circle(&renderer, &mut assets, &car, kmh, |_| steer);
-        let right = circle(&renderer, &mut assets, &car, kmh, |_| -steer);
+        let left = circle(renderer, assets, car, kmh, |_| steer);
+        let right = circle(renderer, assets, car, kmh, |_| -steer);
         let (Outcome::Done(l), Outcome::Done(r)) = (&left, &right) else {
             let says = |o: &Outcome<Circle>| match o {
                 Outcome::Unreached => "çıkamadı",
@@ -414,8 +449,8 @@ async fn run() {
     }
     for kmh in [60.0f32, 90.0] {
         let (Some(l), Some(r)) = (
-            tap(&renderer, &mut assets, &car, kmh, 1.0, false),
-            tap(&renderer, &mut assets, &car, kmh, -1.0, false),
+            tap(renderer, assets, car, kmh, 1.0, false),
+            tap(renderer, assets, car, kmh, -1.0, false),
         ) else {
             continue;
         };

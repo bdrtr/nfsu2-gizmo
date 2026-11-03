@@ -36,6 +36,7 @@ use gizmo::prelude::*;
 use gizmo_nfs::types::AssetHash;
 use nfsu2::geom::add_transform;
 use nfsu2::race::{Race, Runner, Standing};
+use nfsu2::rig::bump;
 use nfsu2::rig::rail::{self, Obstacle, RaceLine, Rail, PACE};
 use nfsu2::rig::{spawn_car, CarRig, ChaseCamera, Driver, Limits, Pilot, Placement, Pose, Rescue, FIXED_DT};
 use nfsu2::scene::{self, Textures};
@@ -149,6 +150,9 @@ struct CruiseState {
     /// below roughly eight thousand renderables and telling the caller to measure their own scene
     /// instead of quoting the band. This is that measurement.
     frames: Vec<f32>,
+    /// `NFS_AUTODRIVE=<s>`: full throttle without a hand on the keyboard, after waiting `s` seconds
+    /// of the race on the brakes (`1` or anything that is not a number: no wait).
+    autodrive: Option<f32>,
     /// The technical overlay: the cell and frame counters, the course fix and the race line drawn
     /// on the road. Off by default — in a race they are debugging leftovers, not a HUD — and on
     /// under `NFS_DEBUG=1` or with **F3**.
@@ -186,6 +190,9 @@ use nfsu2::world::COURSE_HALF_WIDTH;
 /// distance along the same line, found near where it was last ([`RaceLine::track`]) — so the
 /// running order compares like with like, and the rails see it as traffic.
 struct RailRace {
+    /// Which rivals the player was touching last step, so a contact is reported once when it
+    /// starts rather than at 240 Hz while it lasts.
+    touching: Vec<bool>,
     line: RaceLine,
     limits: Limits,
     /// The rivals' cars, and their places on the line, in the same order.
@@ -284,6 +291,7 @@ impl RailRace {
             line.report.lap_time,
         );
         Some(Self {
+            touching: vec![false; rigs.len()],
             player_s: player.s(),
             player_lane: player.lane(),
             player_v: 0.0,
@@ -352,6 +360,9 @@ impl RailRace {
     /// One physics step: the field moves, and each body is given the velocity that takes it there,
     /// so what it meets on the way is pushed rather than passed through.
     fn step(&mut self, world: &mut World, dt: f32, player: &CarRig) {
+        if self.demo.is_none() {
+            self.collide(world, dt, player);
+        }
         let me = Obstacle { s: self.player_s, lane: self.player_lane, v: self.player_v };
         let before: Vec<(Vec3, Quat)> =
             self.rigs.iter().enumerate().map(|(k, g)| self.shown(k, g.ride())).collect();
@@ -373,6 +384,27 @@ impl RailRace {
         for (k, (rig, now)) in self.rigs.iter().zip(before).enumerate() {
             rig.place(world, now, self.shown(k, rig.ride()), dt);
         }
+    }
+
+    /// The player against every rival, the way the game settles two cars ([`bump`]): the player's
+    /// body takes its share as velocity, spin and a step apart; the rival's rail takes its share as
+    /// speed, a sideways drift and a step off its line. The solver never sees the pair.
+    fn collide(&mut self, world: &mut World, dt: f32, player: &CarRig) {
+        let hits = bump::player_vs_rails(world, player, &self.rigs, &mut self.field, &self.line, dt);
+        let mut now = vec![false; self.touching.len()];
+        for (k, c, closing) in hits {
+            now[k] = true;
+            if !self.touching[k] {
+                println!(
+                    "temas: rakip {} · yaklaşma {closing:.1} m/s · derinlik {:.2} m · normal ({:.2}, {:.2})",
+                    k + 1,
+                    c.depth,
+                    c.normal.x,
+                    c.normal.z
+                );
+            }
+        }
+        self.touching = now;
     }
 
     /// Once a frame, after physics: where the player is, the running order, and who has finished.
@@ -1078,6 +1110,10 @@ fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> CruiseState
         frames: Vec::with_capacity(FRAME_WINDOW),
         debug,
         race_line,
+        autodrive: std::env::var("NFS_AUTODRIVE")
+            .ok()
+            .filter(|v| v != "0")
+            .map(|v| v.parse::<f32>().ok().filter(|_| v != "1").unwrap_or(0.0)),
     }
 }
 
@@ -1117,6 +1153,20 @@ fn update(world: &mut World, state: &mut CruiseState, dt: f32, input: &Input) {
     // The keyboard read the way NFSU2 reads it: steering scaled to the speed, Down brakes before it
     // reverses, Space is the handbrake — `CarRig::for_human`.
     controls = state.rig.for_human(world, controls);
+    // `NFS_AUTODRIVE`: the throttle held down, the steering left to the keys — straight into
+    // whatever is in front at the start, which is what testing a collision wants.
+    // With a number, it waits that many seconds after the start on the brakes first, so the field
+    // is in front of it.
+    if let Some(wait) = state.autodrive {
+        let clock = state.rails.as_ref().map_or(f32::MAX, |r| if r.race.holding() { 0.0 } else { r.clock });
+        if clock < wait {
+            controls.throttle = 0.0;
+            controls.brake = 1.0;
+        } else {
+            controls.throttle = 1.0;
+            controls.brake = 0.0;
+        }
+    }
     if let Some(rr) = state.rails.as_mut() {
         rr.race.tick(dt);
         // On the line until the lights go: the brake held, the wheel free.
