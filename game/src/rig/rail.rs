@@ -127,9 +127,27 @@ const WOBBLE_SPREAD: f32 = 500.0;
 const CATCH_X: [f32; 11] = [-320.0, -160.0, -120.0, -85.0, -60.0, 0.0, 120.0, 170.0, 240.0, 320.0, 640.0];
 const CATCH_EASY: [f32; 11] = [0.22, 0.15, 0.09, 0.06, 0.02, 0.0, -0.025, -0.06, -0.08, -0.15, -0.25];
 const CATCH_HARD: [f32; 11] = [0.37, 0.22, 0.12, 0.07, 0.03, 0.0, -0.01, -0.04, -0.06, -0.10, -0.15];
-/// Rakiplerin becerisi, `0..1` ([`CATCH_EASY`] → [`CATCH_HARD`]). Oyunda rakip başına (`[araba]
-/// vtable+0x78`, 0..9); burada hepsi ortada.
-const CATCH_SKILL: f32 = 0.5;
+/// Rakibin becerisini seçen birikimli dağılımlar, zorluk başına (`0x34B00` bloğu `+0x9F4`, kura
+/// `0x4FED00`): ilk `kura ≤ dağılım[i]` becerisi `i`. Ortalamalar 1, 4 ve 7,2 / 9. Beceri
+/// `DriverInfo+0x901`'de duruyor, `0x4084A0` onu `/9` ile [`CATCH_EASY`] → [`CATCH_HARD`] karıştırıyor.
+const SKILL_CDF: [[f32; 10]; 3] = [
+    [0.3, 0.7, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+    [0.0, 0.0, 0.0, 0.3, 0.7, 1.0, 1.0, 1.0, 1.0, 1.0],
+    [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.2, 0.6, 1.0, 1.0],
+];
+
+/// `draw` (`0..1`) ve zorluk için rakibin becerisi, `0..1` olarak (`beceri / 9`).
+#[must_use]
+pub fn skill_of(draw: f32, difficulty: usize) -> f32 {
+    let row = &SKILL_CDF[difficulty.min(SKILL_CDF.len() - 1)];
+    row.iter().position(|c| draw <= *c).unwrap_or(0) as f32 / 9.0
+}
+
+/// `NFS_DIFFICULTY`: 0 kolay, 1 orta, 2 zor. Varsayılan orta bir seçim: oyunda bu oyuncu ayarı.
+fn difficulty() -> usize {
+    static LEVEL: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *LEVEL.get_or_init(|| std::env::var("NFS_DIFFICULTY").ok().and_then(|v| v.parse().ok()).unwrap_or(1))
+}
 /// Oyuncunun yanındaki rakibin hız farkı terimi: `−0,005 · Δv / (0,01·mesafe² + 1)`, ±0,05
 /// (`0x4084A0`, sabitler `0x7834F8..0x783500`): yanında ondan hızlı giden rakip biraz yavaşlıyor.
 const CATCH_DV: f32 = -0.005;
@@ -151,10 +169,10 @@ fn catch_curve(y: &[f32; 11], x: f32) -> f32 {
 }
 
 /// Rakibin oyuncuya göre konumu `gap` metre (önde artı) ve hız farkı `dv` m/s (rakip hızlıysa artı)
-/// iken hızına eklenen kesir.
+/// iken, `skill` (`0..1`) becerisindeki bir rakibin hızına eklenen kesir.
 #[must_use]
-pub fn catch_fraction(gap: f32, dv: f32) -> f32 {
-    let table = catch_curve(&CATCH_EASY, gap) * (1.0 - CATCH_SKILL) + catch_curve(&CATCH_HARD, gap) * CATCH_SKILL;
+pub fn catch_fraction(gap: f32, dv: f32, skill: f32) -> f32 {
+    let table = catch_curve(&CATCH_EASY, gap) * (1.0 - skill) + catch_curve(&CATCH_HARD, gap) * skill;
     let near = (CATCH_DV * dv / (CATCH_DV_FALLOFF * gap * gap + 1.0)).clamp(-CATCH_DV_MAX, CATCH_DV_MAX);
     table + near
 }
@@ -1016,6 +1034,8 @@ pub struct Rail {
     wobble: (f32, f32),
     /// The catch-up multiplier [`catch_up`] last set, 1.0 when nothing has.
     catch_up: f32,
+    /// How hard this car catches up, `0..1` ([`skill_of`]).
+    skill: f32,
     /// The body's lean, radians: roll (positive = left side down) and pitch (positive = nose up),
     /// each lagging the load that causes it by [`ATTITUDE_LAG`].
     roll: f32,
@@ -1077,6 +1097,9 @@ impl Rail {
                 (pace * 7_919.0).fract() * std::f32::consts::TAU,
             ),
             catch_up: 1.0,
+            // The game draws this at random per race. From the pace, as the wobble is, so a race
+            // can be run again and come out the same.
+            skill: skill_of((pace * 15_485.0).fract(), difficulty()),
             roll: 0.0,
             pitch: 0.0,
             shove: 0.0,
@@ -1324,7 +1347,7 @@ impl Rail {
 /// — see [`catch_fraction`].
 pub fn catch_up(field: &mut [Rail], player_s: f32, player_v: f32) {
     for r in field {
-        r.catch_up = 1.0 + catch_fraction(r.s - player_s, r.v - player_v);
+        r.catch_up = 1.0 + catch_fraction(r.s - player_s, r.v - player_v, r.skill);
     }
 }
 
@@ -1688,11 +1711,31 @@ mod tests {
         assert!(field[1].pace_here() < base[1], "ahead of the player: slower");
         // The game's own numbers, half way between its two curves: 320 m back is +29.5 %,
         // 640 m ahead −20 %, alongside nothing.
-        assert!((catch_fraction(-320.0, 0.0) - 0.295).abs() < 1e-5);
-        assert!((catch_fraction(640.0, 0.0) + 0.20).abs() < 1e-5);
-        assert_eq!(catch_fraction(0.0, 0.0), 0.0);
+        assert!((catch_fraction(-320.0, 0.0, 0.5) - 0.295).abs() < 1e-5);
+        assert!((catch_fraction(640.0, 0.0, 0.5) + 0.20).abs() < 1e-5);
+        assert_eq!(catch_fraction(0.0, 0.0, 0.5), 0.0);
+        // Skill walks between the game's two curves.
+        assert!((catch_fraction(-320.0, 0.0, 0.0) - 0.22).abs() < 1e-5);
+        assert!((catch_fraction(-320.0, 0.0, 1.0) - 0.37).abs() < 1e-5);
         // Alongside and 10 m/s faster: eased off by the full 5 %.
-        assert!((catch_fraction(0.0, 10.0) + 0.05).abs() < 1e-6);
+        assert!((catch_fraction(0.0, 10.0, 0.5) + 0.05).abs() < 1e-6);
+    }
+
+    #[test]
+    fn a_rivals_skill_comes_from_its_difficulty() {
+        let nine = |draw, level| (skill_of(draw, level) * 9.0).round() as i32;
+        // Not a draw of exactly 0: `kura ≤ dağılım` takes the first slot then, in the game as here.
+        assert_eq!((nine(0.01, 0), nine(0.5, 0), nine(0.99, 0)), (0, 1, 2));
+        assert_eq!((nine(0.01, 1), nine(0.5, 1), nine(0.99, 1)), (3, 4, 5));
+        assert_eq!((nine(0.01, 2), nine(0.5, 2), nine(0.99, 2)), (6, 7, 8));
+        let mean = |level| (0..10_000).map(|i| skill_of(i as f32 / 10_000.0, level) * 9.0).sum::<f32>() / 10_000.0;
+        assert!((mean(0) - 1.0).abs() < 0.01 && (mean(1) - 4.0).abs() < 0.01 && (mean(2) - 7.2).abs() < 0.01);
+    }
+
+    #[test]
+    fn the_field_does_not_all_draw_the_same_skill() {
+        let skills: Vec<i32> = PACE.iter().map(|p| (skill_of((p * 15_485.0).fract(), 1) * 9.0).round() as i32).collect();
+        assert!(skills.iter().any(|s| *s != skills[0]), "{skills:?}");
     }
 
     #[test]
