@@ -210,6 +210,10 @@ struct RailRace {
     player_start: f32,
     /// Seconds since the lights went green.
     clock: f32,
+    /// Tur ilerlemesinin nitroya son yazıldığı an ve o andaki ilerleme, metre ([`Self::lap_refill`]).
+    nos_mark: Option<(f32, f32)>,
+    /// Oyuncunun yarıştaki en iyi sırası, GAINED olayları için ([`Self::style_events`]).
+    best_place: Option<usize>,
     /// When each entrant finished, in race seconds: the player first, then the rivals in field order.
     finished: Vec<Option<f32>>,
     /// The running order, leader first. Entrant 0 is the player.
@@ -304,6 +308,8 @@ impl RailRace {
             race,
             from,
             clock: 0.0,
+            nos_mark: None,
+            best_place: None,
             order: Vec::new(),
             demo,
             slots: keep,
@@ -328,6 +334,8 @@ impl RailRace {
         self.player_s = self.player_start;
         self.player_v = 0.0;
         self.clock = 0.0;
+        self.nos_mark = None;
+        self.best_place = None;
         self.finished = vec![None; self.field.len() + 1];
         self.order.clear();
         println!("yarış yeniden başlıyor");
@@ -344,6 +352,56 @@ impl RailRace {
         } else {
             (at, rot)
         }
+    }
+
+    /// Turda alınan yolun nitro karşılığı, depo kesri: oyun saniyede bir, oyuncunun tur
+    /// ilerlemesinin yüzde değişimini `· 0,01 · 0,5` ile depoya ekliyor (`0x601785`) — bir tur yarım
+    /// depo. Yalnız tur yarışında (oyunun koşulu bir yarış türü; açık yarışta okunmadı), ışıklar
+    /// yandıktan sonra.
+    fn lap_refill(&mut self) -> f32 {
+        const EVERY: f32 = 1.0;
+        const PER_LAP: f32 = 0.5;
+        if !self.line.closed() || self.race.holding() || self.line.length() <= 0.0 {
+            return 0.0;
+        }
+        let progress = (self.player_s - self.from).max(0.0);
+        match self.nos_mark {
+            Some((t, p0)) if self.clock - t >= EVERY => {
+                self.nos_mark = Some((self.clock, progress));
+                (progress - p0).max(0.0) / self.line.length() * PER_LAP
+            }
+            Some(_) => 0.0,
+            None => {
+                self.nos_mark = Some((self.clock, progress));
+                0.0
+            }
+        }
+    }
+
+    /// Bu karede ateşlenen yarış stil olayları, `(olay, girdi)` (`0x56F720`):
+    ///
+    /// - HEAD START (#24): ışıklardan 1–1,5 s sonra birinci ve 5 mph'den hızlı;
+    /// - GAINED 4TH…1ST (#29…#32): 1,5 s'den sonra sıra yeni bir en iyiye, beşincinin önüne çıkınca.
+    fn style_events(&mut self) -> Vec<(usize, f32)> {
+        let mut out = Vec::new();
+        if self.demo.is_some() || self.race.holding() {
+            return out;
+        }
+        let Some(place) = self.order.iter().position(|s| s.car == 0).map(|p| p + 1) else { return out };
+        if self.clock > 1.0 && self.clock < 1.5 && place == 1 && self.player_v > 2.235 {
+            out.push((24, 1.0));
+        }
+        if self.clock > 1.5 {
+            match self.best_place {
+                None => self.best_place = Some(place),
+                Some(best) if best > 1 && place < best && place < 5 => {
+                    self.best_place = Some(place);
+                    out.push((33 - place, 1.0));
+                }
+                _ => {}
+            }
+        }
+        out
     }
 
     /// The player's place in the order, measured as a rail's is.
@@ -1257,6 +1315,27 @@ fn update(world: &mut World, state: &mut CruiseState, dt: f32, input: &Input) {
             }
         }
     });
+    if !demo {
+        // Rüzgâr arkası, öndeki rakiplerden: raydakilerin hızı rayın, pilotlarınki kendi.
+        let mut ahead: Vec<(Vec3, Vec3, f32)> = Vec::new();
+        if let Some(rr) = rails.as_ref() {
+            for (r, rail) in rr.rigs.iter().zip(&rr.field) {
+                if let Some(p) = r.pose(world) {
+                    ahead.push((p.position, p.rotation * Vec3::NEG_Z, rail.speed()));
+                }
+            }
+        }
+        for (r, _) in field.iter() {
+            if let Some(p) = r.pose(world) {
+                ahead.push((p.position, p.rotation * Vec3::NEG_Z, p.speed));
+            }
+        }
+        rig.set_draft(world, &ahead);
+        rig.style_tick(world, dt);
+        if let Some(add) = rails.as_mut().map(RailRace::lap_refill).filter(|a| *a > 0.0) {
+            rig.add_nitro(world, add);
+        }
+    }
 
     // **And the same net the player has.** `keep_in_world` was called for the player and for
     // nobody else, so a rival that rolled stayed rolled for the rest of the race — which is what a
@@ -1278,6 +1357,9 @@ fn update(world: &mut World, state: &mut CruiseState, dt: f32, input: &Input) {
     if let Some(rr) = state.rails.as_mut() {
         rr.sync(world, dt);
         rr.observe(pose.position, pose.speed, dt);
+        for (event, input) in rr.style_events() {
+            state.rig.style_fire(event, input);
+        }
     }
 
     // The city has holes the shipped geometry never covered; a car that finds one must come back,
@@ -1471,10 +1553,10 @@ fn diagnose(world: &World, state: &mut CruiseState, pose: nfsu2::rig::Pose) {
 fn ui(world: &mut World, state: &mut CruiseState, ctx: &egui::Context) {
     let dash = match state.rails.as_ref().and_then(|r| r.demo.as_ref()) {
         Some(own) => Some(nfsu2::hud::Dash::speed_only(own.speed() * 3.6)),
-        None => world
-            .borrow::<gizmo::physics::vehicle::VehicleController>()
-            .get(state.rig.chassis)
-            .map(nfsu2::hud::Dash::of),
+        None => nfsu2::hud::Dash::of_car(world, state.rig.chassis).map(|mut d| {
+            d.style = state.rig.style_hud();
+            d
+        }),
     };
     if state.debug {
         debug_ui(state, ctx);
@@ -1483,7 +1565,7 @@ fn ui(world: &mut World, state: &mut CruiseState, ctx: &egui::Context) {
             .anchor(egui::Align2::LEFT_BOTTOM, egui::vec2(24.0, -24.0))
             .show(ctx, |ui| {
                 ui.label(
-                    egui::RichText::new("W/S · A/D · Space el freni · R başa · Enter yeniden · F3 teknik")
+                    egui::RichText::new("W/S · A/D · Space el freni · Shift nitro · E/Q vites · R başa · Enter yeniden · F3 teknik")
                         .size(12.0)
                         .color(egui::Color32::from_gray(150)),
                 );

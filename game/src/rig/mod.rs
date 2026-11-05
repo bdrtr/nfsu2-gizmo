@@ -32,12 +32,15 @@ mod chase;
 mod drive;
 pub mod dyno;
 mod pilot;
+pub mod powertrain;
 pub mod rail;
+pub mod steer;
+pub mod style;
 
 use crate::world::Ground;
 
 pub use chase::ChaseCamera;
-pub use drive::{vehicle_step, Controls, Driver, FIXED_DT};
+pub use drive::{physics_step, vehicle_step, Controls, Driver, FIXED_DT};
 pub use dyno::Limits;
 pub use pilot::Pilot;
 pub use rail::{Obstacle, RaceLine, Rail};
@@ -264,6 +267,32 @@ pub enum Rescue {
     Righted,
 }
 
+/// What the car's **body** is made of when it hits something — a wall, a kerb, another car.
+///
+/// It used to be the engine's default: restitution 0.3 with `Max` combining, friction 0.6. `Max`
+/// beats the road's own `Min`, so every wall returned 30 % of the speed it was hit with, and at
+/// 0.6 × 0.75 a car touching a wall at an angle *gripped* it: on the bench (`NFS_BENCH=wall`) a
+/// 30° hit at 15 m/s left 0.1 m/s of the 15 along the wall and spun the car at 1.3 rad/s, and at
+/// 25 m/s and 60° it came off at 0.64 of what it hit with.
+///
+/// `SPEED2.EXE`'s own: the car body's restitution is **0.1** (`0x5A0C90`) and its friction **0.3**
+/// (`0x5A0BE0`), and the contact solver (`0x5AF0E0`, `0x5941C0`) takes the **smaller** of the two
+/// bodies' values. Hence `Min` on both — against the road's 0.05 the bounce is 0.05, against another
+/// car 0.1 — so a car scrapes along a wall rather than catching on it. The wheels do not read this:
+/// they take the ground collider's material (`scene::road`).
+#[must_use]
+pub fn body_material() -> gizmo::physics::components::PhysicsMaterial {
+    use gizmo::physics::components::{CombineMode, PhysicsMaterial};
+    PhysicsMaterial {
+        static_friction: 0.3,
+        dynamic_friction: 0.3,
+        restitution: 0.1,
+        friction_combine: CombineMode::Min,
+        restitution_combine: CombineMode::Min,
+        ..PhysicsMaterial::default()
+    }
+}
+
 /// A car spawned into a world: its physics chassis, its visual entities, and the state that only
 /// exists to make those two look like one object.
 pub struct CarRig {
@@ -307,7 +336,47 @@ pub struct CarRig {
     /// Whether a human is holding the handbrake — set by [`Self::for_human`], acted on by
     /// [`Self::between_step`].
     handbrake: bool,
+    /// Bu karenin gazı ve freni (ayak + el), oyunun direksiyonu kilidi bunlarla açıyor
+    /// ([`steer::lock_deg`]). Yalnız [`Self::for_human`] yazıyor.
+    pedals: (f32, f32),
+    /// Oyunun drift bayrağı ([`steer::drifting`]); [`Self::catch_slide`] her karede güncelliyor.
+    drifting: bool,
+    /// Bu arabayı bir insan mı sürüyor — [`Self::for_human`] bir kez çağrılınca evet. İnsanın
+    /// arabası oyunun 45°'lik kilidini alıyor ([`PLAYER_LOCK`]), pilotunki motorun 25°'sinde kalıyor.
+    human: bool,
+    /// Stil puanlayıcısı ve olayları besleyen hareket durumu ([`style`]); yalnız insanın arabasında
+    /// işliyor ([`Self::style_tick`]). Kayıt okunamadıysa `None`.
+    style: Option<(style::Scorer, style::Moves)>,
 }
+
+/// Stil olaylarının hangi kipte sayıldığı: `0x01`, yarış ve serbest dolaşım olaylarının ortak biti
+/// (POWER SLIDE, HANG TIME, 360, J-TURN, REVERSE hepsi `0x49`'u taşıyor; drift olayları yalnız
+/// `0x04`'ü, drift yarışının biti).
+const STYLE_MODE: u8 = 0x01;
+
+/// El ile vites (`Controls::shift`): `gear` motorun sırasında (0 geri, 1 boş, 2.. ileri), `count`
+/// oran sayısı. İleri vitesler arasında; geri vitese ve boşa tuş değil, durunca S götürüyor. Boştan
+/// büyütmek birinci.
+#[must_use]
+pub fn manual_gear(gear: usize, shift: i8, count: usize) -> usize {
+    let top = count.saturating_sub(1).max(2);
+    if gear < 2 {
+        return if shift > 0 { 2 } else { gear };
+    }
+    if shift > 0 {
+        (gear + 1).min(top)
+    } else {
+        gear.saturating_sub(1).max(2)
+    }
+}
+
+/// Oyuncunun arabasının direksiyon kilidi, radyan: oyunun açı sınırı (`0x7844D4`, 45°).
+///
+/// Oyun düşük hızda tam tuşta buna varıyor (`40° × 1,35 × 1,1`, kırpılmış) ve karşı direksiyon
+/// ([`CarRig::catch_slide`]) kaymayı bu açıya kadar izliyor. Kontrolcünün 25°'sinde RX8 110 km/h'de
+/// 44°'lik bir kaymaya yetişemiyordu. Pilot girdiyi kilidin kesri olarak hesaplıyor ve bütün eşikleri
+/// 25°'ye göre süpürüldü; o yüzden yalnız insan.
+pub const PLAYER_LOCK: f32 = steer::MAX_DEG * std::f32::consts::PI / 180.0;
 
 /// Build a car from its `GEOMETRY.BIN` and stand it in the world at `place`.
 ///
@@ -522,6 +591,11 @@ fn build_car(
             // to the two-wheel total, so all-wheel drive costs what the other two cost and the feel
             // already driven on them stands; the overcount itself is `MOTOR-NOTLARI.md` #18.
             let driven = vehicle.wheels.iter().filter(|w| vehicle.drivetrain.drives(&w.axle_type)).count();
+            // The record's own engine inertia (`gizmo_nfs::Engine::inertia_kgm2`, 0.20–0.70) where
+            // the engine had one number for every car; a 240SX's is the engine's 0.25 exactly.
+            if t.flywheel_kgm2 > 0.0 {
+                vehicle.flywheel_inertia = t.flywheel_kgm2;
+            }
             if driven > 2 {
                 vehicle.flywheel_inertia *= 2.0 / driven as f32;
             }
@@ -543,11 +617,20 @@ fn build_car(
     let collider = Collider::offset_box(
         Vec3::new(0.0, size.y * 0.12, 0.0),
         Vec3::new(size.x * 0.42, size.y * 0.3, size.z * 0.46),
-    );
+    )
+    .with_material(if std::env::var("NFS_BODY").is_ok_and(|v| v == "engine") {
+        // `NFS_BODY=engine`: the engine's default material, to measure what the game's is worth.
+        gizmo::physics::components::PhysicsMaterial::default()
+    } else {
+        body_material()
+    });
     world.add_component(chassis, vehicle);
     world.add_component(chassis, rb);
     world.add_component(chassis, Velocity::new(Vec3::ZERO));
     world.add_component(chassis, collider.clone());
+    if let Some(t) = &tune {
+        world.add_component(chassis, powertrain::Powertrain::new(t.powertrain));
+    }
     phys.add_body(
         gizmo::physics::BodyHandle::from_id(chassis.id()),
         rb,
@@ -573,6 +656,16 @@ fn build_car(
         spin: 0.0,
         visual_steer: 0.0,
         handbrake: false,
+        pedals: (0.0, 0.0),
+        drifting: false,
+        human: false,
+        style: (!gb.style.is_empty()).then(|| {
+            let labels = crate::assets::load_labels_beside(path);
+            let scorer = style::Scorer::new(&gb.style, STYLE_MODE, |d| {
+                labels.get(&d.label).cloned().unwrap_or_else(|| format!("#{}", d.index))
+            });
+            (scorer, style::Moves::default())
+        }),
     }
 }
 
@@ -604,7 +697,14 @@ fn tyre_longitudinal(grip: f32) -> gizmo::physics::vehicle::PacejkaParams {
     gizmo::physics::vehicle::PacejkaParams { d: grip, ..Default::default() }
 }
 
-/// The tyre's lateral curve, as Pacejka `B, C, D, E`. `NFS_TYRE="b,c,d,e"` overrides it whole.
+/// `SPEED2.EXE`'nin yanal tablosuna (`0x59D510`, yedi kademe × altı yük, `0x7FC968..`) uydurulmuş
+/// Pacejka `B, C, E`: 240SX'in tekerlek yükünde (≈ 3 kN) ve `μ_s` çemberinden sonra oyunun eğrisi
+/// tepenin %70'ini 2°'de, %98'ini 4°'de veriyor ve sonra hiç düşmüyor. Bu üçlü 0,5–45°'de en çok
+/// 0,035 sapıyor; 30°'de tepenin %99'u (motorun varsayılanı %96). `NFS_TYRE=game` ile seçiliyor.
+const GAME_TYRE_SHAPE: (f32, f32, f32) = (18.0, 1.1, -2.75);
+
+/// The tyre's lateral curve, as Pacejka `B, C, D, E`. `NFS_TYRE="b,c,d,e"` overrides it whole;
+/// `NFS_TYRE=game` keeps `D` and takes the game's shape ([`GAME_TYRE_SHAPE`]).
 ///
 /// `D` — the peak, the friction coefficient the force never exceeds — is the record's peak grip,
 /// the lane `SPEED2.EXE` bounds its friction circle with (`AxleTune::grip_peak`): 1.70 on a 240SX's
@@ -622,6 +722,10 @@ fn tyre_longitudinal(grip: f32) -> gizmo::physics::vehicle::PacejkaParams {
 /// 1.6–2.9 g and 0.5–0.7 kN.
 fn tyre_lateral(grip: f32) -> gizmo::physics::vehicle::PacejkaParams {
     let mut p = gizmo::physics::vehicle::PacejkaParams { d: grip, ..Default::default() };
+    if std::env::var("NFS_TYRE").is_ok_and(|v| v == "game") {
+        let (b, c, e) = GAME_TYRE_SHAPE;
+        return gizmo::physics::vehicle::PacejkaParams { b, c, d: grip, e };
+    }
     if let Ok(v) = std::env::var("NFS_TYRE") {
         let n: Vec<f32> = v.split(',').filter_map(|x| x.trim().parse().ok()).collect();
         if let [b, c, d, e] = n[..] {
@@ -872,6 +976,10 @@ impl CarRig {
     /// `NFS_STEERASSIST=0` turns it off.
     #[must_use]
     pub fn steer_for_speed(&self, world: &World, steer: f32) -> f32 {
+        if steer::chosen() {
+            let (throttle, brake) = self.pedals;
+            return self.game_steer(world, steer, throttle, brake);
+        }
         if std::env::var("NFS_STEERASSIST").is_ok_and(|v| v == "0") {
             return steer;
         }
@@ -883,6 +991,140 @@ impl CarRig {
         let reach = (wheelbase * self.lateral_limit(speed) / (speed * speed) + ASSIST_SLIP)
             * ASSIST_MARGIN;
         steer * (reach / lock).min(1.0)
+    }
+
+    /// Oyunun klavye direksiyonu ([`steer`]): açıyı oyunun tablolarıyla hesaplayıp kontrolcünün
+    /// kilidine bölüyor. Oyuncunun arabası oyunun 45°'sini alıyor ([`PLAYER_LOCK`]); pilotun 25°'lik
+    /// kilidinde düşük hızda oyunun açısı kırpılırdı.
+    #[must_use]
+    pub fn game_steer(&self, world: &World, steer: f32, throttle: f32, brake: f32) -> f32 {
+        let vehicles = world.borrow::<VehicleController>();
+        let Some(v) = vehicles.get(self.chassis) else { return steer };
+        let mult = self.tune.as_ref().map_or(1.0, |t| t.steer_mult);
+        let deg = steer::angle_deg(steer, v.current_speed_kmh / 3.6, throttle, brake, mult);
+        (deg.to_radians() / v.max_steering_angle.max(1e-3)).clamp(-1.0, 1.0)
+    }
+
+    /// Kayma açısı, radyan, **sağa artı** (araba burnunun sağına gidiyorsa), ve düzlemdeki hız,
+    /// m/s. Hız 1 m/s'nin altındayken açı 0 — oyunun da yaptığı gibi (`0x59FA10`).
+    #[must_use]
+    pub fn sideslip(&self, world: &World) -> Option<(f32, f32)> {
+        let lin = world.borrow::<Velocity>().get(self.chassis)?.linear;
+        let rot = world.borrow::<Transform>().get(self.chassis)?.rotation;
+        let v = Vec3::new(lin.x, 0.0, lin.z);
+        let speed = v.length();
+        if speed < 1.0 {
+            return Some((0.0, speed));
+        }
+        let nose = rot * Vec3::NEG_Z;
+        let nose = Vec3::new(nose.x, 0.0, nose.z).normalize_or_zero();
+        let right = nose.cross(Vec3::Y);
+        Some((v.dot(right).atan2(v.dot(nose)), speed))
+    }
+
+    /// Stil puanlarını bu karenin hareketiyle ilerlet, kazanılanı nitroya ekle (`0x6016A0`: 1 500
+    /// puan bir depo). Yalnız insanın arabası ([`Self::for_human`] çağırmışsa); kare başına bir kez,
+    /// fizikten sonra.
+    pub fn style_tick(&mut self, world: &mut World, dt: f32) {
+        if !self.human {
+            return;
+        }
+        let Some((slip, speed)) = self.sideslip(world) else { return };
+        let (down, _) = self.wheels_down(world);
+        let (forward, yaw_rate, heading) = {
+            let vel = world.borrow::<Velocity>();
+            let tr = world.borrow::<Transform>();
+            let (Some(v), Some(t)) = (vel.get(self.chassis), tr.get(self.chassis)) else { return };
+            let nose = t.rotation * Vec3::NEG_Z;
+            (v.linear.dot(nose), v.angular.y, nose.x.atan2(-nose.z))
+        };
+        let draft = world.borrow::<powertrain::Powertrain>().get(self.chassis).map_or(0.0, |p| p.draft);
+        let Some((scorer, moves)) = &mut self.style else { return };
+        let motion = style::Motion { slip, speed, forward, wheels_down: down, yaw_rate, heading, draft };
+        moves.observe(motion, scorer, dt);
+        let earned = scorer.tick(dt);
+        if earned > 0.0 {
+            self.add_nitro(world, style::refill(earned));
+        }
+    }
+
+    /// Bu arabanın rüzgâr arkasını öndeki arabalardan hesaplayıp sürüklemesine yaz
+    /// ([`powertrain::draft`]). `others`: her birinin konumu, burun yönü ve hızı.
+    pub fn set_draft(&self, world: &mut World, others: &[(Vec3, Vec3, f32)]) {
+        let Some(me) = self.pose(world) else { return };
+        let d = powertrain::draft(me.position, others);
+        if let Some(mut p) = world.borrow_mut::<powertrain::Powertrain>().get_mut(self.chassis) {
+            p.draft = d;
+        }
+    }
+
+    /// Nitro deposuna `tank` kesri ekle (2'ye kadar taşabilir, `0x592640`); nitro takılı değilse
+    /// hiçbir şey.
+    pub fn add_nitro(&self, world: &mut World, tank: f32) {
+        if let Some(mut p) = world.borrow_mut::<powertrain::Powertrain>().get_mut(self.chassis) {
+            if p.spec.nitro_tank_s > 0.0 {
+                p.nitro.fill = powertrain::nitro_add(p.nitro.fill, tank);
+            }
+        }
+    }
+
+    /// Anlık bir stil olayını ateşle — arabanın kendi hareketinin bilmediği olaylar (yarıştaki
+    /// sıra) için; insanın arabası değilse hiçbir şey.
+    pub fn style_fire(&mut self, event: usize, input: f32) {
+        if let Some((scorer, _)) = self.style.as_mut().filter(|_| self.human) {
+            scorer.fire(event, input);
+        }
+    }
+
+    /// Göstergenin stil satırı, insanın arabası için.
+    #[must_use]
+    pub fn style_hud(&self) -> Option<crate::hud::Style> {
+        let (s, _) = self.style.as_ref().filter(|_| self.human)?;
+        Some(crate::hud::Style {
+            total: s.banked,
+            running: s.running().map(|(n, p)| (n.to_string(), p)),
+            last: s.last.clone(),
+        })
+    }
+
+    /// Oyunun karşı direksiyonu (`0x405DC0`, [`steer::catch_lock_deg`]): tuş kaymanın tarafına
+    /// basılıyken kilit kaymanın kendisine açılıyor, ve tekerler hızın yönüne dönüyor. `key` ham
+    /// tuş, `steer` yolun (yardım ya da oyunun tabloları) verdiği girdi; karşı direksiyon yoksa
+    /// `steer` olduğu gibi dönüyor.
+    ///
+    /// Kıyas kilidi yolun tam tuştaki açısı: oyunun yolunda tablonun kilidi, yardımda yardımın
+    /// tam tuşu. Oyuncunun kilidi oyunun 45°'si ([`PLAYER_LOCK`]), yani tekerler kaymayı 45°'ye kadar
+    /// izleyebiliyor.
+    pub fn catch_slide(&mut self, world: &World, key: f32, steer: f32) -> f32 {
+        if !steer::catch_on() {
+            return steer;
+        }
+        let Some((slip, speed)) = self.sideslip(world) else { return steer };
+        let slip_left_deg = -slip.to_degrees();
+        self.drifting = steer::drifting(self.drifting, slip_left_deg, speed);
+        // Geri giderken kayma ~180° okunuyor; yakalanacak bir kayma yok, ve kilit tuşun bir
+        // yanında tam açılırdı. 90°'yi geçmiş bir dönüş de yakalanacak şey değil.
+        if slip_left_deg.abs() > 90.0 {
+            return steer;
+        }
+        let full_deg = if steer::chosen() {
+            let (throttle, brake) = self.pedals;
+            steer::lock_deg(speed, 1.0, throttle, brake)
+        } else {
+            let lock = world
+                .borrow::<VehicleController>()
+                .get(self.chassis)
+                .map_or(0.0, |v| v.max_steering_angle);
+            (self.steer_for_speed(world, 1.0).abs() * lock).to_degrees()
+        };
+        let Some(lock) = steer::catch_lock_deg(key, slip_left_deg, self.drifting, full_deg) else {
+            return steer;
+        };
+        let vehicles = world.borrow::<VehicleController>();
+        let Some(v) = vehicles.get(self.chassis) else { return steer };
+        let mult = self.tune.as_ref().map_or(1.0, |t| t.steer_mult);
+        let deg = steer::shaped_deg(key, lock, mult);
+        (deg.to_radians() / v.max_steering_angle.max(1e-3)).clamp(-1.0, 1.0)
     }
 
     /// The lateral acceleration this car holds at `speed` m/s, in m/s² — what a full key is aimed at.
@@ -910,7 +1152,13 @@ impl CarRig {
     ///
     /// For a human only; the pilot drives through [`Self::drive`] and is measured as it stands.
     pub fn for_human(&mut self, world: &World, mut c: Controls) -> Controls {
-        c.steer = self.steer_for_speed(world, c.steer);
+        self.human = true;
+        let forward_now = self.pose(world).map_or(0.0, |p| p.speed);
+        let foot = if c.throttle < 0.0 && forward_now > 1.0 { -c.throttle } else { 0.0 };
+        self.pedals = (c.throttle.max(0.0), foot + c.brake);
+        let key = c.steer;
+        c.steer = self.steer_for_speed(world, key);
+        c.steer = self.catch_slide(world, key, c.steer);
         self.handbrake = c.brake > 0.0;
         c.brake = 0.0;
         let forward = self.pose(world).map_or(0.0, |p| p.speed);
@@ -942,8 +1190,20 @@ impl CarRig {
         v.throttle_input = c.throttle.abs().min(1.0);
         v.brake_input = c.brake;
         v.steering_input = c.steer.clamp(-1.0, 1.0);
+        if self.human {
+            v.max_steering_angle = PLAYER_LOCK;
+        }
         if c.toggle_auto_shift {
             v.auto_shift = !v.auto_shift;
+        }
+        if c.shift != 0 {
+            v.auto_shift = false;
+            v.current_gear = manual_gear(v.current_gear, c.shift, v.tuning.gear_ratios.len());
+        }
+        drop(vehicles);
+        if let Some(mut p) = world.borrow_mut::<powertrain::Powertrain>().get_mut(self.chassis) {
+            p.nitro.request = c.nitro;
+            p.human = self.human;
         }
     }
 
@@ -1096,8 +1356,9 @@ impl CarRig {
     /// steered by an invisible hand. It applies to the player exactly as it applies to a rival,
     /// which is the whole point of putting it here and not in [`Pilot`](super::Pilot).
     ///
-    /// Only while the car is on its wheels. A car already in the air is
-    /// [`Self::keep_in_world`]'s problem, and a jump that clears a gap is not a barrier violation.
+    /// Only while the car is on its wheels — except the player's, see below. A car already in the
+    /// air is [`Self::keep_in_world`]'s problem, and a jump that clears a gap is not a barrier
+    /// violation.
     pub fn hold_at_edge(&mut self, world: &mut World, pose: Pose, ground: &Ground) -> Fence {
         /// How far ahead to look, as a multiple of speed in m/s, and the bounds on it.
         ///
@@ -1110,7 +1371,14 @@ impl CarRig {
         const SLACK: f32 = 8.0;
 
         let (down, total) = self.wheels_down(world);
-        if total == 0 || down == 0 {
+        // **The player's car is fenced in the air too** (2026-11-04). A free-roam drive left the
+        // world at `(238.7, 18.2, −1176.4)`: an intersection whose far kerb is the end of the
+        // loaded region, with no ground beyond it at any height. A car meeting that kerb at speed
+        // hops it, its wheels leave the ground for a moment, and a fence that only works on four
+        // wheels lets it sail over the lip. In the air the fence still only holds where there is
+        // **no ground at any level** ahead (the `off_level` exemption below stands), so a jump onto
+        // a lower road is still a jump. The pilot keeps the old rule: its sweeps were measured on it.
+        if total == 0 || (down == 0 && !self.human) {
             return Fence::default();
         }
 
@@ -1396,6 +1664,18 @@ impl CarRig {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn manual_gears_stay_among_the_forward_ones() {
+        use super::manual_gear;
+        // [reverse, neutral, 1..5]: seven ratios, top gear index 6.
+        assert_eq!(manual_gear(1, 1, 7), 2, "neutral up is first");
+        assert_eq!(manual_gear(1, -1, 7), 1);
+        assert_eq!(manual_gear(2, -1, 7), 2, "first down stays first");
+        assert_eq!(manual_gear(6, 1, 7), 6, "fifth up stays fifth");
+        assert_eq!(manual_gear(4, 1, 7), 5);
+        assert_eq!(manual_gear(4, -1, 7), 3);
+        assert_eq!(manual_gear(0, -1, 7), 0, "reverse is the S key's, not this one's");
+    }
     use super::*;
 
     /// The centre of mass a third of the way back: the front axle carries two thirds.

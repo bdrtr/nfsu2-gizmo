@@ -572,7 +572,20 @@ const GRIP: f32 = 8.0;
 /// 34 on 4061**: 919 against 1,035. Three thresholds now, 8, 4 and 2 m/s, all refuted. The lift at
 /// low speed is not the general defect it keeps looking like; it is only wrong *inside an escape*,
 /// where there is no corner at all.
-const CORNER_LIFT: f32 = 0.75;
+///
+/// **0.75 → 0.3 when the game's own drivetrain went in (2026-11-03).** With `rig::powertrain` a
+/// lifted pedal is no longer a coasting car: the engine brakes, `(1 − throttle) · Tbrake(rpm)`, and
+/// drag doubles. 0.75 took the pedal to 0.36 at full lock, which at corner rpm is a net *brake*,
+/// and the field fell 1 601 → 1 351. Re-swept over eight routes with the drivetrain on
+/// (`NFS_CORNER_LIFT`, waypoints driven past):
+///
+/// | lift | 0.75 | 0.5 | 0.4 | **0.3** | 0.2 | 0 |
+/// |---|---|---|---|---|---|---|
+/// | field | 1 351 | 1 383 | 1 486 | **1 587** | 1 462 | 1 324 |
+///
+/// Unimodal, and 0.3 against the old drivetrain at 0.75 (1 601) is −14, carried — neutral. The
+/// engine braking now does part of what the lift used to.
+const CORNER_LIFT: f32 = 0.3;
 
 /// How far ahead to look for another car, as a multiple of speed in m/s, and the floor under it.
 ///
@@ -970,6 +983,8 @@ impl Pilot {
                 brake: 1.0,
                 steer: 0.0,
                 toggle_auto_shift: false,
+                nitro: false,
+                shift: 0,
             });
         }
 
@@ -1546,6 +1561,8 @@ impl Pilot {
                 brake: 0.0,
                 steer: -self.steer,
                 toggle_auto_shift: false,
+                nitro: false,
+                shift: 0,
             });
         }
         // Gated on *time* and not on having taken a junction: the cars that need this most are
@@ -1840,8 +1857,12 @@ impl Pilot {
         // keeping the car there, and for the sweep.
         let esc_full: f32 =
             std::env::var("NFS_ESCFULL").ok().and_then(|v| v.parse().ok()).unwrap_or(ESCAPE_FULL);
+        let corner_lift: f32 = std::env::var("NFS_CORNER_LIFT")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(CORNER_LIFT);
         let lift =
-            if self.escape.is_some() && speed.abs() < esc_full { 0.0 } else { CORNER_LIFT };
+            if self.escape.is_some() && speed.abs() < esc_full { 0.0 } else { corner_lift };
         let mut throttle = (1.0 - self.steer.abs() * lift).max(0.15);
         // `NFS_FLATOUT=1`: pedal to the floor, no brake, steering untouched. **An instrument, not
         // a driving mode.** "The car is not fast enough" is a claim about the drivetrain, and the
@@ -2002,6 +2023,6 @@ impl Pilot {
             brake = brake.max((close - 0.5).max(0.0) * 2.0);
         }
 
-        Some(Controls { throttle, brake, steer: self.steer, toggle_auto_shift: false })
+        Some(Controls { throttle, brake, steer: self.steer, toggle_auto_shift: false, nitro: false, shift: 0 })
     }
 }

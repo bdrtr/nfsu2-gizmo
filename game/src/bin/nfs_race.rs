@@ -315,6 +315,7 @@ fn update(world: &mut World, state: &mut RaceState, dt: f32, input: &Input) {
 
     let rig = &state.rig;
     state.driver.step_physics_with(world, dt, |w| rig.between_step(w, FIXED_DT));
+    state.rig.style_tick(world, dt);
 
     let Some(pose) = state.rig.pose(world) else { return };
 
@@ -345,6 +346,8 @@ fn update(world: &mut World, state: &mut RaceState, dt: f32, input: &Input) {
     let car_xz = Vec3::new(pose.position.x, 0.0, pose.position.z);
     let cp = state.checkpoints[state.next_cp];
     if car_xz.distance(Vec3::new(cp.x, 0.0, cp.z)) < CP_RADIUS {
+        // Oyunun tur dolumu (`0x601785`): bir tur yarım depo, burada kontrol noktası başına payı.
+        state.rig.add_nitro(world, 0.5 / N_CHECKPOINTS as f32);
         if state.next_cp == 0 {
             // Reached the start line after all checkpoints → a lap is complete.
             state.lap += 1;
@@ -403,7 +406,8 @@ fn ui(world: &mut World, state: &mut RaceState, ctx: &egui::Context) {
             ui.label(format!("Checkpoint: {}/{}", state.next_cp, N_CHECKPOINTS));
             ui.label("W/S · A/D · Space · R");
         });
-    if let Some(v) = world.borrow::<gizmo::physics::vehicle::VehicleController>().get(state.rig.chassis) {
-        nfsu2::hud::show(ctx, &nfsu2::hud::Dash::of(v));
+    if let Some(mut d) = nfsu2::hud::Dash::of_car(world, state.rig.chassis) {
+        d.style = state.rig.style_hud();
+        nfsu2::hud::show(ctx, &d);
     }
 }

@@ -289,6 +289,61 @@ impl Bench {
         Self { world, rig, t: 0.0 }
     }
 
+    /// A wall across the car's path, `ahead` metres in front of the origin and turned `angle_deg`
+    /// about the vertical from square-on: 60 m wide, 2 m tall, carrying the road's material the
+    /// way the city's own colliders do.
+    pub fn add_wall(&mut self, ahead: f32, angle_deg: f32) {
+        self.add_block(ahead, angle_deg, 2.0, 0.5);
+    }
+
+    /// A kerb across the car's path: like [`Self::add_wall`] but `height` metres tall and 3 m deep,
+    /// so the car can drive up onto it.
+    pub fn add_kerb(&mut self, ahead: f32, angle_deg: f32, height: f32) {
+        self.add_block(ahead, angle_deg, height, 1.5);
+    }
+
+    /// A 60 m wide block `height` tall and `half_depth · 2` deep, standing on the plane.
+    fn add_block(&mut self, ahead: f32, angle_deg: f32, height: f32, half_depth: f32) {
+        let e = self.world.spawn();
+        let at = Transform::new(Vec3::new(0.0, height * 0.5, -ahead))
+            .with_rotation(Quat::from_rotation_y(angle_deg.to_radians()));
+        add_transform(&mut self.world, e, at);
+        let collider = crate::scene::road(Collider::offset_box(
+            Vec3::ZERO,
+            Vec3::new(30.0, height * 0.5, half_depth),
+        ));
+        self.world.add_component(e, RigidBody::new_static());
+        self.world.add_component(e, Velocity::default());
+        self.world.add_component(e, collider.clone());
+        self.world.add_component(e, gizmo::physics::components::PhysicsMaterial::ASPHALT);
+        if let Some(mut phys) = self.world.get_resource_mut::<PhysicsWorld>() {
+            phys.add_body(
+                gizmo::physics::BodyHandle::from_id(e.id()),
+                RigidBody::new_static(),
+                at,
+                Velocity::default(),
+                collider,
+            );
+        }
+    }
+
+    /// The chassis' velocity, world space.
+    pub fn velocity_world(&self) -> Vec3 {
+        self.velocity().0
+    }
+
+    /// How far the car has gone along −Z from where it stood.
+    pub fn travelled(&self) -> f32 {
+        let tr = self.world.borrow::<Transform>();
+        tr.get(self.rig.chassis).map_or(0.0, |t| -t.position.z)
+    }
+
+    /// The car's own up axis, world space — `y` below zero is a car on its roof.
+    pub fn up(&self) -> Vec3 {
+        let (_, _, rot) = self.velocity();
+        rot * Vec3::Y
+    }
+
     /// The player at `player` m/s driving into the back of the same car on rails at `rail` m/s,
     /// coasting, for `seconds` — resolved the way the race resolves it ([`super::bump`]), or with
     /// `solver` the old way: the rail's body left in the engine's solver as a kinematic wall.
@@ -387,8 +442,9 @@ impl Bench {
     pub fn step(&mut self, c: &Controls) {
         self.rig.drive(&mut self.world, c);
         super::drive::vehicle_step(&mut self.world, FIXED_DT);
-        self.rig.apply_downforce(&mut self.world, FIXED_DT);
-        gizmo::physics::physics_step_system(&self.world, FIXED_DT);
+        self.rig.between_step(&mut self.world, FIXED_DT);
+        super::drive::physics_step(&mut self.world, FIXED_DT);
+        self.rig.style_tick(&mut self.world, FIXED_DT);
         self.t += FIXED_DT;
     }
 
@@ -503,6 +559,35 @@ impl Bench {
         (-right.y.clamp(-1.0, 1.0).asin(), -nose.y.clamp(-1.0, 1.0).asin())
     }
 
+    /// Turn the car a quarter to its left where it stands and send it along −Z at `speed` m/s —
+    /// sliding sideways, its right flank leading, as a car that has lost its tail in a corner does.
+    pub fn slide_sideways(&mut self, speed: f32) {
+        let at = self.position();
+        let rot = Quat::from_rotation_y(std::f32::consts::FRAC_PI_2);
+        let step = Vec3::new(0.0, 0.0, -speed * FIXED_DT);
+        self.rig.place(&mut self.world, (at, rot), (at + step, rot), FIXED_DT);
+        // A body at rest is asleep, and a sleeping body's velocity is not integrated.
+        if let Some(mut rb) = self.world.borrow_mut::<RigidBody>().get_mut(self.rig.chassis) {
+            rb.wake_up();
+        }
+    }
+
+    /// The chassis' position, world space.
+    pub fn position(&self) -> Vec3 {
+        self.world.borrow::<Transform>().get(self.rig.chassis).map_or(Vec3::ZERO, |t| t.position)
+    }
+
+    /// Roll rate: the angular velocity about the car's own nose axis, rad/s.
+    pub fn roll_rate(&self) -> f32 {
+        let (_, ang, rot) = self.velocity();
+        ang.dot(rot * Vec3::NEG_Z)
+    }
+
+    /// How many wheels are touching something.
+    pub fn wheels_down(&self) -> usize {
+        self.rig.wheels_down(&self.world).0
+    }
+
     /// Gear, engine rpm, total drive torque at the wheels and mean wheel spin — see
     /// [`super::CarRig::drivetrain`].
     pub fn drivetrain(&self) -> (usize, f32, f32, f32) {
@@ -528,6 +613,30 @@ impl Bench {
     #[must_use]
     pub fn assisted(&self, steer: f32) -> f32 {
         self.rig.steer_for_speed(&self.world, steer)
+    }
+
+    /// Arka tekerleri el freniyle kilitle ya da bırak — oyuncunun Space'i
+    /// ([`CarRig::between_step`](super::CarRig::between_step)).
+    pub fn handbrake(&mut self, on: bool) {
+        self.rig.handbrake = on;
+    }
+
+    /// Bir girdi, yardımdan ve oyunun karşı direksiyonundan geçmiş hâliyle — oyuncunun tuşunun
+    /// vardığı yer ([`CarRig::catch_slide`](super::CarRig::catch_slide)).
+    pub fn caught(&mut self, key: f32) -> f32 {
+        self.rig.human = true;
+        let steer = self.rig.steer_for_speed(&self.world, key);
+        self.rig.catch_slide(&self.world, key, steer)
+    }
+
+    /// Stil puanları: bankadaki toplam ve son olay — yalnız [`Self::caught`] çağrılmışsa (insan).
+    pub fn style(&self) -> Option<crate::hud::Style> {
+        self.rig.style_hud()
+    }
+
+    /// The game's own keyboard steering ([`super::steer`]) for this input and these pedals.
+    pub fn game_steered(&self, steer: f32, throttle: f32, brake: f32) -> f32 {
+        self.rig.game_steer(&self.world, steer, throttle, brake)
     }
 
     /// The steering angle, radians: the input times the lock, the one angle the controller splits

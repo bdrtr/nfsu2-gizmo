@@ -218,6 +218,114 @@ fn tap(
     Some(Tap { slip, yaw, after: b.sideslip() })
 }
 
+/// A steady corner at `kmh` through the player's steering (assist and catch, a full key held), then
+/// the throttle floored for 2.5 s with the key still held.
+fn power(renderer: &Renderer, assets: &mut AssetManager, car: &str, kmh: f32) {
+    let want = kmh / 3.6;
+    let Some(mut b) = up_to(renderer, assets, car, want) else {
+        println!("   {kmh:>4.0} km/h: hıza çıkamadı");
+        return;
+    };
+    let mut key = 0.0f32;
+    let t0 = b.t;
+    let (mut corner, mut peak, mut yaw, mut spun) = (0.0f32, 0.0f32, 0.0f32, false);
+    while b.t - t0 < 6.5 {
+        let t = b.t - t0;
+        key = (key + 6.0 * FIXED_DT).min(1.0);
+        let throttle = if t < 4.0 { hold(&b, want).0 } else { 1.0 };
+        let steer = b.caught(key);
+        b.step(&Controls { throttle, steer, ..Controls::default() });
+        let slip = b.sideslip().to_degrees().abs();
+        if t < 4.0 {
+            corner = slip;
+        } else {
+            peak = peak.max(slip);
+            yaw = yaw.max(b.yaw_rate().abs().to_degrees());
+            spun |= slip > 60.0;
+        }
+    }
+    println!(
+        "   {kmh:>4.0} km/h · viraj {corner:>4.1}° · en çok {peak:>5.1}° · yalpa {yaw:>5.1}°/s · {} · {:>3.0} km/h",
+        if spun { "DÖNDÜ" } else { "     " },
+        b.speed() * 3.6
+    );
+}
+
+/// What the driver does once the handbrake has broken the tail loose.
+#[derive(Clone, Copy, PartialEq)]
+enum Catch {
+    /// Lets go of the key.
+    LetGo,
+    /// Steers into the slide through the assist alone (`NFS_CATCH=0`'s game).
+    Bare,
+    /// Steers into the slide through the assist and the game's counter-steer.
+    Game,
+    /// Keeps the left key held.
+    Hold,
+}
+
+/// Straight at `kmh`, then half a second of handbrake with the left key ramping in, then four
+/// seconds of three-quarter throttle and `way`. Steering into the slide is the key towards the side
+/// the car is travelling to — ramped like [`nfsu2::rig::Driver`]'s — let go once the slide is under
+/// 3°.
+fn drift(renderer: &Renderer, assets: &mut AssetManager, car: &str, kmh: f32, name: &str, way: Catch) {
+    let Some(mut b) = up_to(renderer, assets, car, kmh / 3.6) else {
+        println!("   {kmh:>4.0} km/h · {name}: hıza çıkamadı");
+        return;
+    };
+    let mut key = 0.0f32;
+    let t0 = b.t;
+    let (mut peak, mut at, mut settled, mut spun) = (0.0f32, [0.0f32; 3], None, false);
+    while b.t - t0 < 4.5 {
+        let t = b.t - t0;
+        let slip = b.sideslip();
+        let (target, throttle) = if t < 0.5 {
+            (1.0, 0.3)
+        } else {
+            let into = if slip.to_degrees().abs() > 3.0 { -slip.signum() } else { 0.0 };
+            let target = match way {
+                Catch::LetGo => 0.0,
+                Catch::Bare | Catch::Game => into,
+                Catch::Hold => 1.0,
+            };
+            (target, 0.75)
+        };
+        key = if target == 0.0 {
+            key * (-15.0 * FIXED_DT).exp()
+        } else {
+            (key + (target - key).clamp(-6.0 * FIXED_DT, 6.0 * FIXED_DT)).clamp(-1.0, 1.0)
+        };
+        b.handbrake(t < 0.5);
+        let steer = if way == Catch::Game { b.caught(key) } else { b.assisted(key) };
+        b.step(&Controls { throttle, steer, ..Controls::default() });
+        let slip = b.sideslip().to_degrees().abs();
+        if t >= 0.5 {
+            peak = peak.max(slip);
+            spun |= slip > 90.0;
+            if settled.is_none() && peak > 5.0 && slip < 5.0 {
+                settled = Some(t - 0.5);
+            }
+        }
+        for (i, s) in [1.5f32, 2.5, 3.5].iter().enumerate() {
+            if (t - s).abs() < FIXED_DT * 0.5 {
+                at[i] = slip;
+            }
+        }
+    }
+    let style = b.style().map_or(String::new(), |s| {
+        format!(" · stil {:.0}{}", s.total, s.last.map_or(String::new(), |(n, p, _)| format!(" ({n} +{p:.0})")))
+    });
+    println!(
+        "   {kmh:>4.0} km/h · {name:<17} · en çok {peak:>5.1}° · {:>5.1}° {:>5.1}° {:>5.1}° · iniş {} · {} · {:>3.0} km/h{style}",
+        at[0],
+        at[1],
+        at[2],
+        settled.map_or("  —  ".into(), |s| format!("{s:>4.1} s")),
+        if spun { "DÖNDÜ" } else { "     " },
+        b.speed() * 3.6
+    );
+}
+
 /// How far `b` is from mirroring `a`, as a fraction of `a`: zero when `b = −a`.
 fn unmirrored(a: f32, b: f32) -> f32 {
     (a + b).abs() / a.abs().max(1e-6)
@@ -237,6 +345,86 @@ async fn run() {
     // engine's solver).
     if std::env::var("NFS_BENCH").is_ok_and(|v| v == "mirror") {
         mirror(&renderer, &mut assets, &car);
+        return;
+    }
+    // `NFS_BENCH=kerb`: a kerb struck at speed and at an angle, coasting — whether the car rolls.
+    if std::env::var("NFS_BENCH").is_ok_and(|v| v == "kerb") {
+        println!("== kaldırım: yükseklik · hız · açı → en büyük yalpa · yalpa hızı · havada · en yüksek sıçrama · ters döndü mü");
+        for height in [0.12f32, 0.2, 0.3] {
+            for speed in [15.0f32, 25.0] {
+                for angle in [30.0f32, 60.0, 75.0] {
+                    kerb(&renderer, &mut assets, &car, height, speed, angle);
+                }
+            }
+        }
+        return;
+    }
+    // `NFS_BENCH=trip`: sliding sideways into a kerb — the tripped roll-over.
+    if std::env::var("NFS_BENCH").is_ok_and(|v| v == "trip") {
+        println!("== yana kayarak kaldırıma: yükseklik · yan hız → en büyük yalpa · yalpa hızı · ters döndü mü");
+        for height in [0.12f32, 0.2, 0.3] {
+            for lateral in [4.0f32, 7.0, 10.0, 14.0] {
+                trip(&renderer, &mut assets, &car, height, lateral);
+            }
+        }
+        return;
+    }
+    if std::env::var("NFS_BENCH").is_ok_and(|v| v == "wall") {
+        println!("== duvar: hız · açı → sekme (duvara dik hız, önce → sonra) · duvar boyunca kalan · en büyük sapma · en büyük yalpa · ters döndü mü");
+        for speed in [15.0f32, 25.0] {
+            for angle in [0.0f32, 30.0, 60.0] {
+                wall(&renderer, &mut assets, &car, speed, angle);
+            }
+        }
+        return;
+    }
+    // `NFS_BENCH=steer`: full key in a steady circle, three ways — the bare lock, our speed-scaled
+    // assist, and the game's own tables (`rig::steer`, at the throttle the circle holds).
+    if std::env::var("NFS_BENCH").is_ok_and(|v| v == "steer") {
+        println!("== direksiyon: tam tuş, sabit daire · açı · yanal ivme · kayma");
+        for kmh in [40.0f32, 70.0, 100.0, 130.0, 160.0] {
+            let mut row = format!("   {kmh:>4.0} km/h");
+            for (name, way) in [("çıplak", 0u8), ("yardım", 1), ("oyunun", 2)] {
+                let o = circle(&renderer, &mut assets, &car, kmh, |b| match way {
+                    0 => 1.0,
+                    1 => b.assisted(1.0),
+                    _ => b.game_steered(1.0, hold(b, kmh / 3.6).0, 0.0),
+                });
+                row += &match o {
+                    Outcome::Unreached => format!(" · {name}: —"),
+                    Outcome::Spun => format!(" · {name}: DÖNDÜ"),
+                    Outcome::Done(c) => format!(
+                        " · {name}: {:>4.1}° {:>4.1} m/s² kayma {:>4.1}°",
+                        c.angle.to_degrees(),
+                        c.lat.abs(),
+                        c.slip.abs().to_degrees()
+                    ),
+                };
+            }
+            println!("{row}");
+        }
+        return;
+    }
+    // `NFS_BENCH=power`: a steady corner, then the throttle floored — whether the tail steps out.
+    if std::env::var("NFS_BENCH").is_ok_and(|v| v == "power") {
+        println!("== gazla çıkış: sabit virajda tam tuş, sonra 2,5 s tam gaz · viraj kayması · en büyük kayma · en büyük yalpa · dönüş · son hız");
+        for kmh in [40.0f32, 60.0, 90.0] {
+            power(&renderer, &mut assets, &car, kmh);
+        }
+        return;
+    }
+    // `NFS_BENCH=drift`: a slide provoked with the handbrake, then caught (or not) four ways.
+    if std::env::var("NFS_BENCH").is_ok_and(|v| v == "drift") {
+        println!("== drift: 0,5 s el freni + sol tuş, sonra · en büyük kayma · 1/2/3 s'deki kayma · 5°'ye iniş · dönüş · son hız");
+        for kmh in [70.0f32, 90.0, 110.0] {
+            for (name, way) in [("bırak", Catch::LetGo), ("karşı, yardımsız", Catch::Bare), ("karşı, oyunun", Catch::Game), ("sola tut", Catch::Hold)] {
+                drift(&renderer, &mut assets, &car, kmh, name, way);
+            }
+        }
+        return;
+    }
+    if std::env::var("NFS_BENCH").is_ok_and(|v| v == "launch") {
+        launch(&renderer, &mut assets, &car);
         return;
     }
     if std::env::var("NFS_BENCH").is_ok_and(|v| v == "crash") {
@@ -400,6 +588,168 @@ async fn run() {
     }
 
     mirror(&renderer, &mut assets, &car);
+}
+
+/// Into a wall at `speed` m/s, `angle` degrees off square (0 = head on, 60 = a glancing scrape),
+/// coasting from 10 m before it: how much the car bounces back off the wall's normal, how much of
+/// its speed along the wall it keeps, and whether the hit spins it or rolls it.
+fn wall(renderer: &Renderer, assets: &mut AssetManager, car: &str, speed: f32, angle: f32) {
+    const AHEAD: f32 = 220.0;
+    let mut b = Bench::new(renderer, assets, car);
+    b.add_wall(AHEAD, angle);
+    b.run(2.0, |_, _| Controls::default());
+    // The wall's normal, pointing back at the car.
+    let normal = Quat::from_rotation_y(angle.to_radians()) * Vec3::Z;
+    let mut t = 0.0;
+    while t < 60.0 {
+        let ahead = AHEAD - b.travelled();
+        if ahead < 10.0 {
+            break;
+        }
+        let throttle = if b.forward_speed() < speed { 1.0 } else { 0.0 };
+        let steer = 0.0;
+        b.step(&Controls { throttle, steer, ..Controls::default() });
+        t += FIXED_DT;
+    }
+    let before = b.velocity_world();
+    let (into_before, along_before) = (-before.dot(normal), before.length());
+    let (mut out, mut yaw, mut roll, mut flipped) = (0.0f32, 0.0f32, 0.0f32, false);
+    let mut along_after = 0.0;
+    let mut s = 0.0;
+    while s < 3.0 {
+        b.step(&Controls::default());
+        s += FIXED_DT;
+        let v = b.velocity_world();
+        out = out.max(v.dot(normal));
+        yaw = yaw.max(b.yaw_rate().abs());
+        roll = roll.max(b.attitude().0.abs());
+        flipped |= b.up().y < 0.2;
+        along_after = (v - normal * v.dot(normal)).length();
+    }
+    println!(
+        "   {speed:>4.0} m/s · {angle:>3.0}° → sekme {into_before:>5.1} → {out:>4.1} m/s (e≈{:.2}) · duvar boyunca {along_after:>5.1} / {along_before:>5.1} · sapma {yaw:>4.2} rad/s · yalpa {:>5.1}° · {}",
+        if into_before > 0.1 { out / into_before } else { 0.0 },
+        roll.to_degrees(),
+        if flipped { "TERS DÖNDÜ" } else { "tekerlekleri üstünde" },
+    );
+}
+
+/// A kerb `height` tall across the path, turned `angle` from square-on, met at `speed` m/s with
+/// the throttle lifted 10 m before it; three seconds watched.
+fn kerb(renderer: &Renderer, assets: &mut AssetManager, car: &str, height: f32, speed: f32, angle: f32) {
+    const AHEAD: f32 = 220.0;
+    let mut b = Bench::new(renderer, assets, car);
+    b.add_kerb(AHEAD, angle, height);
+    b.run(2.0, |_, _| Controls::default());
+    let mut t = 0.0;
+    while t < 60.0 && AHEAD - b.travelled() > 12.0 {
+        let throttle = if b.forward_speed() < speed { 1.0 } else { 0.0 };
+        b.step(&Controls { throttle, ..Controls::default() });
+        t += FIXED_DT;
+    }
+    let y0 = b.position().y;
+    let (mut roll, mut rate, mut air, mut lift, mut flipped) = (0.0f32, 0.0f32, 0.0f32, 0.0f32, false);
+    let mut s = 0.0;
+    while s < 3.0 {
+        b.step(&Controls::default());
+        s += FIXED_DT;
+        let (r, p) = b.attitude();
+        roll = roll.max(r.abs()).max(p.abs());
+        rate = rate.max(b.roll_rate().abs());
+        if b.wheels_down() == 0 {
+            air += FIXED_DT;
+        }
+        lift = lift.max(b.position().y - y0);
+        flipped |= b.up().y < 0.2;
+    }
+    println!(
+        "   {height:.2} m · {speed:>4.0} m/s · {angle:>3.0}° → yalpa/yunus {:>5.1}° · {:>5.1}°/s · havada {air:.2} s · sıçrama {lift:.2} m · {}",
+        roll.to_degrees(),
+        rate.to_degrees(),
+        if flipped { "TERS DÖNDÜ" } else { "" },
+    );
+}
+
+/// The car set sliding sideways at `lateral` m/s towards a kerb `height` tall 4 m away; three
+/// seconds watched, no controls.
+fn trip(renderer: &Renderer, assets: &mut AssetManager, car: &str, height: f32, lateral: f32) {
+    let mut b = Bench::new(renderer, assets, car);
+    b.add_kerb(5.5, 0.0, height);
+    b.run(2.0, |_, _| Controls::default());
+    b.slide_sideways(lateral);
+    if std::env::var("NFS_TRIP_TRACE").is_ok() {
+        eprintln!("trip: at {:?} v {:?} up {:?}", b.position(), b.velocity_world(), b.up());
+        b.step(&Controls::default());
+        eprintln!("trip: after one step at {:?} v {:?}", b.position(), b.velocity_world());
+    }
+    let (mut roll, mut rate, mut flipped) = (0.0f32, 0.0f32, false);
+    let mut s = 0.0;
+    while s < 3.0 {
+        b.step(&Controls::default());
+        s += FIXED_DT;
+        roll = roll.max(b.attitude().0.abs());
+        rate = rate.max(b.roll_rate().abs());
+        flipped |= b.up().y < 0.2;
+    }
+    println!(
+        "   {height:.2} m · {lateral:>4.0} m/s → yalpa {:>5.1}° · {:>5.1}°/s · {}",
+        roll.to_degrees(),
+        rate.to_degrees(),
+        if flipped { "TERS DÖNDÜ" } else { "" },
+    );
+}
+
+/// Full throttle from rest on the flat, then the pedal lifted at speed: the drivetrain alone.
+///
+/// Prints each gear change (time, speed, the rpm it left at and landed on), the times to 60, 100
+/// and 160 km/h and the top speed after 60 s — then 10 s off the throttle from there, which is
+/// where engine braking and the game's lifted-off drag show. `NFS_POWERTRAIN=off` runs it with
+/// the engine's own drivetrain, for the comparison.
+fn launch(renderer: &Renderer, assets: &mut AssetManager, car: &str) {
+    let mut b = Bench::new(renderer, assets, car);
+    b.run(2.0, |_, _| Controls::default());
+    // `NFS_BENCH_NOS=1`: nitro held from the line — the tank burns out in its six seconds.
+    let nos = std::env::var("NFS_BENCH_NOS").is_ok_and(|v| v == "1");
+    let full = Controls { throttle: 1.0, nitro: nos, ..Controls::default() };
+    let (mut gear, mut rpm) = b.gearbox();
+    let mut marks: [(f32, Option<f32>); 3] = [(60.0, None), (100.0, None), (160.0, None)];
+    let mut t = 0.0f32;
+    let mut shifts = Vec::new();
+    while t < 60.0 {
+        b.step(&full);
+        t += FIXED_DT;
+        let kmh = b.forward_speed() * 3.6;
+        for m in &mut marks {
+            if m.1.is_none() && kmh >= m.0 {
+                m.1 = Some(t);
+            }
+        }
+        let (g, r) = b.gearbox();
+        if g != gear {
+            shifts.push(format!("{}→{} {:.1}s {:.0}km/h {:.0}→{:.0}", gear, g, t, kmh, rpm, r));
+            gear = g;
+        }
+        rpm = r;
+    }
+    let top = b.forward_speed() * 3.6;
+    let fmt = |m: (f32, Option<f32>)| m.1.map_or("—".to_string(), |s| format!("{s:.1} s"));
+    println!(
+        "== kalkış: 0-60 {} · 0-100 {} · 0-160 {} · 60 s'de {top:.1} km/h ({}. vites, {rpm:.0} rpm)",
+        fmt(marks[0]),
+        fmt(marks[1]),
+        fmt(marks[2]),
+        gear.saturating_sub(1),
+    );
+    println!("   geçişler: {}", shifts.join(" · "));
+    let mut coast = Vec::new();
+    for k in 1..=10 {
+        b.run(1.0, |_, _| Controls::default());
+        if k % 2 == 0 || k == 1 {
+            let (g, r) = b.gearbox();
+            coast.push(format!("{k}s {:.0} km/h ({}., {r:.0})", b.forward_speed() * 3.6, g.saturating_sub(1)));
+        }
+    }
+    println!("   gaz bırakınca: {}", coast.join(" · "));
 }
 
 /// Every manoeuvre to the left and to the right: the second should be the first's mirror image.

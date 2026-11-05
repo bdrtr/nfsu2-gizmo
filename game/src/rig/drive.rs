@@ -37,7 +37,17 @@ struct WheelOrder(bool);
 ///
 /// `NFS_WHEELORDER=fixed` turns it off — the engine's own fixed order — so what it is worth can be
 /// measured against what it replaced.
+///
+/// Around it, the game's own powertrain rules ([`super::powertrain`]): shift time, the fuel cut,
+/// engine braking and the record's drag, none of which the engine's controller has.
 pub fn vehicle_step(world: &mut World, dt: f32) {
+    super::powertrain::before_step(world, dt);
+    controller_step(world, dt);
+    super::powertrain::after_step(world, dt);
+}
+
+/// The controller itself, with the wheel order alternated — see [`vehicle_step`].
+fn controller_step(world: &mut World, dt: f32) {
     static FIXED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     if *FIXED.get_or_init(|| std::env::var("NFS_WHEELORDER").is_ok_and(|v| v == "fixed")) {
         gizmo::physics::vehicle_controller_system(world, dt);
@@ -56,6 +66,56 @@ pub fn vehicle_step(world: &mut World, dt: f32) {
     gizmo::physics::vehicle_controller_system(world, dt);
     if flip {
         swap_sides(world);
+    }
+}
+
+/// One rigid-body step, with what **contacts** do to a driven car's spin optionally cut to NFSU2's
+/// share — **off by default** (`NFS_SPINSHARE=0.4` turns it on).
+///
+/// `SPEED2.EXE` applies a collision impulse to a car through its own `ApplyImpulse` (`0x5A0B00`),
+/// and only **0.4** of it goes into turning the car ([`super::bump::SPIN_SHARE`]) — whatever the car
+/// hit, a wall or another car. The engine's solver gives the whole of it, so a car that clipped a
+/// wall at an angle came away spinning: 1.5–3.8 rad/s on the bench (`NFS_BENCH=wall`), and a kerb
+/// struck at speed could roll it.
+///
+/// The engine has no knob for that, so it is done around the step: the controller has already put
+/// its own forces into the velocity, the step adds damping (`ω · e^(−c·dt)`) and the contacts, and
+/// whatever the step changed beyond the damping is the contacts' — of which `share` is kept.
+/// Kinematic rails have no controller and are not touched.
+///
+/// **Why off.** On the bench it halves the spin a wall hit gives (30° at 15 m/s: 1.53 → 0.61
+/// rad/s), but the pilot sweep loses to it solidly: 1 605 → 1 500 waypoints over eight routes. The
+/// share also scales what the *ground* does to a chassis that bottoms out or tips onto a kerb, which
+/// the game's per-pair impulse does not, and nothing here can tell the two apart. So it stays a knob
+/// to drive with rather than a default.
+pub fn physics_step(world: &mut World, dt: f32) {
+    use gizmo::physics::vehicle::VehicleController;
+    // `NFS_SPINSHARE=<x>`: the share kept (default 1 = the engine's own; NFSU2's is 0.4).
+    static SHARE: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
+    let share = *SHARE.get_or_init(|| {
+        std::env::var("NFS_SPINSHARE").ok().and_then(|v| v.parse().ok()).unwrap_or(1.0)
+    });
+    if share >= 1.0 {
+        gizmo::physics::physics_step_system(world, dt);
+        return;
+    }
+    let ids: Vec<u32> = world.borrow::<VehicleController>().entities().collect();
+    let before: Vec<(u32, Vec3)> = {
+        let vel = world.borrow::<Velocity>();
+        let rbs = world.borrow::<RigidBody>();
+        ids.iter()
+            .filter_map(|&id| {
+                let damp = rbs.get(id)?.angular_damping;
+                Some((id, vel.get(id)?.angular * (-damp * dt).exp()))
+            })
+            .collect()
+    };
+    gizmo::physics::physics_step_system(world, dt);
+    let mut vel = world.borrow_mut::<Velocity>();
+    for (id, base) in before {
+        if let Some(mut v) = vel.get_mut(id) {
+            v.angular = base + (v.angular - base) * share;
+        }
     }
 }
 
@@ -101,6 +161,12 @@ pub struct Controls {
     pub steer: f32,
     /// Whether the automatic gearbox was toggled this frame.
     pub toggle_auto_shift: bool,
+    /// Nitro düğmesi basılı mı. Basılı tutuldukça yanıyor, depo bitene kadar
+    /// ([`super::powertrain::Nitro`]).
+    pub nitro: bool,
+    /// El ile vites: `+1` büyüt (E), `−1` küçült (Q), bu karede basıldıysa. Basmak otomatik
+    /// şanzımanı kapatıyor ([`super::CarRig::drive`]).
+    pub shift: i8,
 }
 
 /// The player's side of the car: the smoothed steering position and the physics accumulator.
@@ -153,6 +219,9 @@ impl Driver {
             brake,
             steer: self.steer,
             toggle_auto_shift: input.is_key_just_pressed(KeyCode::KeyT as u32),
+            nitro: held(KeyCode::ShiftLeft) || held(KeyCode::KeyN),
+            shift: i8::from(input.is_key_just_pressed(KeyCode::KeyE as u32))
+                - i8::from(input.is_key_just_pressed(KeyCode::KeyQ as u32)),
         }
     }
 
@@ -180,7 +249,7 @@ impl Driver {
         while self.accum >= FIXED_DT && steps < MAX_STEPS {
             vehicle_step(world, FIXED_DT);
             between(world);
-            gizmo::physics::physics_step_system(world, FIXED_DT);
+            physics_step(world, FIXED_DT);
             self.accum -= FIXED_DT;
             steps += 1;
         }

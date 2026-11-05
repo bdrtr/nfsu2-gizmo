@@ -2111,6 +2111,8 @@ async fn run() {
                         brake: 1.0,
                         steer: 0.0,
                         toggle_auto_shift: false,
+                        nitro: false,
+                        shift: 0,
                     },
                 );
                 continue;
@@ -2133,7 +2135,7 @@ async fn run() {
                     .ok()
                     .and_then(|v| v.parse().ok())
                     .unwrap_or(0.0);
-                let c = Controls { throttle: 1.0, brake: 0.0, steer: st, toggle_auto_shift: false };
+                let c = Controls { throttle: 1.0, brake: 0.0, steer: st, ..Controls::default() };
                 cmd[k] = (c.throttle, c.brake, c.steer);
                 spoke[k] = true;
                 rig.drive(&mut world, &c);
@@ -2177,7 +2179,7 @@ async fn run() {
                 }
             }
         }
-        gizmo::physics::physics_step_system(&world, FIXED_DT);
+        nfsu2::rig::physics_step(&mut world, FIXED_DT);
 
         // Where the world last held each car up — the same question `keep_in_world` asks in the
         // game, through the same code, with the rescue left out. Watching a field leave the world

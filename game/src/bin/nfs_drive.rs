@@ -158,6 +158,7 @@ fn update(world: &mut World, state: &mut DriveState, dt: f32, input: &Input) {
 
     let rig = &state.rig;
     state.driver.step_physics_with(world, dt, |w| rig.between_step(w, FIXED_DT));
+    state.rig.style_tick(world, dt);
 
     let Some(pose) = state.rig.pose(world) else { return };
 
@@ -189,12 +190,13 @@ fn update(world: &mut World, state: &mut DriveState, dt: f32, input: &Input) {
 }
 
 fn ui(world: &mut World, state: &mut DriveState, ctx: &egui::Context) {
-    if let Some(v) = world.borrow::<gizmo::physics::vehicle::VehicleController>().get(state.rig.chassis) {
-        nfsu2::hud::show(ctx, &nfsu2::hud::Dash::of(v));
+    if let Some(mut d) = nfsu2::hud::Dash::of_car(world, state.rig.chassis) {
+        d.style = state.rig.style_hud();
+        nfsu2::hud::show(ctx, &d);
     }
     egui::Area::new(egui::Id::new("keys"))
         .anchor(egui::Align2::LEFT_BOTTOM, egui::vec2(24.0, -24.0))
         .show(ctx, |ui| {
-            ui.label("W gaz · S fren/geri · A/D direksiyon · Space el freni · R reset · T otomatik vites");
+            ui.label("W gaz · S fren/geri · A/D direksiyon · Space el freni · Shift nitro · E/Q vites · R reset · T otomatik vites");
         });
 }

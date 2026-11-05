@@ -30,6 +30,8 @@ pub struct GlobalbCar {
     pub handling: Option<CarHandling>,
     /// The 123 colours the game paints bodies with. Empty when the bundle would not parse.
     pub palette: Vec<Colour>,
+    /// The 39 style events the game pays points for ([`gizmo_nfs::globalb::style`]).
+    pub style: Vec<gizmo_nfs::globalb::style::StyleEvent>,
 }
 
 /// Read the install's bundle for the car a `CARS/<name>/GEOMETRY.BIN` path names, looked up by the
@@ -48,7 +50,32 @@ pub fn load_globalb_beside(geometry_path: &str) -> GlobalbCar {
         handling: info.as_ref().map(|i| i.handling),
         info,
         palette: gizmo_nfs::CarParts::parse(&bytes).map(|p| p.palette()).unwrap_or_default(),
+        style: gizmo_nfs::globalb::style::style_events(&bytes).unwrap_or_default(),
     }
+}
+
+/// The install's English text, by label hash ([`gizmo_nfs::language::labels`]) — what the style
+/// events are called. Empty when the file is not where the bundle says the install is.
+#[must_use]
+pub fn load_labels_beside(geometry_path: &str) -> std::collections::HashMap<u32, String> {
+    let Some(bundle) = gizmo_nfs::globalb::install::find(std::path::Path::new(geometry_path)) else {
+        return std::collections::HashMap::new();
+    };
+    // `<install>/GLOBAL/GlobalB.lzc` → `<install>/LANGUAGES/English.bin`, matched without regard to
+    // case: a Wine prefix keeps the install's own mixed case.
+    let Some(root) = bundle.lzc.parent().and_then(std::path::Path::parent) else {
+        return std::collections::HashMap::new();
+    };
+    let find = |dir: &std::path::Path, name: &str| {
+        std::fs::read_dir(dir).ok()?.flatten().map(|e| e.path()).find(|p| {
+            p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.eq_ignore_ascii_case(name))
+        })
+    };
+    find(root, "LANGUAGES")
+        .and_then(|d| find(&d, "English.bin"))
+        .and_then(|p| std::fs::read(p).ok())
+        .map(|b| gizmo_nfs::language::labels(&b))
+        .unwrap_or_default()
 }
 
 /// The bundle's bytes, decompressed.

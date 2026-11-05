@@ -12,8 +12,10 @@
 //! and [`AxleTune`] carries them to the wheels. The record's downforce goes in too, but not through
 //! the engine's aero, whose force grows with the square of speed where the game's grows with speed
 //! itself: [`crate::rig::CarRig::apply_downforce`]. Units are the record's tonnes-and-kilonewtons, so
-//! each is multiplied by a thousand on the way in. The steering lock is still not in the data, and
-//! drag stays at the engine's default.
+//! each is multiplied by a thousand on the way in. The steering lock is still not in the data.
+//! Drag, engine braking, shift time and the fuel cut are in the record too, and in `SPEED2.EXE`'s
+//! engine and gearbox code; the engine's controller has no slot for them, so they travel as
+//! [`CarTune::powertrain`] and are applied around its step by [`crate::rig::powertrain`].
 //!
 //! Where the engine cannot say what the game says, the record's number goes in the nearest slot
 //! and the difference is written down in `MOTOR-NOTLARI.md`: one sway-bar rate for both axles,
@@ -128,10 +130,16 @@ impl EngineLevel {
 pub struct Upgrades {
     pub gearbox: GearboxLevel,
     pub engine: EngineLevel,
+    /// Nitro takılı mı. Seviyesi değil: oyun (`0x5AC4F0`) depoyu takılı parçaların ağırlığıyla
+    /// doluya doğru çekiyor ve toplamı 1'de kırpıyor, profilde ölçülen ağırlıklar ise seviye 1'de
+    /// 1, seviye 2'de 2 — her seviye zaten tam depo. Torku hiç ölçeklemiyor.
+    pub nitrous: bool,
 }
 
 impl Upgrades {
-    /// Read both from the environment: `NFS_ENGINE` and `NFS_GEARBOX`, each `0`–`3`.
+    /// Read both from the environment: `NFS_ENGINE` and `NFS_GEARBOX`, each `0`–`3`; and
+    /// `NFS_NITRO=0` to take the nitrous off, which is otherwise **fitted** — the one part this
+    /// game hands over unbought, because without a garage it is the only way anyone would meet it.
     ///
     /// The same way every other configuration in this game arrives (`NFS_KIT`, `NFS_STYLE_HOOD`,
     /// `NFS_PAINT`), and for the same reason: there is no garage to buy anything in yet, so the
@@ -155,6 +163,7 @@ impl Upgrades {
                 3 => EngineLevel::Three,
                 _ => EngineLevel::Stock,
             },
+            nitrous: std::env::var("NFS_NITRO").map_or(true, |v| v.trim() != "0"),
         }
     }
 
@@ -165,6 +174,7 @@ impl Upgrades {
         Self {
             gearbox: GearboxLevel::from_transmission_total(profile.total(Category::Transmission)),
             engine: EngineLevel::from_engine_total(profile.total(Category::Engine)),
+            nitrous: profile.total(Category::Nitrous) > 0.0,
         }
     }
 }
@@ -242,6 +252,14 @@ pub struct CarTune {
     /// **Linear in speed, not quadratic** — see [`crate::rig::CarRig::apply_downforce`] for the
     /// game's formula and the drive that measured it.
     pub downforce_n_per_mps: f32,
+    /// The engine's rotating inertia, kg·m², from the record.
+    pub flywheel_kgm2: f32,
+    /// What the engine's controller has no slot for: engine braking, shift time, the fuel cut's
+    /// limits and the record's drag — applied around its step by [`crate::rig::powertrain`].
+    pub powertrain: crate::rig::powertrain::Spec,
+    /// Kaydın direksiyon çarpanı (`+0x380`), oyunun direksiyonu açıyı bununla çarpıyor
+    /// ([`crate::rig::steer`]).
+    pub steer_mult: f32,
 }
 
 /// The steering lock, in radians.
@@ -309,8 +327,10 @@ pub fn tune_from_record(
         torque_curve,
         ..VehicleTuning::default()
     };
-    // Downshift has no counterpart in the record either. Half the red line keeps it below the
-    // upshift point for every car measured, which is a rule about this field and not about NFSU2.
+    // Both shift points are starting values. `SPEED2.EXE` upshifts 100–200 rpm short of the red line
+    // and downshifts per gear, below the rpm the upshift into that gear dropped to (`0x5AA960`);
+    // `rig::powertrain` writes both every step for the gear the car is in. These two are what stand
+    // where the powertrain is turned off.
     tuning.downshift_rpm = handling.engine.red_line_rpm * 0.5;
 
     let chassis = &handling.chassis;
@@ -339,6 +359,18 @@ pub fn tune_from_record(
         gears: gears.len(),
         axles,
         downforce_n_per_mps: (chassis.downforce[0] + chassis.downforce[1]) * KILO,
+        flywheel_kgm2: handling.engine.inertia_kgm2,
+        steer_mult: handling.steer_ratio,
+        powertrain: crate::rig::powertrain::Spec {
+            idle_rpm: handling.engine.idle_rpm,
+            red_line_rpm: handling.engine.red_line_rpm,
+            limiter_rpm: handling.engine.limiter_rpm,
+            brake_nm: handling.engine.brake_nm,
+            shift_rate: gb.shift_rate,
+            drag_n: chassis.drag * KILO,
+            nitro_tank_s: if upgrades.nitrous { chassis.nitro_full[0] } else { 0.0 },
+            nitro_nm: if upgrades.nitrous { chassis.nitro_full[1] * KILO } else { 0.0 },
+        },
     }
 }
 
@@ -398,6 +430,7 @@ mod tests {
         let u = Upgrades::default();
         assert_eq!(u.gearbox, GearboxLevel::Stock);
         assert_eq!(u.engine, EngineLevel::Stock);
+        assert!(!u.nitrous);
     }
 
     /// The whole path over a **real** install: the file the game opens → the parser → the
@@ -444,7 +477,7 @@ mod tests {
         let built = tune_from_record(
             info,
             h,
-            Upgrades { gearbox: GearboxLevel::Three, engine: EngineLevel::Three },
+            Upgrades { gearbox: GearboxLevel::Three, engine: EngineLevel::Three, nitrous: true },
             2.6,
             1.6,
         );

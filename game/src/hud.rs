@@ -11,12 +11,25 @@ use gizmo::egui;
 use gizmo::physics::vehicle::VehicleController;
 
 /// Göstergenin bir karede çizdiği her şey.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Dash {
     /// Hız, km/h, işaretsiz.
     pub speed_kmh: f32,
     /// Motor tarafı; araba bir rayda giderken (`NFS_DEMO`) motor çalışmıyor ve yalnız hız var.
     pub engine: Option<Engine>,
+    /// Nitro deposu, takılıysa: doluluk `0..=2` ve şu an yanıyor mu.
+    pub nitro: Option<(f32, bool)>,
+    /// Stil puanları ([`crate::rig::style`]): bankadaki toplam, şu an biriken olay (adı, puanı) ve
+    /// son bankaya geçen (adı, puanı, kaç saniye önce).
+    pub style: Option<Style>,
+}
+
+/// Göstergenin stil satırı.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Style {
+    pub total: f32,
+    pub running: Option<(String, f32)>,
+    pub last: Option<(String, f32, f32)>,
 }
 
 /// Devir ve vites, motorun kendi alanlarından.
@@ -43,13 +56,27 @@ impl Dash {
                 max_rpm: v.tuning.max_rpm,
                 shift_rpm: v.tuning.upshift_rpm,
             }),
+            nitro: None,
+            style: None,
         }
+    }
+
+    /// Aynısı, şasinin nitrosu da okunarak.
+    #[must_use]
+    pub fn of_car(world: &gizmo::prelude::World, chassis: u32) -> Option<Self> {
+        let mut d = Self::of(&*world.borrow::<VehicleController>().get(chassis)?);
+        d.nitro = world
+            .borrow::<crate::rig::powertrain::Powertrain>()
+            .get(chassis)
+            .filter(|p| p.spec.nitro_tank_s > 0.0)
+            .map(|p| (p.nitro.fill, p.nitro.firing));
+        Some(d)
     }
 
     /// Motoru olmayan bir hız: rayın kendi hızı.
     #[must_use]
     pub fn speed_only(speed_kmh: f32) -> Self {
-        Self { speed_kmh: speed_kmh.abs(), engine: None }
+        Self { speed_kmh: speed_kmh.abs(), engine: None, nitro: None, style: None }
     }
 }
 
@@ -79,6 +106,8 @@ const PANEL: egui::Color32 = egui::Color32::from_rgba_premultiplied(8, 10, 14, 1
 const INK: egui::Color32 = egui::Color32::from_rgb(235, 238, 242);
 const DIM: egui::Color32 = egui::Color32::from_rgb(140, 146, 156);
 const RED: egui::Color32 = egui::Color32::from_rgb(232, 52, 44);
+const NOS: egui::Color32 = egui::Color32::from_rgb(64, 156, 255);
+const NOS_OVER: egui::Color32 = egui::Color32::from_rgb(170, 110, 255);
 
 /// Göstergeyi sağ alta çizer.
 pub fn show(ctx: &egui::Context, dash: &Dash) {
@@ -128,6 +157,40 @@ fn panel(ui: &mut egui::Ui, dash: &Dash) {
         rpm_bar(ui, e);
         ui.label(egui::RichText::new(format!("{:.0} rpm", e.rpm)).size(12.0).color(DIM));
     }
+    if let Some((fill, firing)) = dash.nitro {
+        nitro_bar(ui, fill, firing);
+    }
+    if let Some(s) = &dash.style {
+        style_line(ui, s);
+    }
+}
+
+/// Stil puanı: toplam, şu an biriken olay, ve son bankaya geçen iki saniye boyunca.
+fn style_line(ui: &mut egui::Ui, s: &Style) {
+    let mut text = format!("STİL {:.0}", s.total);
+    if let Some((name, pts)) = &s.running {
+        text += &format!("  ·  {name} {pts:.0}");
+    } else if let Some((name, pts, age)) = &s.last {
+        if *age < 2.0 {
+            text += &format!("  ·  {name} +{pts:.0}");
+        }
+    }
+    ui.label(egui::RichText::new(text).size(13.0).strong().color(NOS));
+}
+
+/// Nitro deposu: çubuğun tamamı dolu bir depo, taşan kısım (1'in üstü, en çok 2) üstüne başka renkte
+/// biniyor — oyunun kademeleri oradan geliyor.
+fn nitro_bar(ui: &mut egui::Ui, fill: f32, firing: bool) {
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(BAR_W, BAR_H * 0.6), egui::Sense::hover());
+    let p = ui.painter();
+    p.rect_filled(rect, 2.0, egui::Color32::from_rgb(28, 34, 46));
+    let at = |f: f32| egui::pos2(rect.left() + rect.width() * f.clamp(0.0, 1.0), rect.bottom());
+    let base = if firing { INK } else { NOS };
+    p.rect_filled(egui::Rect::from_min_max(rect.left_top(), at(fill)), 2.0, base);
+    if fill > 1.0 {
+        p.rect_filled(egui::Rect::from_min_max(rect.left_top(), at(fill - 1.0)), 2.0, NOS_OVER);
+    }
+    ui.label(egui::RichText::new("NOS · Shift / N").size(11.0).color(DIM));
 }
 
 /// Bin devirde bir çentikli çubuk; vites devrinden sonrası kırmızı zemin, ibre oraya girince
