@@ -8590,6 +8590,54 @@ birinci, birinciden küçültmek birinci; geri vitesi S (durunca) götürmeye de
 otomatiği kapatıyor, `T` geri açıyor. Geçiş süresi ve kesik oyunun kuralıyla (`rig::powertrain`,
 vites değişimini kendisi fark ediyor). Tuş yardımı `nfs_cruise` ve `nfs_drive`'da.
 
+### Kovalama kamerası: koltuk arabanın kaydında (2026-11-05)
+
+`TrackCarCameraMover` okundu. Aranan tablo ne `GLOBALB`'nin ayrı bir parçasında ne exe'nin veri
+bölümündeydi: **her arabanın kendi kaydında**, `+0x720`'de. `FUN_005ecca0` tabloyu `[ECX+0xC] + 0x720`'den
+alıyor. PryHUB `CarTypeInfo::cameras` olarak okuyor; altın test 46 kaydın hepsini doğruluyor.
+
+| bakış | 240SX ileri / yukarı / eğim | not |
+|---|---|---|
+| 0 | −5,8 / 1,7 / 0° | HUMMER kendine özgü: −6,7 / 2,3 |
+| 1 | −4,7 / 1,7 / 0° | |
+| 2, 3, 4 | arabanın içinde | bu kodda yok: gövde çizilmeye devam ederdi |
+| 5 | −5,8 / 3,45 / 16,7° | nişan `3,45 − 5,8·tan 16,7° = 1,71`, öbürleriyle aynı noktaya |
+
+`+0x790`'da ikinci bir tablo var; global bir kip (`0x8707DC`) 3 iken o kullanılıyor, kipin ne olduğu
+okunmadı. Hangi bakışın varsayılan olduğu oyuncu ayarında (`0x83AA74`, dosyada değil); burada 0 ile
+başlıyor, `C` geçiyor, `NFS_POV` seçiyor.
+
+**Kural** (`0x453570`, `0x44DE90`, `0x445C20`). Kamera arabayı izleyen bir çerçevede duruyor:
+
+- **Yön** 8 m/s'nin altında burun, 13 m/s'nin üstünde **gidiş yönü** (`0x7EC420`). Kaymada
+  arabanın yanının görünmesinin sebebi bu. Geri giderken gidiş yönü yansıtılıyor, kamera burnun arkasında kalıyor.
+- **Koltuk** o çerçevede sabit, yani hız tek başına kamerayı oynatmıyor. İleri ivme (dört örneğin
+  ortalaması) koltuğu `−0,15 m/(m/s²)` ile [−1,5, +1,25], nişanı `−0,06` ile ±1,25 kaydırıyor
+  (`0x7EC610 + 20·bakış`, iki satırın ortası).
+- **Takip** bir kübik Hermite, her adımda yeniden başlıyor (`0x5749E0`). Yeniden başlayınca sönümlü yay:
+  `ω = √6/T`, `ζ = 0,82`. `T`: koltuk 1, nişan 0,35, yön 0,3/0,3/0,55 s.
+- **Görüş açısı hızla değişmiyor.** 71,52° (`0x7EB5B4`) yatay: projeksiyon (`0x5C7EC0`) yarım açıyı
+  yükseklik/genişlikle ölçekliyor, 4:3'te dikey 53,64°. Bizim 45°→72° eğrisi tamamen uydurmaydı, ve
+  "daha iyi olmuş" hükmü o eğriye verilmişti.
+
+**Sarsıntı** (`0x452ED0`, `0x441340`). Altı oktavlık değer gürültüsü (`0x441270`), pitch 6,125 ve yaw
+5,0 frekansında, 0,7° ve 0,5° genlikle. Genlik ve frekans `hız/100 · 4` ile beş satırlık tablodan
+(`0x7EC430`), genlik sonra ×0,2 (`0x7870B8`). Yani 216 km/h'de pitch tepesi ~0,1°; önceki titreme 0,29°
+idi. **Asıl sarsıntı nitronun:** yanarken ve 5 mph üstünde (`0x5ECDB0`) genliğe +0,2, frekansa ×1,4.
+Hız birimi de buradan belli: aynı alan 2,237 ile mph'ye çevriliyor, yani **m/s**. Açı görüş açısıyla
+genişliyor, referans 60° (`0x4412E0`). `+0x20C`'nin sıfır olmaması da koşulda; o alan okunmadı.
+Taşınmadı: 3 mm'lik yana kayma, yalnız pürüzlü yüzeyin sürdüğü ikinci kanal (`0x800EFC`; bu yolda yüzey
+türü yok) ve üst hız olarak arabanınki (`[+0x10]+0x20`), kodun 100'lük yedeği kullanıldı.
+
+**Oyunda** `rig::chase::GameFollow` ve `game_shake`, varsayılan. `NFS_CHASE=old` önceki kamerayı geri getiriyor; asıl
+karşılaştırma bu. **Taşınmadı:** ufkun ivmeye yatması (motorun kamerasında yuvarlanma yok), yönün
+havada düzleşmesi (`Pose` arabanın uçtuğunu söylemiyor) ve `0x44DE90`'ın henüz tanınmayan bir
+durumdaki ×1,3 koltuğu.
+
+**Sürülmedi.** Sayılar ve birim testleri kodla uyuşuyor; ekranda nasıl göründüğüne bakılmadı. Koltuk
+yüksekliği arabanın orijinine göre, ve oyunun `+0x50`'siyle bizim `Pose::position`'ın aynı nokta
+olduğu varsayıldı: araba ekranda yanlış yükseklikte durursa ilk bakılacak yer burası.
+
 ### Sabah sürerek doğrulanacaklar (2026-11-04 gecesi)
 
 Hepsi derleniyor ve testli (oyun 129, PryHUB 266 + altın 38), **hiçbiri sürülmedi**:
@@ -8607,3 +8655,4 @@ Hepsi derleniyor ve testli (oyun 129, PryHUB 266 + altın 38), **hiçbiri sürü
    tarafına basınca toparlanma.
 8. **Işıklandırma "patlıyor"** — durağan karede yok; ne olduğunu (titreme / gölge / ani parlama)
    söylemek yeterli.
+9. **Kamera** — `NFS_CHASE=old` ile karşılaştır: araba ekranda doğru yükseklikte mi, kaymada yanı görünüyor mu, hız hissi sabit görüş açısıyla yetiyor mu. `C` bakış değiştiriyor.
