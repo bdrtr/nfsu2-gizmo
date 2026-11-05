@@ -8561,11 +8561,12 @@ gücü (0x89E7FC, çalışma anında) + sıra terimi`. Üstüne bir yakınlık t
 Önceki uydurma kural 300 m'de ±%5'ti — oyununki beş-altı kat güçlü. `PACE_CEIL` (0,98) duruyor:
 gerideki rakip hattın sınırını aşmıyor. Sürülerek denenmedi.
 
-**Seçenek gücü okundu (2026-11-05).** `0x89E7FC`'e 13 yerden yazılıyor. Dokuzu sabit `1,0`; dördü hızlı
-yarış kurulumunda (`FUN_0053F150` ve kardeşleri) bloğun `+0x94C` tablosundan, satır `0x89E7F4`, sütun
-`FUN_005B5330`. İlk dört satır `1,1,1,1` ×3 ve `0,3 / 0,8 / 1 / 1`. Bu kurulumda iki oyuncu için ayrı
-değer var (`0x89E800`). **Yani burada kullanılan 1 doğru**, kod değişmedi. Satır ve sütunun oyuncuya
-hangi seçenek olarak göründüğü okunmadı; `MOCatchUp` adı yalnız temizlik kodunda geçiyor.
+**Seçenek gücü kısmen okundu (2026-11-05).** `0x89E7FC`'e 13 referans var: biri okuma (`0x4174EB`), sekizi
+sabit `1,0` yazıyor, dördü bloğun `+0x94C` tablosundan alıyor (`FUN_0053F150` ve üç benzeri; satır `0x89E7F4`,
+sütun `FUN_005B5330`, iki oyuncu için ayrı değer `0x89E800`). İlk dört satır `1,1,1,1` ×3 ve `0,3 / 0,8 / 1 / 1`;
+tablonun kaç satır olduğu kesin değil. **Burada kullanılan 1 en yaygın değer, ama her kip için doğru olduğu
+gösterilmedi:** hangi kurulumun hangi yarış kipi olduğu ve satır/sütunun oyuncuya hangi seçenek olarak
+göründüğü okunmadı. Kod değişmedi. `MOCatchUp` adı yalnız temizlik kodunda geçiyor.
 
 ### Rüzgâr arkası (drafting): öndeki arabanın arkasında sürükleme düşüyor (2026-11-04)
 
