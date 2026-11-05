@@ -8612,7 +8612,9 @@ okumasını güçlendiriyor, ama hâlâ dolaylı.
 bir koşulda (`0x89E7B8 > 0` ve `*0x890118 == 3`) 1. Sürüklenmeyi (`0x59E620`) ikisi de çağırıyor. **Oyuncunun normal yarışta
 hangi sınıfta olduğu statik olarak okunmadı.** `ROADMAP`'te okunan kuralların çoğu `PhysMov`'un parçaları, kayma önleyici ise
 yalnız `Melov8r` adımında. Kesin cevap oyun çalışırken arabanın `+0x34`'ündeki nesnenin sanal tablosu (`0x7A25E0` mi `0x7A2538` mi)
-ölçülerek alınır (`tools/nfsu2-memlog.py`).
+ölçülerek alınır: `tools/nfsu2-memlog.py movers`. Aynı komut rakiplerin becerisini (`+0x901`), zorluğu (`0x89E7F4`), bakış ayarını
+(`0x83AA74`) ve kip bayraklarını da yazıyor; bunların hepsi şimdilik kodla okundu, çalışan oyunda görülmedi. Komut yalnız sentetik
+bellekte denendi.
 
 ### Rüzgâr arkası (drafting): öndeki arabanın arkasında sürükleme düşüyor (2026-11-04)
 

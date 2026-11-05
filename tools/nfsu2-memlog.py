@@ -11,6 +11,7 @@ wheel loads, suspension compression and contact. How the offsets were read is in
     tools/nfsu2-memlog.py log <out.csv> [seconds]      # sample a game that is already running
     tools/nfsu2-memlog.py launch <out.csv> [seconds]   # start the game first, then sample it
     tools/nfsu2-memlog.py loads <out.csv>              # the table that found the downforce
+    tools/nfsu2-memlog.py movers [seconds] [launch]    # which class moves which car, printed
 
 **Why `launch` exists.** With `kernel.yama.ptrace_scope = 1` a process's memory can only be read
 by one of its ancestors, so a game started from Lutris cannot be read from here. `launch` starts
@@ -45,6 +46,27 @@ SUSP_VT = 0x7A210C
 WHEEL_VT = 0x7A20E8
 RB_VT = 0x7A20C4
 G = 9.8
+
+
+# What `0x5F46A0` builds, by the number it is asked for. A car holds its mover at `+0x34`.
+MOVERS = {
+    0x7A5BB0: "tür0",
+    0x7A25E0: "PhysMov",
+    0x78456C: "tür2",
+    0x7A2538: "MeloMvr",
+    0x7A2144: "tür4",
+    0x7A2590: "tür5",
+}
+# In a car: its `DriverInfo` and its speed. In a `DriverInfo`: the kind (`0x6373E0`'s second
+# argument: 2 a rival, 3 traffic; 1 taken to be a person, from `0x5F46A0`), skill, name.
+CAR_DRIVER, CAR_MOVER, CAR_SPEED = 0x14, 0x34, 0x430
+DRIVER_KIND, DRIVER_SKILL, DRIVER_NAME = 0x4, 0x901, 0x90C
+# Fixed addresses, the image is not relocated.
+STATE = {
+    "bakış_ayarı": 0x83AA74,
+    "zorluk": 0x89E7F4,
+}
+FLAGS = {"drag?": 0x89E7D8, "drift": 0x89E7D9, "tür2": 0x89E7E3}
 
 
 def pid_of():
@@ -212,7 +234,84 @@ def loads(path):
             print(f"  {lo:3d}-{lo + 40:3d} km/h | " + "  ".join(cells))
 
 
+def mover_cars(mem):
+    """Every car found through its mover: car address -> the mover's address."""
+    movers = [m for vt in MOVERS for m in find_objects(mem, vt)]
+    out = {}
+    for lo, hi in mem.regions():
+        try:
+            data = mem.read(lo, hi - lo)
+        except OSError:
+            continue
+        for m in movers:
+            pat = struct.pack("<I", m)
+            i = data.find(pat)
+            while i >= 0:
+                car = lo + i - CAR_MOVER
+                if (lo + i) % 4 == 0 and describe(mem, car) is not None:
+                    out[car] = m
+                i = data.find(pat, i + 1)
+    return out
+
+
+def describe(mem, car):
+    """What a car says about itself, or None if this address is not one."""
+    try:
+        driver = mem.u32(car + CAR_DRIVER)
+        kind = mem.u32(driver + DRIVER_KIND)
+        if kind not in (1, 2, 3):
+            return None
+        mover = MOVERS.get(mem.u32(mem.u32(car + CAR_MOVER)))
+        if mover is None:
+            return None
+        skill = struct.unpack("<b", mem.read(driver + DRIVER_SKILL, 1))[0]
+        name = mem.read(driver + DRIVER_NAME, 16).split(b"\0")[0].decode("ascii", "replace")
+        return kind, mover, skill, name, mem.f32(car + CAR_SPEED) * 3.6
+    except (OSError, struct.error, TypeError):
+        return None
+
+
+def movers(seconds, start_game):
+    """Print which class moves which car, each time that answer changes."""
+    if start_game:
+        launch("/tmp/nfsu2-movers")
+    pid = pid_of()
+    for _ in range(120 if start_game else 0):
+        if pid is not None:
+            break
+        time.sleep(1.0)
+        pid = pid_of()
+    if pid is None:
+        sys.exit("SPEED2.EXE is not running")
+    mem = Mem(pid)
+    kinds = {1: "oyuncu", 2: "rakip", 3: "trafik"}
+    start, cars_at, seen = time.time(), {}, None
+    while time.time() - start < seconds:
+        try:
+            cars_at = mover_cars(mem) or cars_at
+        except OSError as e:
+            sys.exit(f"{e}: with ptrace_scope 1 only a game this script started can be read; add `launch`")
+        rows = sorted(filter(None, (describe(mem, c) for c in cars_at)), key=lambda r: (r[0], r[3]))
+        now = (
+            tuple((r[0], r[1], r[2], r[3]) for r in rows),
+            tuple(mem.u32(a) for a in STATE.values()),
+            tuple(mem.read(a, 1)[0] for a in FLAGS.values()),
+        )
+        if now != seen:
+            seen = now
+            print(f"--- t={time.time() - start:.0f} s")
+            print("   ", " ".join(f"{k}={mem.u32(a)}" for k, a in STATE.items()),
+                  " ".join(f"{k}={mem.read(a, 1)[0]}" for k, a in FLAGS.items()))
+            for kind, mover, skill, name, kmh in rows:
+                print(f"    {kinds[kind]:<7} {mover:<8} beceri={skill:<3} {kmh:6.1f} km/h  {name}")
+            sys.stdout.flush()
+        time.sleep(1.0)
+
+
 def main():
+    if len(sys.argv) >= 2 and sys.argv[1] == "movers":
+        movers(float(sys.argv[2]) if len(sys.argv) > 2 else 600, "launch" in sys.argv)
+        return
     if len(sys.argv) < 3 or sys.argv[1] not in ("log", "launch", "loads"):
         sys.exit(__doc__)
     cmd, out = sys.argv[1], sys.argv[2]
