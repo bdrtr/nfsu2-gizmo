@@ -8557,16 +8557,32 @@ gücü (0x89E7FC, çalışma anında) + sıra terimi`. Üstüne bir yakınlık t
 | 120 m önde | −0,025 | −0,01 |
 | 640 m önde | −0,25 | −0,15 |
 
-`rail::catch_up` artık bunu kullanıyor (iki eğrinin ortası, `CATCH_SKILL = 0,5`; seçenek gücü 1).
+`rail::catch_up` artık bunu kullanıyor (seçenek gücü 1; beceri aşağıda).
 Önceki uydurma kural 300 m'de ±%5'ti — oyununki beş-altı kat güçlü. `PACE_CEIL` (0,98) duruyor:
 gerideki rakip hattın sınırını aşmıyor. Sürülerek denenmedi.
 
-**Seçenek gücü kısmen okundu (2026-11-05).** `0x89E7FC`'e 13 referans var: biri okuma (`0x4174EB`), sekizi
-sabit `1,0` yazıyor, dördü bloğun `+0x94C` tablosundan alıyor (`FUN_0053F150` ve üç benzeri; satır `0x89E7F4`,
-sütun `FUN_005B5330`, iki oyuncu için ayrı değer `0x89E800`). İlk dört satır `1,1,1,1` ×3 ve `0,3 / 0,8 / 1 / 1`;
-tablonun kaç satır olduğu kesin değil. **Burada kullanılan 1 en yaygın değer, ama her kip için doğru olduğu
-gösterilmedi:** hangi kurulumun hangi yarış kipi olduğu ve satır/sütunun oyuncuya hangi seçenek olarak
-göründüğü okunmadı. Kod değişmedi. `MOCatchUp` adı yalnız temizlik kodunda geçiyor.
+**Seçenek gücü (2026-11-05/06).** `0x89E7FC`'e 13 referans var: biri okuma (`0x4174EB`), sekizi sabit `1,0`
+yazıyor, dördü bloğun `+0x94C` tablosundan alıyor (`FUN_0053F150` ve üç benzeri; satır `0x89E7F4`, sütun
+`FUN_005B5330`). `0x89E7F4` zorluk: rakip kurulumu (`0x53EE90`) beceriyi de onunla seçiyor ve üç satırlık dağılım
+tablosu var. `+0x94C`'nin ilk üç satırı `1,1,1,1`, yani **üç zorlukta da güç 1**; dördüncü satır `0,3 / 0,8 / 1 / 1`
+hiçbir zorluğa denk gelmiyor gibi. Sütunun oyuncuya ne olarak göründüğü bu yüzden önemsiz, okunmadı.
+
+**Rakibin becerisi (2026-11-06).** Rakip başına rastgele: `0x4FED00` `[0,1)` kurasını bloğun `+0x9F4 + zorluk·0x28`
+dağılımıyla karşılaştırıyor, sonuç `DriverInfo+0x901`'e yazılıyor (`0x6373E0`), `0x610510` onu okuyor.
+
+| zorluk | beceri (0–9) | ortalama |
+|---|---|---|
+| 0 | 0 %30, 1 %40, 2 %30 | 1,0 |
+| 1 | 3 %30, 4 %40, 5 %30 | 4,0 |
+| 2 | 6 %20, 7 %40, 8 %40 | 7,2 |
+
+Burada `rail::skill_of`; kura rastgele değil arabanın temposundan, yarış tekrar koşulabilsin diye. `NFS_DIFFICULTY`
+seçiyor, varsayılan 1 bir seçim (oyuncu ayarı). Eski sabit 0,5 (4,5/9) ortaya yakındı, yani fark rakipler arası çeşitlilik.
+
+**Önceki notun düzeltmesi.** Eğri çiftinin kip ve itibara göre seçildiği doğru (`0x4084A0`), ama eğri 0–3 birbiriyle,
+4–7 birbiriyle bayt bayt aynı, yani seçim bir şey değiştirmiyor. Sıra terimi (`+0x424`, `+0x464`) dosyada tamamen
+sıfır: eksik değil. Bir de `+0x2C0`/`+0x318`'de ayrı bir eğri çifti var; `0x89E7E3` ya da `0x89010C` açıkken
+kullanılıyor, bu iki bayrağın ne olduğu okunmadı.
 
 ### Rüzgâr arkası (drafting): öndeki arabanın arkasında sürükleme düşüyor (2026-11-04)
 
