@@ -8607,14 +8607,30 @@ rakibinkine `+0xE8` = 0,4 / 0,8 / 1 ve beceriye göre `0x550 + beceri·0x68` alt
 bağlı: drift 3, `0x89E7E3` 10, drag 2. **Normal yarışı etkilemiyor, taşınmadı.** Drag'e bağlı olması `0x89E7D8` = drag
 okumasını güçlendiriyor, ama hâlâ dolaylı.
 
-**İki hareket sınıfı (açık soru).** Fabrika `0x5F46A0` tür numarası alıyor: 1 `PhysMov`, 3 `MeloMvr` (`0x5B6D00`, içinde
+**İki hareket sınıfı.** Fabrika `0x5F46A0` tür numarası alıyor: 1 `PhysMov`, 3 `MeloMvr` (`0x5B6D00`, içinde
 `Melov8r`), 5 `Melov8r`'ı kullanan üçüncü bir sınıf (`0x5B6FC0`). `0x5FAE20` sürücü sınıfını 3 yaparken türü de 3 istiyor,
 bir koşulda (`0x89E7B8 > 0` ve `*0x890118 == 3`) 1. Sürüklenmeyi (`0x59E620`) ikisi de çağırıyor. **Oyuncunun normal yarışta
-hangi sınıfta olduğu statik olarak okunmadı.** `ROADMAP`'te okunan kuralların çoğu `PhysMov`'un parçaları, kayma önleyici ise
-yalnız `Melov8r` adımında. Kesin cevap oyun çalışırken arabanın `+0x34`'ündeki nesnenin sanal tablosu (`0x7A25E0` mi `0x7A2538` mi)
-ölçülerek alınır: `tools/nfsu2-memlog.py movers`. Aynı komut rakiplerin becerisini (`+0x901`), zorluğu (`0x89E7F4`), bakış ayarını
-(`0x83AA74`) ve kip bayraklarını da yazıyor; bunların hepsi şimdilik kodla okundu, çalışan oyunda görülmedi. Komut yalnız sentetik
-bellekte denendi.
+hangi sınıfta olduğu statik olarak okunamadı**, o yüzden ölçüldü.
+
+**Ölçüldü (2026-11-06, `tools/nfsu2-memlog.py movers`):** oyuncunun sürdüğü tek yarış, ~4 dakika, yaklaşık 12 saniyede bir örnek
+(komut her turda belleği baştan tarıyor, satır eksikleri de ondan):
+
+| | sınıf | örnek |
+|---|---|---|
+| oyuncu | **hep `PhysMov`** | 19/19 |
+| rakip | `tür0` 30, `tür4` 11, `MeloMvr` 7; **hiç `PhysMov` yok** | 48 |
+| trafik | `TrafficMover` (`tür2`) 51, `tür0` 33, `MeloMvr` 25, `tür4` 13; hiç `PhysMov` yok | 122 |
+
+- **Okunan kurallar oyuncuya ait:** motor, şanzıman, tekerlekler `PhysMov`'un. Bu ölçümle `rig::powertrain` ve lastik okumaları
+  doğru sınıftan yapılmış görünüyor. **Kayma önleyici oyuncuya bu yarışta uygulanmıyordu** (o yalnız `Melov8r` adımında).
+- **Rakipler tam fizikle sürülmüyor.** Bu, rakipleri rayda sürme kararımızla uyumlu. Bir rakip yarış içinde sınıf da değiştiriyor
+  (Al: `tür4` ↔ `MeloMvr`). `tür0`'daki rakibin hızı donuk: Jason ve Serena 130 saniye boyunca 118,4 ve 121,4 km/h. Neye göre geçtiği
+  (uzaklık?) ölçülmedi; ölçümde konum yok. `tür0` (`0x7A5BB0`) ve `tür4` (`0x7A2144`) okunmadı, adları yok.
+- **Beceri doğrulandı:** zorluk 1'de Al 3, Jason 4, Serena 4; okunan `3, 4, 5` dağılımının içinde. Oyuncununki −2 (kurucunun değeri).
+- **Bayraklar:** normal yarışta drag ve drift bayrakları 0. Bu, kapalı olduklarını doğruluyor; **drift ve drag olduklarını değil**,
+  o yarışlar ölçülmedi. Zorluk menüde 0, yarışta 1.
+- **Bakış ayarı** 3, yani POV 0 (uzak kovalama); burada varsayılan olarak seçtiğimizle aynı. Bu oyuncunun kayıtlı ayarı, oyunun
+  fabrika varsayılanı değil.
 
 ### Rüzgâr arkası (drafting): öndeki arabanın arkasında sürükleme düşüyor (2026-11-04)
 
