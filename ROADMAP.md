@@ -8634,6 +8634,12 @@ karşılaştırma bu. **Taşınmadı:** ufkun ivmeye yatması (motorun kamerası
 havada düzleşmesi (`Pose` arabanın uçtuğunu söylemiyor) ve `0x44DE90`'ın henüz tanınmayan bir
 durumdaki ×1,3 koltuğu.
 
+**Hareket bulanıklığı** ayrı bir ayar (`g_MotionBlurEnable`) ve motorda karşılığı yok; `MOTOR-NOTLARI.md`
+#25. Okunan üç geçişte hız girdisi görülmedi, yani hıza göre artan bir efekt değil gibi.
+
+**Açık:** `0x44DE90`'ın ×1,3 koltuğunun koşulu dört tekerlekte `[+0x30]+0x1EC…` ve `+0x3F8…` alanlarını
+soruyor, bunların ne olduğu okunmadı. Varsayılan bakış oyuncu ayarı (`0x83AA74`), 32 yerde kullanılıyor.
+
 **Sürülmedi.** Sayılar ve birim testleri kodla uyuşuyor; ekranda nasıl göründüğüne bakılmadı. Koltuk
 yüksekliği arabanın orijinine göre, ve oyunun `+0x50`'siyle bizim `Pose::position`'ın aynı nokta
 olduğu varsayıldı: araba ekranda yanlış yükseklikte durursa ilk bakılacak yer burası.
