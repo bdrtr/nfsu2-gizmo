@@ -253,8 +253,9 @@ fn setup_scene(world: &mut World, renderer: &gizmo::renderer::Renderer) -> RaceS
     world.insert_resource(assets);
     world.insert_resource(phys);
 
-    let camera =
+    let mut camera =
         ChaseCamera::spawn(world, rig.start.position + Vec3::new(0.0, 4.0, 10.0), 0.1, 4000.0);
+    camera.set_views(&rig.cameras);
 
     println!(
         "race ready: track {} tris, {} checkpoints",
@@ -364,6 +365,7 @@ fn update(world: &mut World, state: &mut RaceState, dt: f32, input: &Input) {
     diagnose(world, state, pose);
 
     state.rig.sync_visuals(world, pose, dt);
+    state.camera.nitro = state.rig.nitro_firing(world);
     state.camera.update(world, input, pose, dt);
 }
 

@@ -39,7 +39,7 @@ pub mod style;
 
 use crate::world::Ground;
 
-pub use chase::ChaseCamera;
+pub use chase::{ChaseCamera, ChaseView};
 pub use drive::{physics_step, vehicle_step, Controls, Driver, FIXED_DT};
 pub use dyno::Limits;
 pub use pilot::Pilot;
@@ -347,6 +347,8 @@ pub struct CarRig {
     /// Stil puanlayıcısı ve olayları besleyen hareket durumu ([`style`]); yalnız insanın arabasında
     /// işliyor ([`Self::style_tick`]). Kayıt okunamadıysa `None`.
     style: Option<(style::Scorer, style::Moves)>,
+    /// The chase seats in this car's record ([`ChaseCamera::set_views`]); empty without one.
+    pub cameras: Vec<ChaseView>,
 }
 
 /// Stil olaylarının hangi kipte sayıldığı: `0x01`, yarış ve serbest dolaşım olaylarının ortak biti
@@ -666,6 +668,7 @@ fn build_car(
             });
             (scorer, style::Moves::default())
         }),
+        cameras: chase::views_of(gb.info.as_ref()),
     }
 }
 
@@ -1046,6 +1049,12 @@ impl CarRig {
         if earned > 0.0 {
             self.add_nitro(world, style::refill(earned));
         }
+    }
+
+    /// Nitro şu an yanıyor mu.
+    #[must_use]
+    pub fn nitro_firing(&self, world: &World) -> bool {
+        world.borrow::<powertrain::Powertrain>().get(self.chassis).is_some_and(|p| p.nitro.firing)
     }
 
     /// Bu arabanın rüzgâr arkasını öndeki arabalardan hesaplayıp sürüklemesine yaz

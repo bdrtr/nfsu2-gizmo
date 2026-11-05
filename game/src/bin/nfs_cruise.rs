@@ -1136,8 +1136,9 @@ fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> CruiseState
 
     // near 0.5 / far 20 000 — the pair `nfs_fly` measured for this city. The ratio is what costs
     // depth precision, and a city needs the far plane, so the near plane is what has to give.
-    let camera =
+    let mut camera =
         ChaseCamera::spawn(world, rig.start.position + Vec3::new(0.0, 4.0, 10.0), 0.5, 20_000.0);
+    camera.set_views(&rig.cameras);
 
     let debug = std::env::var("NFS_DEBUG").is_ok_and(|v| v != "0");
     if let Some(id) = race_line {
@@ -1453,6 +1454,7 @@ fn update(world: &mut World, state: &mut CruiseState, dt: f32, input: &Input) {
             let (position, rotation) = r.pose(&rr.line, g.ride());
             Some(Pose { position, rotation, speed: r.speed() })
         });
+    state.camera.nitro = state.rig.nitro_firing(world);
     state.camera.update(world, input, watched.unwrap_or(pose), dt);
 }
 
@@ -1565,7 +1567,7 @@ fn ui(world: &mut World, state: &mut CruiseState, ctx: &egui::Context) {
             .anchor(egui::Align2::LEFT_BOTTOM, egui::vec2(24.0, -24.0))
             .show(ctx, |ui| {
                 ui.label(
-                    egui::RichText::new("W/S · A/D · Space el freni · Shift nitro · E/Q vites · R başa · Enter yeniden · F3 teknik")
+                    egui::RichText::new("W/S · A/D · Space el freni · Shift nitro · E/Q vites · C kamera · R başa · Enter yeniden · F3 teknik")
                         .size(12.0)
                         .color(egui::Color32::from_gray(150)),
                 );

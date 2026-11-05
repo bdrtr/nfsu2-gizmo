@@ -115,8 +115,9 @@ fn setup_scene(world: &mut World, renderer: &gizmo::renderer::Renderer) -> Drive
         Vec3::new(-30.0, 40.0, -20.0),
     );
 
-    let camera = ChaseCamera::spawn(world, Vec3::new(0.0, 4.0, 10.0), 0.1, 2000.0);
+    let mut camera = ChaseCamera::spawn(world, Vec3::new(0.0, 4.0, 10.0), 0.1, 2000.0);
     let rig = spawn_car(world, renderer, &mut assets, &mut phys, &path, Placement::origin());
+    camera.set_views(&rig.cameras);
     world.insert_resource(assets);
     world.insert_resource(phys);
 
@@ -186,6 +187,7 @@ fn update(world: &mut World, state: &mut DriveState, dt: f32, input: &Input) {
     }
 
     state.rig.sync_visuals(world, pose, dt);
+    state.camera.nitro = state.rig.nitro_firing(world);
     state.camera.update(world, input, pose, dt);
 }
 
@@ -197,6 +199,6 @@ fn ui(world: &mut World, state: &mut DriveState, ctx: &egui::Context) {
     egui::Area::new(egui::Id::new("keys"))
         .anchor(egui::Align2::LEFT_BOTTOM, egui::vec2(24.0, -24.0))
         .show(ctx, |ui| {
-            ui.label("W gaz · S fren/geri · A/D direksiyon · Space el freni · Shift nitro · E/Q vites · R reset · T otomatik vites");
+            ui.label("W gaz · S fren/geri · A/D direksiyon · Space el freni · Shift nitro · E/Q vites · C kamera · R reset · T otomatik vites");
         });
 }
