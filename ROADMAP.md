@@ -8249,9 +8249,8 @@ ve hız < 10 m/s iken arka frenleri bırakıyor: oyunun yerinde patinajı.
 eşikleriyle) Dyno kaydırıcılarının etkisini taşıyor (`0x5A7530`): her kaydırıcı için düşük–yüksek
 uç çarpanları (downforce, kütle, lastik tutuşu, fren dengesi, AWD tork payı…) ve kalkış devri
 çarpanı (+0x10: FWD 1,0, AWD 1,2, RWD 1,1). Stok bir araba (kaydırıcılar ortada) için etkisiz.
-Aynı blok `Melov8r`'ın (`0x5B0030`) da kaynağı. **Düzeltme (2026-11-06):** burada "uzaktaki yapay zekâ/trafik
-fiziği" yazıyordu. Adımı (`0x5B0520`) sürüklenmeyi (`0x59E620`) ve tekerlekleri çağırıyor, yani asıl araba fiziği
-bu sınıf gibi görünüyor; hangi arabaların kullandığı doğrudan okunmadı.
+Aynı blok `Melov8r`'ın (`0x5B0030`) da kaynağı. Burada "uzaktaki yapay zekâ/trafik fiziği" yazıyor; bu okunmuş
+değil, aşağıda "İki hareket sınıfı"na bak.
 
 **Nitro** motor torkuna `gaz · şekil(rpm) · T_nitro · seviye` olarak ekleniyor (`0x594300`; şekil
 `0x7FBF38` rölantiden kırmızı çizgiye 0,3 → 1,0 → 0,7, seviye 1,0 / 1,4 / 1,7). Süresi ve
@@ -8598,9 +8597,22 @@ karşı direksiyonun drift tablosu da aynı bayrağa bakıyor. `0x89E7D8` büyü
   FWD −10/−7/−4, AWD −7,5/−5/−4, RWD −15/−10/−6. Yani yüksek zorlukta daha az yardım.
 - **İki tekerin `+0x188`'i:** `0x7FC910` eğrisinden, `|yaw|·w + (1−w)·|kayma|` ile (`w` 0,35/0,55/0,5).
 
-**Taşınmadı:** bu oyunda drift yarışı yok, normal sürüşü etkilemiyor. Drift eklenince buradan başlanmalı; eğrinin
+**Taşınmadı:** bu oyunda drift yarışı yok, ve drift bayrağı kapalıyken çalışmıyor. Drift eklenince buradan başlanmalı; eğrinin
 kendisi (`0x86B3C8`) çalışma anında kuruluyor, `+0x188`'i kimin okuduğu bulunmadı. Zorluğun öbür okuyucuları: puan çarpanı
-`0x79DAE8` (1 / 1,25 / 1,5), `0x7A19E8` (3 / 1,5 / 1) ve `0x7A19F4` (0,4 / 0,8 / 1) `FUN_005B5CC0`'ta, okunmadı.
+`0x79DAE8` (1 / 1,25 / 1,5; kullanımı doğrulanmadı).
+
+**`FUN_005B5CC0` okundu: `PhysMov`'un kurucusu.** Tekerlek (`0x5A8160`, `0x5A86C0`), motor (`0x5AA5A0`) ve şanzımanı
+(`0x5AF9D0`) kuruyor. Zorluk burada yalnız drag bayrağı açıkken okunuyor: oyuncunun şanzımanına `+0xE4` = 3 / 1,5 / 1,
+rakibinkine `+0xE8` = 0,4 / 0,8 / 1 ve beceriye göre `0x550 + beceri·0x68` altı alan. Şanzımanın başlangıç kipi de bayrağa
+bağlı: drift 3, `0x89E7E3` 10, drag 2. **Normal yarışı etkilemiyor, taşınmadı.** Drag'e bağlı olması `0x89E7D8` = drag
+okumasını güçlendiriyor, ama hâlâ dolaylı.
+
+**İki hareket sınıfı (açık soru).** Fabrika `0x5F46A0` tür numarası alıyor: 1 `PhysMov`, 3 `MeloMvr` (`0x5B6D00`, içinde
+`Melov8r`), 5 `Melov8r`'ı kullanan üçüncü bir sınıf (`0x5B6FC0`). `0x5FAE20` sürücü sınıfını 3 yaparken türü de 3 istiyor,
+bir koşulda (`0x89E7B8 > 0` ve `*0x890118 == 3`) 1. Sürüklenmeyi (`0x59E620`) ikisi de çağırıyor. **Oyuncunun normal yarışta
+hangi sınıfta olduğu statik olarak okunmadı.** `ROADMAP`'te okunan kuralların çoğu `PhysMov`'un parçaları, kayma önleyici ise
+yalnız `Melov8r` adımında. Kesin cevap oyun çalışırken arabanın `+0x34`'ündeki nesnenin sanal tablosu (`0x7A25E0` mi `0x7A2538` mi)
+ölçülerek alınır (`tools/nfsu2-memlog.py`).
 
 ### Rüzgâr arkası (drafting): öndeki arabanın arkasında sürükleme düşüyor (2026-11-04)
 
