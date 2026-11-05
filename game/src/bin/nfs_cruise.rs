@@ -368,7 +368,8 @@ impl RailRace {
             self.rigs.iter().enumerate().map(|(k, g)| self.shown(k, g.ride())).collect();
         // The field is pulled towards the player — the demo's own rail stands in for one.
         let player_s = self.demo.as_ref().map_or(self.player_s, |own| own.s());
-        rail::catch_up(&mut self.field, player_s);
+        let player_v = self.demo.as_ref().map_or(self.player_v, |own| own.speed());
+        rail::catch_up(&mut self.field, player_s, player_v);
         match self.demo.take() {
             // In the demo the player is a rail among rails, so it goes into the same traffic.
             Some(own) => {

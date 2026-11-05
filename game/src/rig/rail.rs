@@ -116,16 +116,48 @@ const WOBBLE: f32 = 0.025;
 const WOBBLE_MIN: f32 = 600.0;
 const WOBBLE_SPREAD: f32 = 500.0;
 
-/// The catch-up ("lastik bant"): a rival this far behind the player drives up to [`CATCH_UP`]
-/// faster, one this far ahead up to [`CATCH_DOWN`] slower, linear in between, metres.
+/// The catch-up ("lastik bant"), **NFSU2'nin kendi tablosu** (2026-11-04): rakibin oyuncuya göre
+/// konumu, metre (önde artı), → hızına eklenen kesir. `GLOBALB.BUN`'un `0x00034B00` parçası
+/// (yükleyici `0x408200`; parçanın başındaki on bir noktalı sekiz eğri), okuyan `0x4084A0`, uygulayan
+/// `0x417515`: `hız çarpanı = 1 + eğri(mesafe) · seçenek gücü + …`. Rakip iki eğri arasında kendi
+/// becerisine göre (`/9`) karıştırıyor: [`CATCH_EASY`] (eğri 0–3) ve [`CATCH_HARD`] (eğri 4–7).
+/// Seçeneğin gücü (`0x89E7FC`) çalışma anında atanıyor; burada 1.
 ///
-/// What every arcade racer does and NFSU2 did: without it a race is decided by the first corner —
-/// a player who gets away is alone for ten minutes, one who falls behind never sees the field
-/// again. Small on purpose: at 300 m it is a few km/h, which closes a gap over a lap and does not
-/// teleport anybody.
-const CATCH_SPAN: f32 = 300.0;
-const CATCH_UP: f32 = 0.05;
-const CATCH_DOWN: f32 = 0.05;
+/// Önceki kural uydurmaydı — 300 m'de ±%5. Oyununki 320 m geride +%22..37, 640 m önde −%15..25.
+const CATCH_X: [f32; 11] = [-320.0, -160.0, -120.0, -85.0, -60.0, 0.0, 120.0, 170.0, 240.0, 320.0, 640.0];
+const CATCH_EASY: [f32; 11] = [0.22, 0.15, 0.09, 0.06, 0.02, 0.0, -0.025, -0.06, -0.08, -0.15, -0.25];
+const CATCH_HARD: [f32; 11] = [0.37, 0.22, 0.12, 0.07, 0.03, 0.0, -0.01, -0.04, -0.06, -0.10, -0.15];
+/// Rakiplerin becerisi, `0..1` ([`CATCH_EASY`] → [`CATCH_HARD`]). Oyunda rakip başına (`[araba]
+/// vtable+0x78`, 0..9); burada hepsi ortada.
+const CATCH_SKILL: f32 = 0.5;
+/// Oyuncunun yanındaki rakibin hız farkı terimi: `−0,005 · Δv / (0,01·mesafe² + 1)`, ±0,05
+/// (`0x4084A0`, sabitler `0x7834F8..0x783500`): yanında ondan hızlı giden rakip biraz yavaşlıyor.
+const CATCH_DV: f32 = -0.005;
+const CATCH_DV_FALLOFF: f32 = 0.01;
+const CATCH_DV_MAX: f32 = 0.05;
+
+/// [`CATCH_X`] üzerinde bir eğrinin değeri, uçlarda kırpılmış.
+fn catch_curve(y: &[f32; 11], x: f32) -> f32 {
+    if x <= CATCH_X[0] {
+        return y[0];
+    }
+    for i in 0..10 {
+        if x <= CATCH_X[i + 1] {
+            let f = (x - CATCH_X[i]) / (CATCH_X[i + 1] - CATCH_X[i]);
+            return y[i] + (y[i + 1] - y[i]) * f;
+        }
+    }
+    y[10]
+}
+
+/// Rakibin oyuncuya göre konumu `gap` metre (önde artı) ve hız farkı `dv` m/s (rakip hızlıysa artı)
+/// iken hızına eklenen kesir.
+#[must_use]
+pub fn catch_fraction(gap: f32, dv: f32) -> f32 {
+    let table = catch_curve(&CATCH_EASY, gap) * (1.0 - CATCH_SKILL) + catch_curve(&CATCH_HARD, gap) * CATCH_SKILL;
+    let near = (CATCH_DV * dv / (CATCH_DV_FALLOFF * gap * gap + 1.0)).clamp(-CATCH_DV_MAX, CATCH_DV_MAX);
+    table + near
+}
 /// Whatever pace, wobble and catch-up add up to, a rail never drives closer to the line's limit
 /// than this — 1.0 is the car's theoretical best on the line, which no person drives.
 const PACE_CEIL: f32 = 0.98;
@@ -1288,11 +1320,11 @@ impl Rail {
 }
 
 /// Sets every rail's catch-up against the player at `player_s` (distance along the same line,
-/// unwrapped the way a rail's is): behind the player faster, ahead slower — see [`CATCH_SPAN`].
-pub fn catch_up(field: &mut [Rail], player_s: f32) {
+/// unwrapped the way a rail's is) driving at `player_v` m/s: behind the player faster, ahead slower
+/// — see [`catch_fraction`].
+pub fn catch_up(field: &mut [Rail], player_s: f32, player_v: f32) {
     for r in field {
-        let gap = ((r.s - player_s) / CATCH_SPAN).clamp(-1.0, 1.0);
-        r.catch_up = 1.0 - gap * if gap < 0.0 { CATCH_UP } else { CATCH_DOWN };
+        r.catch_up = 1.0 + catch_fraction(r.s - player_s, r.v - player_v);
     }
 }
 
@@ -1651,9 +1683,16 @@ mod tests {
         field[0].s = 0.0;
         field[1].s = 1000.0;
         let base: Vec<f32> = field.iter().map(Rail::pace_here).collect();
-        catch_up(&mut field, 500.0);
+        catch_up(&mut field, 500.0, 0.0);
         assert!(field[0].pace_here() > base[0], "behind the player: faster");
         assert!(field[1].pace_here() < base[1], "ahead of the player: slower");
+        // The game's own numbers, half way between its two curves: 320 m back is +29.5 %,
+        // 640 m ahead −20 %, alongside nothing.
+        assert!((catch_fraction(-320.0, 0.0) - 0.295).abs() < 1e-5);
+        assert!((catch_fraction(640.0, 0.0) + 0.20).abs() < 1e-5);
+        assert_eq!(catch_fraction(0.0, 0.0), 0.0);
+        // Alongside and 10 m/s faster: eased off by the full 5 %.
+        assert!((catch_fraction(0.0, 10.0) + 0.05).abs() < 1e-6);
     }
 
     #[test]
