@@ -21,14 +21,41 @@
 //! * past [`SHAKE_FROM`] the view trembles by a fraction of a degree, a few pixels, the way a
 //!   camera bolted to something fast does.
 //!
-//! The pull-back with speed was already there and stays: the chase *lerps* toward its seat, so at
-//! speed `v` it settles `v / lag` metres further back than [`ChaseCamera::distance`] — 2 m at
-//! 90 km/h, 4 m at 180.
+//! **No pull-back with speed** (2026-11-03). The chase used to *lerp* toward its seat, so at speed
+//! `v` it settled `v / lag` metres further back — 2 m at 90 km/h, 4 m at 180 — and a camera that
+//! drifts away from the car makes the world beside it crawl: the player's verdict was "fast does
+//! not look fast". Now the seat is held at [`ChaseCamera::distance`] at every speed, and what moves
+//! is:
+//!
+//! * the camera's **heading**, which follows the car's nose at [`ChaseCamera::lag`] per second, so a
+//!   corner or a slide swings the car across the screen and shows its flank before the view catches
+//!   up;
+//! * a **pull** of at most [`PULL_MAX`] metres under acceleration (and a little push under braking),
+//!   from the change in speed rather than the speed — it is the shove, not the cruise, that the
+//!   eye reads;
+//! * the **aim**, [`LOOK_AHEAD`] metres in front of the car rather than at it, which puts the car low
+//!   on the screen and the road ahead in the middle of it.
+//!
+//! These numbers are not the game's: `SPEED2.EXE`'s chase (`TrackCarCameraMover`) has not been read.
 
 use gizmo::prelude::*;
 
 /// How high above the car's origin the chase camera aims.
-const CHASE_LOOK_Y: f32 = 0.7;
+const CHASE_LOOK_Y: f32 = 0.9;
+/// How far in front of the car the chase aims, metres.
+pub const LOOK_AHEAD: f32 = 4.0;
+/// The most the camera is pushed back by acceleration, metres; braking pulls it in by up to half.
+pub const PULL_MAX: f32 = 0.8;
+/// Metres of pull per m/s² of acceleration.
+const PULL_PER_MPS2: f32 = 0.12;
+/// How fast the pull follows the acceleration, per second.
+const PULL_RATE: f32 = 3.0;
+/// How fast the camera's height follows the car's, per second — kerbs and bumps are softened, a
+/// hill is not.
+const HEIGHT_RATE: f32 = 10.0;
+/// A jump in the car's position bigger than this in one frame is a reset, not driving: the camera
+/// cuts to its seat instead of swinging there.
+const CUT_DISTANCE: f32 = 15.0;
 /// The same, for the shot camera — lower, because it is framing the car rather than the road ahead.
 const SHOT_LOOK_Y: f32 = 0.5;
 /// Where the orbit pivot sits relative to the car's origin, and how far the camera stands off it.
@@ -39,19 +66,19 @@ const MOUSE_SENSITIVITY: f32 = 0.005;
 
 /// The vertical field of view standing still: 45°, what every binary had before.
 pub const FOV_REST: f32 = std::f32::consts::FRAC_PI_4;
-/// …and at [`FOV_SPEED`] and above: 62°.
-pub const FOV_FAST: f32 = 62.0 * std::f32::consts::PI / 180.0;
-/// Below this the view does not widen at all (m/s, 36 km/h): town speed should look like town.
-pub const FOV_FROM: f32 = 10.0;
-/// Where the widening is complete (m/s, 252 km/h) — a little past what the stock cars reach, so
-/// the view keeps opening all the way to their top speed.
-pub const FOV_SPEED: f32 = 70.0;
+/// …and at [`FOV_SPEED`] and above: 72°. (It was 62° at 252 km/h, which at 150 km/h was 54° —
+/// too little to read.)
+pub const FOV_FAST: f32 = 72.0 * std::f32::consts::PI / 180.0;
+/// Below this the view does not widen at all (m/s, 29 km/h): town speed should look like town.
+pub const FOV_FROM: f32 = 8.0;
+/// Where the widening is complete (m/s, 216 km/h); 150 km/h is 66°.
+pub const FOV_SPEED: f32 = 60.0;
 /// How fast the view follows its target, per second. Slow enough that a hard brake *closes* the
 /// view over a second rather than snapping it, which is half of what a brake feels like.
 const FOV_RATE: f32 = 2.5;
 /// Speed the tremble starts at (m/s, 90 km/h), and its amplitude at [`FOV_SPEED`], radians.
 pub const SHAKE_FROM: f32 = 25.0;
-const SHAKE_MAX: f32 = 0.0035;
+const SHAKE_MAX: f32 = 0.005;
 
 /// The field of view the chase is heading for at `speed` (m/s, either sign).
 ///
@@ -91,8 +118,8 @@ pub struct ChaseCamera {
     pub distance: f32,
     /// How far above it.
     pub height: f32,
-    /// Chase stiffness: the exponential rate the camera closes on its target at. Higher is tighter
-    /// and more nauseating.
+    /// How fast the camera's heading follows the car's nose, per second. Higher is tighter; lower
+    /// swings wider through corners and shows more of a slide.
     pub lag: f32,
     /// The `NFS_SHOTCAM` offset, in the car's own frame. `None` unless the variable is set.
     pub shot: Option<Vec3>,
@@ -102,6 +129,14 @@ pub struct ChaseCamera {
     clock: f32,
     /// This frame's tremble, (yaw, pitch) radians, added on write and never fed back into the aim.
     shake: (f32, f32),
+    /// The direction the chase looks along, in plan; zero until the first chase frame.
+    heading: Vec3,
+    /// The acceleration pull this frame, metres (negative under braking).
+    pull: f32,
+    /// The car's speed and position last frame, for the pull and for spotting a reset.
+    last: Option<(f32, Vec3)>,
+    /// The camera's height, smoothed.
+    seat_y: f32,
 }
 
 impl ChaseCamera {
@@ -118,14 +153,22 @@ impl ChaseCamera {
         let camera = world.spawn();
         crate::geom::add_transform(world, camera, Transform::new(at));
         world.add_component(camera, Camera::new(std::f32::consts::FRAC_PI_4, near, far, yaw, pitch, true));
+        // `NFS_CAM="uzaklık,yükseklik,dönüş"`: kovalamanın oturduğu yer, deneme için.
+        let cam: Vec<f32> = std::env::var("NFS_CAM")
+            .map(|v| v.split(',').filter_map(|x| x.trim().parse().ok()).collect())
+            .unwrap_or_default();
+        let (distance, height, lag) = match cam[..] {
+            [d, h, l] => (d, h, l),
+            _ => (5.2, 1.6, 6.0),
+        };
         Self {
             id: camera.id(),
             position: at,
             yaw,
             pitch,
-            distance: 6.5,
-            height: 1.9,
-            lag: 12.0,
+            distance,
+            height,
+            lag,
             // Empty reads as unset: a knob cleared with `NFS_SHOTCAM=` should be off, not on.
             shot: std::env::var("NFS_SHOTCAM")
                 .is_ok_and(|v| !v.is_empty())
@@ -133,6 +176,10 @@ impl ChaseCamera {
             fov: FOV_REST,
             clock: 0.0,
             shake: (0.0, 0.0),
+            heading: Vec3::ZERO,
+            pull: 0.0,
+            last: None,
+            seat_y: at.y,
         }
     }
 
@@ -167,12 +214,28 @@ impl ChaseCamera {
                 self.position = pose.position + Vec3::Y * ORBIT_LOOK_Y - forward * ORBIT_DISTANCE;
             }
             None => {
-                let forward = pose.rotation * Vec3::NEG_Z;
-                let target = pose.position - forward * self.distance + Vec3::Y * self.height;
+                let nose = pose.rotation * Vec3::NEG_Z;
+                let nose = Vec3::new(nose.x, 0.0, nose.z).normalize_or(Vec3::NEG_Z);
+                let cut = self.heading == Vec3::ZERO
+                    || self.last.is_none_or(|(_, at)| at.distance(pose.position) > CUT_DISTANCE);
                 // Frame-rate independent smoothing: a plain `lerp(k)` with a constant `k` closes
                 // faster the more frames there are, so the camera would tighten with the frame rate.
-                self.position = self.position.lerp(target, 1.0 - (-self.lag * dt).exp());
-                self.aim_at(pose.position + Vec3::Y * CHASE_LOOK_Y);
+                let k = |rate: f32| 1.0 - (-rate * dt).exp();
+                if cut {
+                    self.heading = nose;
+                    self.pull = 0.0;
+                    self.seat_y = pose.position.y + self.height;
+                } else {
+                    self.heading = self.heading.lerp(nose, k(self.lag)).normalize_or(nose);
+                    let accel = self.last.map_or(0.0, |(v, _)| (pose.speed - v) / dt.max(1e-4));
+                    let want = (accel * PULL_PER_MPS2).clamp(-0.5 * PULL_MAX, PULL_MAX);
+                    self.pull += (want - self.pull) * k(PULL_RATE);
+                    self.seat_y += (pose.position.y + self.height - self.seat_y) * k(HEIGHT_RATE);
+                }
+                self.last = Some((pose.speed, pose.position));
+                let behind = pose.position - self.heading * (self.distance + self.pull);
+                self.position = Vec3::new(behind.x, self.seat_y, behind.z);
+                self.aim_at(pose.position + self.heading * LOOK_AHEAD + Vec3::Y * CHASE_LOOK_Y);
             }
         }
         self.mouse_look(input);
