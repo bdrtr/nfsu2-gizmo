@@ -1388,9 +1388,30 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
         &mut world,
         Transform::new(eye + Vec3::new(0.0, radius, 0.0))
             .with_rotation(Quat::from_axis_angle(Vec3::new(1.0, 0.3, 0.0).normalize(), -0.9)),
-        2.4,
+        std::env::var("NFS_SUN").ok().and_then(|v| v.parse().ok()).unwrap_or(2.4),
         mid,
     );
+
+    // `NFS_CAR=<GEOMETRY.BIN>`: stand that car at `NFS_AT`, facing `NFS_CAR_YAW` degrees — the
+    // player's view of the city with the player's car in it, lit the way `nfs_cruise` lights it
+    // (its sun is 2.2 against this binary's 2.4; `NFS_SUN` sets both). The only way to look at the
+    // car under the city's glare without a window.
+    if let Ok(car) = std::env::var("NFS_CAR") {
+        let yaw = std::env::var("NFS_CAR_YAW").ok().and_then(|v| v.parse::<f32>().ok()).unwrap_or(0.0);
+        let mut phys = gizmo::physics::world::PhysicsWorld::new();
+        let mut rig = nfsu2::rig::spawn_car(
+            &mut world,
+            &renderer,
+            &mut assets,
+            &mut phys,
+            &car,
+            nfsu2::rig::Placement { ground: mid, yaw: yaw.to_radians(), clearance: 0.0 },
+        );
+        // The visuals follow the chassis once a frame; a still has one frame, so once by hand.
+        if let Some(pose) = rig.pose(&world) {
+            rig.sync_visuals(&mut world, pose, 0.0);
+        }
+    }
 
     let dir = (mid - eye).normalize();
     let cam = world.spawn();
