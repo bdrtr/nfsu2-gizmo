@@ -8249,8 +8249,9 @@ ve hız < 10 m/s iken arka frenleri bırakıyor: oyunun yerinde patinajı.
 eşikleriyle) Dyno kaydırıcılarının etkisini taşıyor (`0x5A7530`): her kaydırıcı için düşük–yüksek
 uç çarpanları (downforce, kütle, lastik tutuşu, fren dengesi, AWD tork payı…) ve kalkış devri
 çarpanı (+0x10: FWD 1,0, AWD 1,2, RWD 1,1). Stok bir araba (kaydırıcılar ortada) için etkisiz.
-Aynı blok `Melov8r`'ın (uzaktaki yapay zekâ/trafik için sadeleştirilmiş fizik, `0x5B0030`) da
-kaynağı.
+Aynı blok `Melov8r`'ın (`0x5B0030`) da kaynağı. **Düzeltme (2026-11-06):** burada "uzaktaki yapay zekâ/trafik
+fiziği" yazıyordu. Adımı (`0x5B0520`) sürüklenmeyi (`0x59E620`) ve tekerlekleri çağırıyor, yani asıl araba fiziği
+bu sınıf gibi görünüyor; hangi arabaların kullandığı doğrudan okunmadı.
 
 **Nitro** motor torkuna `gaz · şekil(rpm) · T_nitro · seviye` olarak ekleniyor (`0x594300`; şekil
 `0x7FBF38` rölantiden kırmızı çizgiye 0,3 → 1,0 → 0,7, seviye 1,0 / 1,4 / 1,7). Süresi ve
@@ -8584,6 +8585,23 @@ seçiyor, varsayılan 1 bir seçim (oyuncu ayarı). Eski sabit 0,5 (4,5/9) ortay
 sıfır: eksik değil. Bir de `+0x2C0`/`+0x318`'de ayrı bir eğri çifti var; `0x89E7E3` ya da `0x89010C` açıkken
 kullanılıyor, bu iki bayrağın ne olduğu okunmadı.
 
+### Yarış türü bayrakları ve yalnız driftte çalışan kayma önleyici (2026-11-06)
+
+`0x5323AA` yarış türü baytından (`+0xF`) bayrak kuruyor: `4 → 0x89E7D8`, `5 → 0x89E7D9`, `2 → 0x89E7E3`.
+`0x89E7D9` **drift**: `FUN_004FF070` onu açarken kamerayı da `0x83AA74 = 4`, yani yüksek bakış (POV 5) yapıyor;
+karşı direksiyonun drift tablosu da aynı bayrağa bakıyor. `0x89E7D8` büyük olasılıkla **drag** (sarsıntı orada
+×0,2 değil); bunun kanıtı dolaylı. `0x89010x` çiftleri aynı bayrakların ikinci kopyası gibi, okunmadı.
+
+`FUN_005AC260` (`Melov8r` adımından, `0x89E7D8`/`0x890108` kapalı ve `0x890114`/`0x89E7D9`/`0x890104`'ten biri açıkken):
+
+- **Dönmeye karşı tork:** kayma ile yaw hızı aynı yöndeyse, `eğri(|kayma|) · K · yaw`, `K = 0x7FC2D0[aktarma·81 + zorluk]`:
+  FWD −10/−7/−4, AWD −7,5/−5/−4, RWD −15/−10/−6. Yani yüksek zorlukta daha az yardım.
+- **İki tekerin `+0x188`'i:** `0x7FC910` eğrisinden, `|yaw|·w + (1−w)·|kayma|` ile (`w` 0,35/0,55/0,5).
+
+**Taşınmadı:** bu oyunda drift yarışı yok, normal sürüşü etkilemiyor. Drift eklenince buradan başlanmalı; eğrinin
+kendisi (`0x86B3C8`) çalışma anında kuruluyor, `+0x188`'i kimin okuduğu bulunmadı. Zorluğun öbür okuyucuları: puan çarpanı
+`0x79DAE8` (1 / 1,25 / 1,5), `0x7A19E8` (3 / 1,5 / 1) ve `0x7A19F4` (0,4 / 0,8 / 1) `FUN_005B5CC0`'ta, okunmadı.
+
 ### Rüzgâr arkası (drafting): öndeki arabanın arkasında sürükleme düşüyor (2026-11-04)
 
 Arabanın `+0x4DC`'si her kare `0x5EBD80`'den yazılıyor ve fizik onu aerodinamik nesnesine
@@ -8648,7 +8666,8 @@ başlıyor, `C` geçiyor, `NFS_POV` seçiyor.
 (`0x7EC430`), genlik sonra ×0,2 (`0x7870B8`). Yani 216 km/h'de pitch tepesi ~0,1°; önceki titreme 0,29°
 idi. **Asıl sarsıntı nitronun:** yanarken ve 5 mph üstünde (`0x5ECDB0`) genliğe +0,2, frekansa ×1,4.
 Hız birimi de buradan belli: aynı alan 2,237 ile mph'ye çevriliyor, yani **m/s**. Açı görüş açısıyla
-genişliyor, referans 60° (`0x4412E0`). `+0x20C`'nin sıfır olmaması da koşulda; o alan okunmadı.
+genişliyor, referans 60° (`0x4412E0`). `+0x20C`'nin sıfır olmaması da koşulda; o alan okunmadı. ×0,2 bayrakları
+(`0x89E7D8`, `0x890108`) kapalıyken geçerli; aşağıya göre bu büyük olasılıkla drag dışı demek, drag'de sarsıntı beş kat.
 Taşınmadı: 3 mm'lik yana kayma, yalnız pürüzlü yüzeyin sürdüğü ikinci kanal (`0x800EFC`; bu yolda yüzey
 türü yok) ve üst hız olarak arabanınki (`[+0x10]+0x20`), kodun 100'lük yedeği kullanıldı.
 

@@ -290,7 +290,8 @@ fn fractal(x: f32) -> f32 {
 const SHAKE_ROWS: [(f32, f32); 5] = [(0.0, 1.0), (0.1, 1.2), (0.3, 1.5), (0.6, 2.0), (1.0, 3.0)];
 /// The fallback in `0x452ED0` for the car's top speed, m/s.
 const SHAKE_TOP_SPEED: f32 = 100.0;
-/// What the game scales the amplitude by outside its two debug modes (`0x7870B8`).
+/// What the game scales the amplitude by, except in what looks like a drag race, where it stays at
+/// 1 (`0x7870B8`; flags `0x89E7D8`, `0x890108`). This game has no drag race.
 const SHAKE_SCALE: f32 = 0.2;
 /// Added to the amplitude and multiplied into the frequency while nitro burns (`0x7870B0`, `0x7870B4`).
 const SHAKE_NITRO_AMP: f32 = 0.2;
