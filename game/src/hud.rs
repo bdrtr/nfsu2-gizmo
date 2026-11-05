@@ -64,7 +64,7 @@ impl Dash {
     /// Aynısı, şasinin nitrosu da okunarak.
     #[must_use]
     pub fn of_car(world: &gizmo::prelude::World, chassis: u32) -> Option<Self> {
-        let mut d = Self::of(&*world.borrow::<VehicleController>().get(chassis)?);
+        let mut d = Self::of(world.borrow::<VehicleController>().get(chassis)?);
         d.nitro = world
             .borrow::<crate::rig::powertrain::Powertrain>()
             .get(chassis)
