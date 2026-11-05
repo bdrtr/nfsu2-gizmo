@@ -1553,7 +1553,7 @@ dependencies = [
 
 [[package]]
 name = "gizmo-nfs"
-version = "0.3.0"
+version = "0.4.0"
 
 [[package]]
 name = "gizmo-physics-core"
