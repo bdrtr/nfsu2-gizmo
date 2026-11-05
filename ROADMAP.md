@@ -8075,3 +8075,535 @@ Etkisi ölçüldü. Pilot süpürmesi (`sweep-table.py`, sekiz rota, taban `NFS_
 1 536 → 1 565, hüküm **taşınıyor** (4041 +67 tek başına) — pilot için nötr; taban son kayıttaki
 1 536'yla birebir. Dyno: fren 13,8 → 14,0 m/s², yanal tutunma 11,4 → 11,5 m/s²; `nfs_rail` 105
 yarışta 840/840 bitiriyor.
+
+### Motor ve aktarma: `SPEED2.EXE`'nin kendi kuralları (2026-11-03)
+
+Süspansiyon ve lastikten sonra okunmamış kalan iki fizik modülü — `Engine` ve `DriveTrain` — REA ile
+okundu, yanına aerodinamiğin sürüklenme yarısı. Adresler hafızada ve `MOTOR-NOTLARI.md` #21'de.
+
+**Motor** (`0x5AA5A0`, kayıt `+0x300`'den). Dört eğri kuruyor: bilinen dokuz noktalı tork
+(`+0x310`, rölantiden limitöre), **üç noktalı motor freni** (`+0x358`, aynı aralık; 240SX 120 / 160 /
+120 N·m), dokuz noktalı ve çoğu arabada sıfır bir eğri (`+0x334`, kullanıldığı yer görülmedi) ve
+nitronun sabit şekli (`0x7FBF38`). Net krank torku (`0x594300`) `T(rpm)·gaz − (1−gaz)·Tfren(rpm)`;
+eksiyse ×0,85. Kesici (`0x5AA760`) limitörün 25 devir altında yakıtı kesiyor, %98,75'in altına inene
+kadar tutuyor, kesikken motor freni iki kat. Atalet `+0x30C` (t·m²; 240SX 0,25 kg·m², motorun
+varsayılanının ta kendisi, HUMMER 0,60).
+
+**Aktarma** (`0x5AF9D0`, vites bloğu `+0x2C0`, yükseltmeler `+0x460/+0x4A0/+0x4E0`). Bloğun
+okunmamış iki şeridi: `+0x14` debriyaj kazancı (0,04), ve **`+0x1C` geçiş hızı**. Debriyaj dört
+durumlu (`0x5A1400`: bağlı → açılıyor → açık → kapanıyor); ilerleme `hız × [−3, 0, 1,5]`
+(`0x5949B0`), açılırken motorun gazı 0, kapanırken %70. Stok 2 → bir geçiş **0,5 s**; yükseltmeler
+2 → 4,04 → 6,02 → 8 (0,125 s). Bir vites kutusu yükseltmesinin oranlardan başka aldığı şey bu —
+okumayı ayrıca doğrulayan şey de. Bağlıyken motor ile tekerlekler katı bir kısıtla birlikte dönüyor
+(`0x594DA0`, beş turlu tekerlek çözücüsü `0x5ABDF0`'ın içinde).
+
+**Otomatik kutu** (`0x5AA960`). Yukarı geçiş kırmızı çizginin 100 devir altında, üstüne 0–100
+devirlik rastgele erken geçiş (`0x594710`). Kodda bir "en iyi geçiş noktası" araması var
+(`0x5AC7D0`: bir üst viteste tekerlek torku daha büyük olan devir) ama onu açan bayrağa
+(`0x86B33C`) hiçbir yer yazmıyor — oyunda hiç çalışmıyor. Aşağı geçiş vitese göre: bir alt vitesin
+geçiş noktasına bu vitesin oranıyla düşülen devrin 200 altı.
+
+**Sürüklenme** (`0x59E620`). `(2 − gaz) · k · |v|·v`, `k` kaydın `+0x370`'i (kN/(m/s)²). Tam
+gazda kayıttaki değer — 240SX 0,4 N/(m/s)², motorun varsayılan `½ρ·0,32·2,2 = 0,43`'ünün hemen
+altında — ve **gaz kesilince iki katı**. Aero nesnesinin `in[4]` alanı gaz pedalının kendisi
+(`0x5ABBF0`).
+
+`gizmo_nfs` (PryHUB): `Engine::inertia_kgm2`, `Engine::brake_nm` / `brake_at`,
+`Gearbox::shift_rate`, `Chassis::drag`; gerçek kurulumda 46 kayıt sınandı
+(`the_drivetrain_lanes_read_like_a_drivetrain`; tek istisna LANCEREVO8'in 2. seviyesi 10, 3.'sü 8).
+
+**Oyuna taşındı — `rig::powertrain`.** Motorun kontrolcüsünde bunların hiçbiri yok (debriyaj hep
+kilitli, vites anında, devir yalnız kırpılıyor, tork hep ≥ 0). Kurallar onun adımının etrafında
+uygulanıyor: önce gaz geçiş evresine ve kesiciye göre kısılıyor, sürüklenme kaydın `k`'sından ve
+gazdan yazılıyor, iki geçiş devri vitese göre; sonra motor freni tahrik tekerleklerinin dönüşünden düşülüyor ve sürücünün
+gazı geri konuyor. Atalet kayıttan. `NFS_POWERTRAIN=off` eskisini geri getiriyor.
+
+`NFS_BENCH=launch nfs_bench` (düz zemin, tam gaz, 60 s; sonra 10 s gaz kesik), kapalı → açık:
+
+| araba | 0-100 | 0-160 | 60 s'de | 10 s gaz kesik |
+|---|---|---|---|---|
+| 240SX | 10,3 → 10,9 s | 21,0 → 21,8 s | 214 → 218 km/h | 177 → 132 km/h |
+| SKYLINE | 9,4 → 9,5 s | 18,9 → 19,2 s | 189 → 194 km/h | 158 → 110 km/h |
+| HUMMER | 13,7 → 14,1 s | 24,9 → 26,1 s | 241 → 232 km/h | 217 → 165 km/h |
+
+Kalkışta bedel vites süresi (SKYLINE'ın stok kutusu zaten 4, farkı küçük). Asıl değişen gaz
+kesilince: motor freni ve iki katına çıkan sürüklenmeyle araba artık yavaşlıyor ve vites
+küçültüyor; eskiden süzülüyordu.
+
+**Yan bulgu, dokunulmadı:** oyun `VehicleTuning::aero`'yu hiç ayarlamamış, yani motorun
+varsayılanındaki **Cl −0,8** başından beri açık — `CarRig::apply_downforce`'un doğrusal
+downforce'unun üstüne kareli bir ikincisi (100 km/h'de ~0,8–1,5 kN). Oyunda öyle bir terim yok.
+Tutuş 0,7 / downforce 0,3 onunla birlikte sürülerek seçildi; kaldırmak bir his kararı, ayrı
+sürülmeli.
+
+**Pilot süpürmesi geriledi — ve neden.** `sweep-table.py`, sekiz rota, taban `NFS_POWERTRAIN=off`:
+**1 601 → 1 351**, hüküm **sağlam** (5/8 rotada taban önde, en büyük tek rota 4061 −120). 4061'de
+sekiz arabanın beşi aynı virajdan (−2354, 1880) 63 km/h'de, frende çıkıp orada kalıyor.
+Hangi kural, dört rotada (4021/4041/4061/4121; taban 873, hepsi açık 610) teker teker kapatılarak
+(`NFS_POWERTRAIN_SKIP=shift|brake|drag|points|cut`):
+
+| kapatılan | toplam | hüküm |
+|---|---|---|
+| vites süresi | 681 | taşınıyor |
+| motor freni | 749 | **sağlam** (4021 +57, 4041 +54, 4061 +54) |
+| sürüklenme | 752 | taşınıyor (4061 +141) |
+| geçiş devirleri | 716 | taşınıyor (4061 +104) |
+| kesici | 733 | taşınıyor (4061 +101) |
+
+4061 kaotik — her değişiklik oradaki virajı kurtarıyor. Tutarlı tek etki motor freni: pilot hızı
+gazla tutuyor, ve artık yarım gazda motor da frenliyor (`0,5·T − 0,5·Tfren`); kolları
+(`BRAKE_GAIN`, `CORNER_LIFT`, hız hedefleri) süzülen bir arabaya göre seçilmişti. Bu bir fizik
+hatası değil, pilotun kalibrasyonu. Karar: önce pilot ayarlanır, toparlanınca açılır.
+
+**Pilot ayarlandı: `CORNER_LIFT` 0,75 → 0,3.** Motor kuralları açıkken sekiz rota
+(`NFS_CORNER_LIFT`):
+
+| viraj gaz kesmesi | 0,75 | 0,5 | 0,4 | **0,3** | 0,2 | 0 |
+|---|---|---|---|---|---|---|
+| alan | 1 351 | 1 383 | 1 486 | **1 587** | 1 462 | 1 324 |
+
+Tek tepeli. 0,3 ile eski aktarmanın 0,75'ine (1 601) karşı −14, hüküm **taşınıyor** — nötr. Motor
+freni artık gaz kesmesinin yaptığı işin bir kısmını yapıyor. **Kurallar varsayılan açık.**
+
+Rayların temposu oyuncunun dyno ölçümünden geldiği için o da değişti: son hız 218 → 223 km/h,
+0-100 10,3 → 10,9 s, fren 13,8 → 14,7 m/s² (frende gaz kesik: motor freni ve iki kat sürüklenme),
+yanal tutunma 11,4 → 11,0 m/s². `nfs_rail`: 105 yarışın 105'i, 840 arabanın 840'ı bitiriyor.
+
+### Duvara çarpmak: gövde motorun varsayılan malzemesindeydi (2026-11-03)
+
+İlk sürüşün geri bildirimi: "çarpmalar çok kötü — bir yere çarpınca sekiyor, kenara değince
+takla atıyor". (Aynı sürüşte "yokuştan düşünce saplandı": motor freni ilk sürümde gövdenin
+burun yönündeki hızından düşülüyordu, burnu aşağı düşen arabada bu düşüşü frenlemek demekti.
+Artık tahrik tekerleklerinin `ω`'sına uygulanıyor, lastik üzerinden geçiyor.)
+
+**Sebep:** şasinin collider'ı `Collider::offset_box` varsayılan malzemesiyle kalmıştı —
+esneklik 0,3 `Max` ile birleşiyor, sürtünme 0,6. `Max` yolun `Min`'ini yeniyor, yani her duvar
+çarpma hızının %30'unu geri veriyordu; 0,6 × 0,75 sürtünmeyle açılı değen araba duvarı sıyırmak
+yerine tutuyordu. Oyunun kendi değerleri: araba gövdesinin esnekliği **0,1** (`0x5A0C90`),
+sürtünmesi **0,3** (`0x5A0BE0`), ve çözücü iki gövdenin **küçüğünü** alıyor (`0x5AF0E0`,
+`0x5941C0`); çarpma impulsunun dönmeye giden payı **0,4** (`0x5A0B00`), neye çarpılırsa.
+
+`rig::body_material` (esneklik 0,1, sürtünme 0,3, ikisi de `Min`) ve `rig::physics_step` (fizik
+adımında temasın açısal hıza kattığının 0,4'ü kalıyor; sönüm `ω·e^(−c·dt)` ayrılarak —
+**varsayılan kapalı**, aşağıya bak).
+`NFS_BENCH=wall nfs_bench` (60 m'lik duvar, 10 m önce gaz kesik):
+
+| vuruş | sekme (e), önce → şimdi | sapma rad/s, önce → şimdi |
+|---|---|---|
+| 15 m/s, dik | 0,29 → 0,05 | 0 → 0 |
+| 15 m/s, 30° | 0,33 → 0,10 | 1,33 → 0,61 |
+| 15 m/s, 60° | 0,00 → 0,00 | 1,82 → 1,14 |
+| 25 m/s, dik | 0,29 → 0,05 | 0 → 0 |
+| 25 m/s, 30° | 0,34 → 0,10 | 2,25 → 1,03 |
+| 25 m/s, 60° | 0,64 → 0,01 | 3,08 → 1,91 |
+
+Düz bir duvarda iki hâlde de devrilme yok; sürüşteki takla kaldırım/kenar gibi alçak bir
+engeldeydi, o tezgâhta yok. Oyunun ikinci yumuşatması — araba impulsa en az 1,85 t gibi tepki
+veriyor — duvarlar için uygulanmadı.
+
+Pilot süpürmesi (sekiz rota, taban `CORNER_LIFT` 0,3 kolu 1 587), değişiklikler tek tek:
+
+| kol | alan |
+|---|---|
+| motor freni tekerlekte (gövde yerine), eski çarpışma | 1 449 (sağlam −138) |
+| + gövde malzemesi | **1 605** |
+| + dönme payı 0,4 | 1 500 (malzemeye karşı sağlam −105) |
+| yalnız dönme payı | 1 416 |
+
+Motor frenini tekerleğe taşımak pilota pahalı ama fizikçe doğru olan o (gövdeye uygulanınca araba
+havada saplanıyordu); gövde malzemesi bunu fazlasıyla geri alıyor. Dönme payı tezgâhta dönmeyi
+yarılıyor ama pilotu sağlam biçimde geriletiyor — pay, gövdenin **zemine** (kaldırım, tabana
+vurma) temasını da ölçekliyor, oyunun çift başına impulsu ise ölçeklemiyor, ve burada ikisi
+ayrılamıyor. **Varsayılan: malzeme açık, dönme payı kapalı** (`NFS_SPINSHARE=0.4` açıyor).
+Kapanış: 1 605, kapalı aktarmalı taban 1 601'le aynı.
+
+### Direksiyon, fren dengesi, Dyno kaydırıcıları: `SPEED2.EXE`'den (2026-11-03)
+
+**Direksiyon üç katmanlı.**
+1. *Ackermann* (`0x59DEF0`, vtable `0x7A2084`): girdi 16 bitlik bir açı (`2π/65536`), `±π`'ye
+   sarılıyor, iç/dış teker `dış = L·a / (L + a·T)` (L, T kaydın teker konumlarından). Hız ya da
+   oran burada yok.
+2. *Oyuncunun direksiyonu* (`0x406A40`, `RealDriver`'ın `PlayerSteering`'i): kilit **hıza bağlı
+   bir tablodan** (`0x7E9F8C`, 0–160 — büyük ihtimalle mph; yapay zekâ kodu eşiklerini mph ile
+   yazıyor): **45, 25, 12, 5,9, 4,2, 3,6, 3,1, 2,9, 2,9, 2,9°**. Kilit gaz/frene göre çarpılıyor:
+   `1,5 − (gaz − fren)/2` — tam gazda ×1, boşta ×1,5, tam frende ×2. Dönüş hızı ikinci bir
+   tablodan (`0x7E9FA0`: 1,0 → 0,34) × 9, merkeze dönerken ×2, en az 0,173. Analog girdi bir
+   eğriden geçiyor (`0x7E9FB4`: 0, 0,1, 0,24, 0,53, 0,79, 1). **Drift bayrağı**: yaw hızı 15°/s'yi
+   ve hız 13,4 m/s'yi (30 mph) geçince kalkıyor, 5°/s'nin altında iniyor; kalkıkken ya da yaw'a
+   karşı çevrilirken kilit yaw hızına kadar (en çok 45°) açılıyor — karşı direksiyon yardımı.
+   Bir alternatif kilit tablosu (`0x7E9FC8`: 45, 42, 37, 30, 4,2…) bir kipte seçiliyor.
+3. *Hız sınırı* (`0x405990`, yapay zekâ sürücüsü): açı hedefe 360°/s × çarpan ile, ±45°.
+
+Bizim `CarRig::steer_for_speed` fizikten türetiliyor (`L·a/v² + kayma`, 100 km/h'de ~6,3°);
+oyunun tablosu aynı hızda ~5°, boşta ~7,5°. Aynı mertebe — sürüşle ayarlandığı için dokunulmadı,
+tablolar ayrı bir sürüşle denenmeli.
+
+**Fren dengesi kodla çözüldü** (`0x5A4E90`): teker `i`'nin fren girdisi `pedal·2·(1 − b)` (ön) ve
+`pedal·2·b` (arka), `b` = kaydın `+0x38C`'i. Kayıttaki teker sırası ön, ön, arka, arka (240SX
++1,39, +1,39, −1,05, −1,05) ve el freni tablosu `0x7FC074` `0, 0, 1, 1` — yani **`b` arka pay**:
+240SX %46,5 ön / %53,5 arka. PryHUB'ın "ön pay" adayı yanlıştı; `Chassis::brake_rear` oldu.
+Motorun sabit 60/40'ı bunu taşıyamıyor (`MOTOR-NOTLARI.md` #16 b). Aynı kod gaz > 0,8, fren > 0,5
+ve hız < 10 m/s iken arka frenleri bırakıyor: oyunun yerinde patinajı.
+
+**Aktarma tipine göre 81 değerlik yapılandırma** (`0x7FC2A8`, FWD / AWD / RWD; 0,2 ve 0,8
+eşikleriyle) Dyno kaydırıcılarının etkisini taşıyor (`0x5A7530`): her kaydırıcı için düşük–yüksek
+uç çarpanları (downforce, kütle, lastik tutuşu, fren dengesi, AWD tork payı…) ve kalkış devri
+çarpanı (+0x10: FWD 1,0, AWD 1,2, RWD 1,1). Stok bir araba (kaydırıcılar ortada) için etkisiz.
+Aynı blok `Melov8r`'ın (uzaktaki yapay zekâ/trafik için sadeleştirilmiş fizik, `0x5B0030`) da
+kaynağı.
+
+**Nitro** motor torkuna `gaz · şekil(rpm) · T_nitro · seviye` olarak ekleniyor (`0x594300`; şekil
+`0x7FBF38` rölantiden kırmızı çizgiye 0,3 → 1,0 → 0,7, seviye 1,0 / 1,4 / 1,7). Süresi ve
+dolumu bir sonraki bölümde.
+
+### Nitro: depo, kademeler, dolum — ve oyunda (2026-11-03)
+
+**Nerede duruyor.** Motorun kurucusuna (`0x5AA5A0`) verilen ikinci argüman bir parça kaydı değil,
+arabanın **nitro nesnesi** (fizik arabası `+0x58`, kurucusu `0x5A93A0`); onun ilk alanı fiziğin
+kayıt kopyasını gösteriyor (`CTI+0x110`'dan `0x2B0` bayt, `0x5AC4F0`). Yani nitro **araç
+kaydında**: depo `CTI+0x3B0` (saniye), tüp sayısı `+0x3B4`, tork `+0x3BC` (kN·m). 46 kaydın
+hepsinde üçü de 0 — hiçbir araba dükkândan nitroyla çıkmıyor. Kopya yapılırken (`0x5AC4F0`) bir
+nitro parçası takılıysa (`0x5A6580`, kategori 2) depo yükseltmenin üst ucuna (`CTI+0x690`) parça
+ağırlığı kadar, tork üst ucuna (`CTI+0x69C`) **tamamen** çekiliyor. Üst uçlar 31 oynanabilir
+arabanın hepsinde aynı: **6 s, 0,5 kN·m**. PryHUB `Chassis::nitro_full`, altın testle.
+
+Parça ağırlığı toplamı 1'de kırpılıyor; profilde ölçülen nitro toplamı seviye 1'de 1, seviye 2'de
+2 (`gizmo_nfs::profile`). Yani her nitro seviyesi zaten tam depo — seviye torku da değiştirmiyor.
+Seviyeler arasındaki farkı başka bir yer taşıyor olmalı; bulunmadı.
+
+**Depo** (`0x592480`, `0x5925B0`, `0x592640`): saniyenin 1/4000'i tiklerle tutuluyor; düğme basılı
+tutuldukça **gerçek zamanla** boşalıyor, gazdan bağımsız (gaz yalnız torku ölçekliyor). Doluluk
+payı `kalan / depo`; depo **dolunun iki katına kadar taşırılabiliyor** (`0x592640`: 1'e kadar
+olağan, üstü `2 − doluluk` sınırıyla, `0x7A178C` = 1 hızında). Kademe (`0x59FA30`) doluluktan:
+**> 1,7 → ×1,7, > 1,4 → ×1,4, > 0 → ×1** (`0x7A1790` eşikler, `0x7A1798` çarpanlar). Yani taşırılmış
+bir depo daha sert yakıyor, ve yandıkça kademe düşüyor. Düğme bırakılınca ya da depo bitince
+duruyor (`0x592500`).
+
+**Dolum** iki yoldan (`0x6016A0`): stil puanı (`Δpuan / 15 · 0,01` → **1 500 puan bir depo**) ve
+yarışta tur ilerlemesi (`Δilerleme% · 0,01 · 0,5` → **bir tur yarım depo**, bir seçenekte 0).
+
+**Aşırı ısınma** (`0x5A11E0`, yalnız drag yarışı — motor `+0x8C` −1 ile başlıyor, drag kipi 0
+yazıyor): kırmızı çizginin üstünde saniyede +0,45, altında −0,1; 1,2'yi geçince 2'ye kilitleniyor
+(motor yandı). 0,6'nın üstünde tork `1 − 0,75·(min(ısı,1) − 0,6)/0,4` ile düşüyor — yanmış motor
+×0,25.
+
+**Net torkun kalan iki çarpanı** (`0x594300`): `+0x90` sürücü nesnesinden gelen bir tork ölçeği
+(`0x599170`; bir global açıkken sürücünün `+0x4E4`/`+0x468`'i, bir bayrakla ×0,4) — büyük ihtimalle
+yapay zekânın yetişme ayarı; `+0x74` doluysa ×1,05, kaynağı belirsiz. Gaz kesikken motor freni
+boşta (`[aktarma+0x3C] == 1`) ×0,65, viteste ×0,85.
+
+**Oyunda** (`rig::powertrain::Nitro`): **Sol Shift ya da N** basılı tutuldukça yanıyor. Tork motorun
+gazına çarpan olarak veriliyor — motorun torku `eğri · |gaz|`, oyunun ek torku da gazla çarpılıyor,
+yani ikisinin oranı gazın çarpanı: `gaz · (1 + şekil · 500 N·m · kademe / T(devir))`. Vites
+geçişinde ve kesicide gaz sıfır olduğu için nitro da sıfır, oyundaki gibi. Gösterge sağ altta mavi
+bir çubuk; taşan kısım mor, yanarken beyaz.
+
+Bizim seçimlerimiz, oyunun değil:
+- **Nitro takılı geliyor** (`NFS_NITRO=0` söküyor). Garaj yok, takılı olmasa kimse görmezdi.
+  Profil okunursa (`Upgrades::from_profile`) nitro toplamına bakılıyor.
+- **Dolum sürülen yolla**: 2 km'de yarım depo. Oyunun iki yolu da (stil puanı, tur ilerlemesi)
+  burada yok; bu "kısa bir turda yarım depo"nun yerine geçiyor. Bu yüzden basılı tutulan boş bir
+  depo damla damla yakmaya devam ediyor.
+- Rakipler ve pilot hiç basmıyor; süpürme etkilenmiyor.
+
+Kalkış tezgâhı (`NFS_BENCH=launch NFS_BENCH_NOS=1`, nitro çizgiden basılı):
+
+| | 0-60 | 0-100 | 0-160 | 60 s'de |
+|---|---|---|---|---|
+| 240SX | 6,4 → **3,0 s** | 10,9 → **4,9 s** | 21,8 → **9,1 s** | 218 → 222 km/h |
+| SKYLINE | 5,5 → **2,7 s** | 9,5 → **4,4 s** | 19,2 → **8,9 s** | 194 → 248 km/h |
+
+500 N·m bir 240SX'in ~220 N·m'lik tepe torkunun iki katından fazla; altı saniyelik bir depo 0-100'ü
+yarıya indiriyor. SKYLINE'ın 60 s'deki farkı nitronun kendisi değil: nitrosuz araba 4. viteste
+7 350 devirde, otomatik kutunun 7 850'lik geçiş devrinin altında asılı kalıyor; nitro onu 5.
+vitese taşıyınca orada kalıyor.
+
+### Oyunun klavye direksiyonu: tablolar m/s'de, ve bizim lastikte önü kaydırıyor (2026-11-03)
+
+**Önceki okuma eksikti.** `0x406A40` oyunun direksiyonu değil: üç yolu seçen fonksiyon (`0x41DFC0`)
+onu bir geliştirici bayrağının (`0x81CB8C`, dosyada 0, hiçbir yer yazmıyor) arkasında çağırıyor.
+Analog bir aygıt `0x4061C0`'a, **klavye `0x416BB0`'a** gidiyor. "Direksiyon üç katmanlı"
+bölümündeki kilit tablosu (45, 25, 12, 5,9…) o kapalı yolun; varsayılanınki başka.
+
+**Hız ekseni m/s, mph değil.** Tablolar `+0x42C`'yi okuyor; aynı alan başka yerlerde mph'ye
+`× 2,237` ile çevriliyor (`0x5A33C7`, `0x5F75E9`), bir mesafeyi bölüp süre veriyor (`0x5EE22C`),
+ve arabanın en yüksek hızıyla oranlanıyor (`0x405ED3`). On noktalı eksen 0–160 m/s, yani 64 km/h
+aralıklı; sürülen aralıkta yalnız ilk dört nokta çalışıyor.
+
+**Varsayılan yol** (`0x416BB0` → `0x405DC0` kilit, `0x4060E0` dönüş hızı):
+- `açı = eğri(girdi) · kilit · kaydın +0x380'i`, ±45°'de kırpılmış.
+- `kilit = T_girdi(|girdi|) · T_kilit(v) · (1 + T_oran(v) · (1 − (gaz + 1 − (fren + el freni)/2)/2))`.
+- `T_kilit` (`0x7E9ED8`): 0, 64, 128, 192 km/h'de **40°, 20°, 10°, 5°**, sonra 3,5 → 2,9.
+  `T_oran` (`0x7E9F14`): 1,0 → 0,32. `T_girdi` (`0x7E9F00`): tam girdide 1,35.
+  `eğri` (`0x7E9E60`): yumuşak bir orta, yarım girdi açının %15'i.
+- Gaz bırakılınca kilit `× (1 + T_oran/2)`, tam frende `× (1 + 0,75·T_oran)` açılıyor.
+- Dönüş hızı 180°/s (bir drift kipinde 110), hızla 1 → 0,32, girdinin değişim hızıyla 1 → 3,1.
+- Karşı direksiyon: ~~yaw hızı~~ **kayma açısı** (aşağıdaki bölümde düzeltildi) 15°'yi ve hız
+  13,4 m/s'yi geçince bir drift bayrağı kalkıyor (5°'nin altında iniyor). Tuş kaymanın tarafına
+  basılıyken kilit kaymanın kendisine (×0,5–0,95 girdiye göre, en çok 45°) açılıyor.
+- Girdi ≥ 0,5 tutulurken kilit hızla daralmıyor: önceki kilit korunuyor.
+
+**Oyunda** `NFS_STEER=game` (`rig::steer`): açı ve kilit yukarıdaki gibi, dönüş hızı ve karşı
+direksiyon yok (tuşun kendi rampası kalıyor). Kontrolcünün kilidi 25°, oyununki 45°: ~75 km/h'nin
+altında oyunun açısı kırpılıyor.
+
+Tezgâh (`NFS_BENCH=steer`, tam tuş, sabit daire, 240SX):
+
+| hız | çıplak (25°) | yardım (`steer_for_speed`) | oyunun |
+|---|---|---|---|
+| 70 km/h | 25° · 9,7 m/s² | 11,3° · **11,1** | 25° · 9,7 |
+| 100 km/h | 25° · 10,5 | 8,6° · **12,2** | 23,1° · 10,8 |
+| 130 km/h | 25° · 11,2 | 7,5° · **13,3** | 16,6° · 12,4 |
+| 160 km/h | 25° · 11,6 | 7,0° · **14,3** | 13,6° · 13,6 |
+
+SKYLINE aynı sırayı veriyor. Oyunun açıları bizim lastikte **tepenin ötesinde**: oyunun yanal
+tablosu 12°'de son sütuna varıp orada kalıyor (`Chassis::tyre_slip_deg`), motorun lastiği
+tepeden sonra düşüyor. Oyun 100 km/h'de 23° verebiliyor çünkü fazlası orada bir şey kaybettirmiyor.
+Bu yüzden varsayılan yardım kalıyor; oyunun tablosu, lastik oyununki gibi olursa yeniden denenecek
+şey. **(Denendi, açıklama yanlış çıktı — aşağıda.)**
+
+### Karşı direksiyon: oyun kaymayı yakalıyor, bizim yardım yakalatmıyordu (2026-11-03)
+
+**Lastik açıklaması yanlıştı.** Oyunun yanal tablosu (`0x59D510`; yedi kayma kademesi × altı yük,
+nesneler `0x7FC968..0x7FC9E0`, kademe `6·α°/α_tepe`, yük `0,8·Fz/yük_norm`, sonuç `× 2,5` kN)
+240SX'in tekerlek yükünde ve `μ_s` çemberinden sonra tepenin %70'ini 2°'de, %98'ini 4°'de veriyor ve
+sonra düşmüyor. Pacejka'ya uydurulunca `B = 18, C = 1,1, E = −2,75` (0,5–45°'de en çok 0,035
+sapma); motorun varsayılanı (`10, 1,9, 0,97`) yükselişte biraz daha yumuşak, 30°'de %96. Bu lastikle
+(`NFS_TYRE=game`, `D` kaydın) aynı tezgâh:
+
+| 240SX, tam tuş | yardım | oyunun direksiyonu |
+|---|---|---|
+| 100 km/h, motorun lastiği | 8,6° · 12,2 m/s² | 23,1° · 10,8 |
+| 100 km/h, oyunun lastiği | 8,6° · 12,3 | 23,1° · 11,1 |
+| 160 km/h, oyunun lastiği | 7,0° · 14,4 | 13,2° · 13,8 |
+
+Fark yerinde kalıyor (SKYLINE de aynı). Büyük açıların kaybı lastiğin düşüşünden gelmiyor.
+`NFS_TYRE=game` seçenek olarak kaldı.
+
+**Karşı direksiyonun okuduğu açı yaw hızı değil, kayma açısı.** `0x405DC0` değeri `0x59FA10`'dan
+alıyor, o da `0x591D90`'a gidiyor: hız vektörünün `atan2`'si (`0x43C570`) gövdenin yönünden
+(`+0x3CC`, ushort) çıkarılıyor, `2π/65536` ile radyana çevrilip ±π'ye sarılıyor. `+0x3EC < 1`
+(hız) iken 0. Yani:
+
+- **Drift bayrağı** (`+0x10`): kayma > 15° ve hız ≥ 13,41 m/s'de kalkıyor, kayma < 5°'de iniyor
+  (inişin hız eşiği `0x81CB90` = 0).
+- **Yakalama:** tuş kaymanın tarafındaysa (`girdi · kayma < 0`, oyunun işaret düzeninde; tekerleri
+  hızın yönüne çeviren taraf) ve araba drift'te ya da kayma kilidi aşmışsa, kilit
+  `min(|kayma|, 45°) · T(|girdi|)` oluyor — kilidin yerine, büyüğü değil. `T` varsayılan
+  `0x7E9EB0` = 0,5, 0,6, 0,7, 0,8, **0,95**; `0x89E7D8`/`0x890108` kapalı ve `0x890114`/`0x89E7D9`/
+  `0x890104`'ten biri açıkken `0x7E9EC4` = 0,2 → 1,0. Sonra açı yine `eğri(girdi) · kilit · +0x380`.
+  Tam tuşta tekerler kaymanın 0,95 × 1,1'ine, yani neredeyse tam hızın yönüne bakıyor.
+
+**Bizde** `CarRig::catch_slide` (`steer::drifting`, `steer::catch_lock_deg`), `for_human`'da her iki
+direksiyon yolunun üstünde; kıyas kilidi yardımın tam tuştaki açısı. Varsayılan açık,
+`NFS_CATCH=0` kapatıyor. Pilot etkilenmiyor.
+
+Tezgâh (`NFS_BENCH=drift`): hızda 0,5 s el freni + sol tuş, sonra ¾ gaz ve dört tepki. "Karşı"
+tuşu kaymanın tarafına rampalıyor, kayma 3°'nin altına inince bırakıyor. En büyük kayma / 5°'ye
+iniş:
+
+| | bırak | karşı, yardımla | karşı, oyunun yakalamasıyla |
+|---|---|---|---|
+| 240SX 70 km/h | döndü | 16,5° / 0,7 s | 17,0° / 0,7 s |
+| 240SX 90 km/h | döndü | **döndü** (123°) | 25,2° / 0,9 s |
+| 240SX 110 km/h | döndü | **döndü** (121°) | 30,9° / 1,1 s |
+| RX8 90 km/h | döndü | **döndü** (134°) | 27,0° / 0,9 s |
+| RX8 110 km/h | döndü | döndü | döndü (120°) |
+| SKYLINE 70–110 | toparlanıyor | toparlanıyor | toparlanıyor, 110'da 1,2 → 0,7 s |
+
+**Bulunan şey yardımın kendi kusuru:** hız yardımı tuşu 90 km/h'de ~8°'ye indiriyor, karşı
+direksiyonda da. 25°'lik bir kaymada tekerler hızın yönüne hiç yetişemiyor ve arka-itişli araba
+karşı direksiyona rağmen dönüyordu. Oyunun yakalaması tam bunu açıyor.
+
+**Açık kalan:** kontrolcünün kilidi 25°, oyununki 45°. Kayma 25°'yi geçince (RX8 110 km/h, 1 s'de
+44°) tekerler kaymaya yetişemiyor. Kilidi büyütmek pilotun her eşiğini kaydırır (pilot girdiyi
+kilidin kesri olarak hesaplıyor), yani bir süpürme ister; yalnız oyuncunun arabasında 45° de olabilir.
+Oyunun dönüş hızı (`0x4060E0`) ve tutulurken daralmama hâlâ alınmadı.
+
+### Kamera: hızla geri çekilme kalktı, ve "daha iyi olmuş" (2026-11-03)
+
+Oyuncunun hükmü: **"hızlıyken hızlı görünmüyor, kamera hissi kötü"**. En büyük sebep kameranın
+kendisindeydi: takip kamerası yerine *lerp*'le yaklaştığı için hızda `v / lag` metre geride
+kalıyordu (150 km/h'de 3,5 m). Arabadan uzaklaşan kamera yanından geçen dünyayı yavaşlatıyor.
+`rig::chase` artık:
+
+- **Sabit mesafe:** her hızda 5,2 m geride, 1,6 m yukarıda (eskiden 6,5 / 1,9; `nfs_race` 7 / 2,2
+  ile kendi değerini veriyordu, artık ortak).
+- **Hızlanma itmesi:** hızın değil hızlanmanın, `0,12 m / (m/s²)`, en çok 0,8 m geri, frende en çok
+  0,4 m ileri, saniyede 3 hızla.
+- **Gecikmeli yön:** kameranın baktığı yön burnu saniyede 6 hızla izliyor; virajda ve kaymada araba
+  ekranda yana kayıyor, yanı görünüyor. Yükseklik saniyede 10 hızla (tümsekler yumuşuyor).
+- **Bakış noktası** arabanın 4 m önünde, 0,9 m yukarıda: araba ekranın altında, yol ortada.
+- **Görüş açısı** 29 km/h'den 216 km/h'ye 45° → 72° (eskiden 36 → 252 km/h'de 45 → 62°; 150 km/h'de
+  54° yerine 66°). Titreşim genliği 0,0035 → 0,005 rad.
+- 15 m'den büyük tek kare sıçraması (R, kurtarma) kesme sayılıyor: kamera savrulmadan yerine geçiyor.
+- `NFS_CAM="uzaklık,yükseklik,dönüş"` deneme için.
+
+Hüküm: **"daha iyi olmuş"**. Sayılar oyunun değil: `SPEED2.EXE`'nin kovalama kamerası
+(`TrackCarCameraMover`, adı `0x7A6208`) okunmadı; ne `GLOBALB`'de ne exe'nin veri bölümünde açık bir
+bakış açısı tablosu bulundu (`0x7874F8` civarındaki `CAMERA SETTINGS` NIS kamera editörünün).
+Gerçek değerler için ya o sınıfın yapıcısı bulunmalı ya da oyun çalışırken kamera–araba mesafesi
+bellekten ölçülmeli (`tools/nfsu2-memlog.py`).
+
+**Aynı oturumda bir donma:** ses akışı ALSA'da `POLLERR`'e düştü, rodio'nun varsayılan hata
+geri çağrısı iki dakikada 3 milyon satır bastı (310 MB kayıt) ve oyun dondu. Önceki ve sonraki
+açılışlarda yok; tek seferlik bir aygıt takılması gibi. Tekrar ederse sesin hata alınca susması
+gerekiyor (motorun `AudioManager`'ı hata geri çağrısını dışarı vermiyor).
+
+### Kilit 45°, dört çeker, gazla arka kaydırma (2026-11-03)
+
+- **Oyuncunun kilidi 45°** (`CarRig::PLAYER_LOCK`, oyunun `0x7844D4`'ü; `for_human` çağıran araba
+  alıyor). Pilot 25°'de: girdiyi kilidin kesri olarak hesaplıyor. Drift tezgâhında RX8 110 km/h
+  artık toparlanıyor (en çok 33°, 0,9 s; 25°'de dönüyordu), 240SX 110'da iniş 1,1 → 0,9 s.
+- **Dört çeker:** kaydın arka payı (vites bloğu `+0x10`) oynanabilir dört çekerlilerin hepsinde 0,5,
+  yalnız HUMMER 0,575 (otobüs 0,4). Motorun `Awd`'si torku dört tekere eşit bölüyor, yani zaten
+  oyunun dağılımı. Yapılacak bir şey yok.
+- **Gazla arka kaydırma** (`0x59D600`, çemberde `Fx × 1,5`) oyun tarafından taklit edilemedi: tek kol
+  `pacejka_lat.d`, ve onu kısmak eğrinin sertliğini de kısıyor. `NFS_BENCH=power` (sabit virajda tam
+  tuş, sonra 2,5 s tam gaz): kural kapalıyken 240SX/RX8/SKYLINE/CIVIC hiç dönmüyor (en çok 2–4°);
+  açıkken arka itişliler tam gazdan önce, sabit virajda dönüyor. 2. viteste teker torku 950–1460
+  N·m, çemberin 0,7–1 katı — oyunda da çember dolu, ama oyun bileşkeyi orantılı kesiyor. Kural
+  `NFS_POWER=1` arkasında, motordan istenen `MOTOR-NOTLARI.md` #24.
+
+### Kaldırım, kenardan düşme, ışık: üç eski şikâyet ölçüldü (2026-11-04)
+
+**"Kenara değince takla."** İki yeni tezgâh: `NFS_BENCH=kerb` (0,12/0,2/0,3 m kaldırım, 15 ve
+25 m/s, 30–75°, gaz kesik) ve `NFS_BENCH=trip` (araba yana dönmüş, 4–14 m/s yana kayarak
+kaldırıma; `Bench::slide_sideways` — dinlenen gövde uykuda, hızı yazmadan önce `wake_up` şart).
+Hiçbir koşulda devrilme yok. En kötüsü yana kayarak 0,3 m'ye 14 m/s: 240SX 24°, SKYLINE 38°,
+HUMMER **55°** yalpa. `NFS_SPINSHARE=0.4` sonuçları **bit bit aynı** bırakıyor, yani yalpayı gövde
+teması değil süspansiyon/lastik veriyor (teker ışını kaldırımın üstüne bir karede sıçrıyor, lastik
+kuvveti temas noktasından). Oyun da kuvveti temas noktasından uyguluyor (`0x5B05AA`); bu fizik
+orada da var. Sürüşteki takla tezgâhta olmayan bir geometrideydi, yeri kayıtlı değil.
+
+**"Kenarlarda aşağı düşüyor."** Sürüş kaydında bir düşüş var: `out of the world at (238.7, 18.2,
+−1176.4)`. `nfs_city` ile o nokta çizildi: bir kavşağın uzak kaldırımı yüklenen bölgenin sonu,
+ötesinde hiçbir seviyede zemin yok. Çit (`hold_at_edge`) yalnız tekerler yerdeyken çalışıyordu;
+kaldırıma hızla vuran araba bir an havalanıyor ve çit o anda yok. **Oyuncunun arabası artık havada
+da çitleniyor** — yalnız önde hiçbir seviyede zemin yoksa (`off_level` istisnası duruyor, alçak bir
+yola atlamak hâlâ atlamak). Pilot eski kuralda. Sürülerek doğrulanmadı.
+
+**"Işıklandırma patlıyor."** Durağan karede yok: `nfs_city` artık `NFS_CAR=<GEOMETRY.BIN>` ile
+oyuncunun arabasını kareye koyabiliyor (`NFS_CAR_YAW`, `NFS_SUN`), oyunun parlama eşiği 0,18'le
+240SX şehirde: medyan 60, p99 203, doymuş piksel yok; motorun 0,85 eşiğiyle p99 162. Yani patlama
+sürerken olan bir şey (titreme, gölge zıplaması, ani parlama) ve ne olduğu tarif edilmeden
+aranamıyor.
+
+### Kayıttaki son açık motor alanları (2026-11-04)
+
+- **`+0x330` bir alan değil:** tork tablosu `+0x310`'da dokuz nokta, dokuzuncusu `+0x330`. 46 kaydın
+  hepsinde "`+0x330` = son tork noktası" tutuyor.
+- **`+0x334` turbo eğrisi:** dokuz nokta, rölantiden kesiciye, kN·m; **tam olarak yedi turbolu
+  arabada** sıfır dışı (GOLF, ECLIPSE, 3000GT, SKYLINE, LANCEREVO8, RX7, IMPREZAWRX), aralığın ilk
+  üçte birinde 0, sonra yükseliyor (SKYLINE 0, 0, 30 … 75 N·m). Motor nesnesi onu tork ve motor
+  freninin yanında üçüncü tablo olarak tutuyor (`0x5AA5A0`, `+0x4C`), ama **hiçbir fizik kodu
+  okumuyor**: krank torku (`0x594300`) eğri ve motor freninden ibaret. Yani sürüşe girmiyor
+  (gösterge ya da ses olmalı, okuyanı bulunmadı). PryHUB `Engine::turbo_nm`, altın test turbolu
+  yediyi kilitliyor.
+- **Motorun ×1,05'i (`+0x74`)** araç kurulurken (`0x5B5CC0`, `0x5B6000`) araba nesnesinin `+0xD8`
+  işaretli baytından kopyalanıyor; aynı nesne o baytı başka yerde bir işaretçi dizisinin sırası
+  olarak kullanıyor (`0x5F0844`, `0x5F9D14`). Anlamı açık; etkisi %5.
+
+### Stil puanları: oyunun 39 olayı, ve nitroyu artık onlar dolduruyor (2026-11-04)
+
+**Tanımlar dosyada.** `GLOBALB.BUN`'un `0x00034A07` parçası (yükleyici `0x56C4C0`, yük 16'ya
+yuvarlanıyor): 39 kayıt × `0x30`. İlk kelime `LANGUAGES/English.bin`'deki etiketin hash'i; 35'i
+çözülüyor: DRIFT, CHAINED DRIFT, BONUS ZONE, WALL IMPACT, drift kademeleri (Good Drift! … Drift
+King!, `+5` = 0 ile DRIFT'e bağlı), SPRAY SHOW, TRAFFIC HIT, LEAD LAP, CLEAN SECTION, CLEAN LAP,
+SHORTCUT, AVOIDED ACCIDENT, 360, BEST LAP, HEAD START, J-TURN, BURNOUT, CLEARED ACCIDENT, GAINED
+5TH…1ST, Bounce, POWER SLIDE, HANG TIME, DRAFTING, REVERSE, Hydros. PryHUB
+`globalb::style::style_events` ve `language::labels`, altın testle.
+
+Alanlar puanlayıcıdan (`0x56C740`, `0x56E920`, `0x56EAB0`, `0x56D500`): `+6` sürekli mi, `+7` kip bitleri
+(`0x04` drift yarışı; yarış/serbest olayların ortak biti `0x01`, `0x49`), `+8` sayılmak için en az
+süre, `+0xC` bankaya geçmeden önce beklenen süre, `+0x10` eşik, `+0x14` tavan, `+0x18`/`+0x1C` çarpan
+tavanı ve artışı, `+0x28` oran, `+0x2C` bir yarıştaki en çok ödeme. Sürekli olay beslendiği her kare
+`oran · girdi · çarpan · dt` biriktiriyor; anlık olay `oran · girdi · çarpan` ödüyor.
+
+**Tetikleyiciler** (sabitler `0x79DB20..`): POWER SLIDE `0x56F4C0` — kayma > 5°, hız > 40 mph, dört
+teker yerde, girdi `min(1, v·|kayma|/20)`; HANG TIME `0x56F020` — gövde yerden 0,75 m yukarıda; REVERSE
+`0x56F720` — 40 mph'den hızlı geri; J-TURN `0x56FA60` — 30 mph'den hızlı geri, 20 mph'nin altına
+düşmeden dönüp 20 mph'den hızlı ileri; 360 `0x56F620` — dönme 2 rad/s'de başlıyor, 170°'lik üç adım.
+Drift yarışının puanı ayrı (`0x56ED40`): `(v/8,33)² · |kayma|`, kayma > 5°, vitese göre en düşük hız
+(40–50 km/h), hıza bağlı beş kademeli kombo — drift kipi olmadığı için alınmadı.
+
+**Nitro:** bankaya geçen puan `Δ/15 · 0,01` depo (`0x6016A0`) — 1 500 puan bir depo. İnsanın arabasında
+mesafeyle dolum (yer tutucu) kalktı; `CarRig::style_tick` her kare, gösterge `STİL <toplam> · <olay>
+<puan>`. Drift tezgâhında 240SX 110 km/h kayması: `POWER SLIDE +54`; 70 ve 90 km/h'dekiler eşiğin
+(50) altında kaldı.
+
+**Alınmayanlar:** DRAFTING (rakibin rüzgârı), trafik ve yarış olayları, BURNOUT'un tetikleyicisi;
+POWER SLIDE'ı duvar vuruşunun bozması (`0x56D5C0`); HANG TIME burada "dört teker havada".
+
+**Tur dolumu** (`0x601785`): oyun saniyede bir oyuncunun tur ilerlemesinin yüzde değişimini
+`· 0,01 · 0,5` ile depoya ekliyor — bir tur yarım depo. `nfs_cruise`'un tur yarışında
+(`RailRace::lap_refill`, ışıklar yandıktan sonra) ve `nfs_race`'in ovalinde (kontrol noktası başına
+payı) uygulandı. Oyunun koşulu bir yarış türü (`[[araba]+0x14]+4 == 2`); açık yarışta (sprint) dolup
+dolmadığı okunmadı, burada dolmuyor.
+
+### Rakiplerin lastik bandı: oyunun tablosu (2026-11-04)
+
+`GLOBALB.BUN`'un `0x00034B00` parçası (yükleyici `0x408200`, işaretçi `0x81CB60`) yapay zekânın ayar
+bloğu; başında on bir noktalı sekiz eğri: rakibin oyuncuya göre konumu (metre, önde artı) → hızına
+eklenen kesir. `0x4084A0` iki eğriyi (0–3 ve 4–7; çiftin içinde kip ve itibar seviyesine göre seçiliyor)
+rakibin becerisiyle (`vtable+0x78`, `/9`) karıştırıyor; `0x417515` `hız çarpanı = 1 + eğri · seçenek
+gücü (0x89E7FC, çalışma anında) + sıra terimi`. Üstüne bir yakınlık terimi: `−0,005 · Δv / (0,01·mesafe²
++ 1)`, ±0,05.
+
+| konum | kolay (0–3) | zor (4–7) |
+|---|---|---|
+| 320 m geride | +0,22 | +0,37 |
+| 120 m geride | +0,09 | +0,12 |
+| 120 m önde | −0,025 | −0,01 |
+| 640 m önde | −0,25 | −0,15 |
+
+`rail::catch_up` artık bunu kullanıyor (iki eğrinin ortası, `CATCH_SKILL = 0,5`; seçenek gücü 1).
+Önceki uydurma kural 300 m'de ±%5'ti — oyununki beş-altı kat güçlü. `PACE_CEIL` (0,98) duruyor:
+gerideki rakip hattın sınırını aşmıyor. Sürülerek denenmedi.
+
+### Rüzgâr arkası (drafting): öndeki arabanın arkasında sürükleme düşüyor (2026-11-04)
+
+Arabanın `+0x4DC`'si her kare `0x5EBD80`'den yazılıyor ve fizik onu aerodinamik nesnesine
+`1 − draft` olarak veriyor (`0x599170`): **sürükleme `(1 − draft)` ile çarpılıyor**. `draft` öndeki
+her arabadan (`0x5EBC20`): öndeki 1 m/s'den hızlı, 60 m içinde ve bu araba onun burnunun arkasındaki
+koninin içindeyse (`cos ≥ 0,95`, ≈ 18°), hizalanma `(cos − 0,95)/0,05`, rüzgâr boyu
+`L(hız) · hizalanma` (`L`: 1 m/s → 0, 5 → 10 m, 150 → 60 m), pay `[1, 0,9, 0,75, 0,55, 0,3, 0]`
+tablosundan `mesafe / boy`'da; toplam 0,9'da kırpılıyor. 40 m/s'lik bir rakibin 8 m arkasında ≈ 0,7:
+sürükleme üçte birine iniyor.
+
+Bizde `powertrain::draft`, `Powertrain::draft` sürüklemeyi çarpıyor, `CarRig::set_draft`
+`nfs_cruise`'da her kare raydaki ve pilotlu rakiplerden. Stil olayı DRAFTING (#36) buna bağlı: hız
+> 20 m/s ve draft > 0,25, girdi draft'ın kendisi, saniyede 100 puana kadar. Rakipler birbirinin
+rüzgârını almıyor (raylar sürüklemeyle sürülmüyor).
+
+**Yarış olayları** (`nfs_cruise`, `RailRace::style_events`): HEAD START (#24, ışıklardan 1–1,5 s
+sonra birinci ve 5 mph'den hızlı, bir kez) ve GAINED 4TH…1ST (#29–#32, 1,5 s'den sonra sıra yeni bir
+en iyiye çıkınca) — `0x56F720`. **Düzeltme:** anlık olaylar (360, J-turn, sıra) `Scorer::tick`'ten
+önce bankaya geçtiği için nitroya hiç gitmiyordu; artık bankaya her geçiş `tick`'in döndürdüğüne
+yazılıyor.
+
+### El ile vites: E büyütür, Q küçültür (2026-11-04)
+
+`T` otomatik şanzımanı kapatıyordu ama kapatınca vites değiştirmenin yolu yoktu. `Controls::shift`
+(E `+1`, Q `−1`), `CarRig::drive`'da `manual_gear`: ileri vitesler arasında, boştan büyütmek
+birinci, birinciden küçültmek birinci; geri vitesi S (durunca) götürmeye devam ediyor. Basmak
+otomatiği kapatıyor, `T` geri açıyor. Geçiş süresi ve kesik oyunun kuralıyla (`rig::powertrain`,
+vites değişimini kendisi fark ediyor). Tuş yardımı `nfs_cruise` ve `nfs_drive`'da.
+
+### Sabah sürerek doğrulanacaklar (2026-11-04 gecesi)
+
+Hepsi derleniyor ve testli (oyun 129, PryHUB 266 + altın 38), **hiçbiri sürülmedi**:
+
+1. **Kenar çiti havada da** — `(238.7, 18.2, −1176.4)` kavşağının uzak kaldırımına hızla git: düşmemeli.
+2. **Stil puanları** — gösterge `STİL …`: 64 km/h üstünde kayma (POWER SLIDE), havada kalma (HANG
+   TIME), hızlı geri (REVERSE), J-turn, 360. 1 500 puan bir nitro deposu; mesafeyle dolum yok artık.
+3. **Rüzgâr arkası** — `NFS_ROUTE` bir yarışta bir rakibin hemen arkasında: hız artmalı, DRAFTING
+   puanı gelmeli.
+4. **Rakiplerin lastik bandı** — oyunun tablosu, eskisinden beş-altı kat güçlü: geride kalan rakipler
+   belirgin yetişmeli, öndekiler yavaşlamalı. Fazla gelirse `CATCH_SKILL`/eğri seçimi.
+5. **Tur dolumu** — tur yarışında tur başına yarım depo; `nfs_race` ovalinde kontrol noktası başına.
+6. **El ile vites** — E/Q; basınca otomatik kapanıyor, T açıyor.
+7. **45° kilit ve karşı direksiyon** — düşük hızda daha keskin dönüş; kayarken tuşu kaymanın
+   tarafına basınca toparlanma.
+8. **Işıklandırma "patlıyor"** — durağan karede yok; ne olduğunu (titreme / gölge / ani parlama)
+   söylemek yeterli.
