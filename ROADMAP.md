@@ -8734,3 +8734,66 @@ Hepsi derleniyor ve testli (oyun 129, PryHUB 266 + altın 38), **hiçbiri sürü
 8. **Işıklandırma "patlıyor"** — durağan karede yok; ne olduğunu (titreme / gölge / ani parlama)
    söylemek yeterli.
 9. **Kamera** — `NFS_CHASE=old` ile karşılaştır: araba ekranda doğru yükseklikte mi, kaymada yanı görünüyor mu, hız hissi sabit görüş açısıyla yetiyor mu. `C` bakış değiştiriyor.
+
+### Şehrin yarısı yanlış yerdeydi: örneklenmiş sahne (2026-11-16)
+
+`STREAML4R?.BUN`'un katıları kendi başlık matrisleriyle yerleşmiyor. Her akış bölümü kullandığı modelleri
+(`0x34102`, 0x44 bayt: ad + üç LOD hash'i) ve onların kopyalarını (`0x34103`, 0x40 bayt: AABB, `+0x18`
+model indeksi, `+0x20` konum, `+0x2C` 3×3 int16 dönüş+ölçek, satır düzeni, 1/8192) listeliyor. `STREAML4RA`'da
+gömülü olmayan **her** katı (6 342) bir örnek modeli ve başlığı **yazarlık konumunda** (ör. şehrin 1 km
+altında); gerçek yerleri 48 270 örnekte. Modelin köşeleri örnek matrisiyle dönüştürülünce 43 877 örneğin
+43 798'i kendi kutusuna oturuyor. `lod.rs`'in "kaba katmanlar bir eksene paralel, 651 m'ye kadar ayrık"
+ölçümü bu yazarlık ızgarasıydı.
+
+Oyunda `world::instance` kopyaları `Bundles::scenery` olarak veriyor (katman süzgecinden ayrı: bir tasarım
+bazen `_1A` ve `_1B` modelleriyle ayrı ayrı örnekleniyor), şablonları `meshes`'ten çıkarıyor, aynalı
+örneklerin sarımını çeviriyor. Aynı yerde artık otel, palmiyeli saksılar, lambalar, korkuluk, fıskiye duruyor;
+önceden boş bir yamaçtı. `NFS_SCENERY=off` eski hâl.
+
+**Yarış bariyerleri gruplu.** `L4R?.BUN` `0x34108` 130 sahne grubu (`BARRIERS_<pist>`, `PLAYER_BARRIERS_<pist>`,
+`BARRIERS_CAREER<n>`, `FREE_ROAM*`, `SMOKEABLE`), üyeleri `0x34107` (8 bayt: bölüm no, örnek indeksi, bayrak)
+üzerinden örneklere çözülüyor; `BARRIERS*` üyelerinin %95+'ı `XO_TRACKBARRIER*`, kalanı o yarışın
+başlangıç/bitiş eşyaları. Exe `0x5F54A0` yarışta `PLAYER_BARRIERS_%d` ve `BARRIERS_%d`'yi (pist no
+`0x88F2C0`), kariyerde ek olarak `BARRIERS_CAREER%d`'yi açıyor. `world::shown_groups` bunu yapıyor; pist no
+rota dosyasından (`Paths4102.bin` → 4102), serbest dolaşımda `FREE_ROAM` açık, bütün yarış bariyerleri kapalı.
+
+**Pilotların bedeli** (sekiz rota, `sweep-table.py`, "driven past"):
+
+| kol | toplam | not |
+|---|---|---|
+| `NFS_SCENERY=off` (eski) | 1 498 | |
+| bütün bariyerler açık | 449 | her yarışın bariyeri aynı anda: rotalar kapanıyor |
+| bariyersiz | 1 209 | kalan kayıp gerçek yerine gelen lamba/ağaç/korkuluk/bina |
+| **grup kuralı (varsayılan)** | **1 071** | off 7/8 rotada önde, sağlam |
+| grup, `PLAYER_BARRIERS` kapalı | 1 130 | fark yalnız 4001'de (+58), 5 rota berabere |
+| **grup + oyunun kendi çarpışması (varsayılan)** | **1 404** | grup kuralına göre +333, 6/8 rota; eskiye göre −94, karışık |
+
+Düşen araba her kolda 0. Kayıp bir pilot sorunu: pilotlar artık şehrin gerçek engelleriyle karşılaşıyor.
+**Açık:** (1) `PLAYER_BARRIERS` oyunda yalnız oyuncuyu mu durduruyor (çarpışma katmanı okunmadı);
+(2) 4001'de yarışın kendi `BARRIERS_4001`'i bile 61 kaybettiriyor — pilot o yarışın kapattığı sokaktan mı
+geçiyor; (3) oyuncu bariyerleri oyunda yaklaşınca parlıyor, bizde hep çiziliyor (kareye etkisi görülmedi; `nfs_city` karelerindeki pembe şeritler bariyer değil, `NFS_ROUTE`'un yarış çizgisi şeridi); (4) `nfs_cruise` kare bütçesi
+ölçülmedi — RA'ya 38 bin kopya (LOD A, ~3 M üçgen) eklendi.
+
+**Ve oyunun çarpışması çizdiği şey değil.** `STREAML4R?.BUN` `0x80034130` → `0x34134`: 32 baytlık çokgenler
+(çözücü `0x5D7F10`/`0x5D2CC0`; X/Y ×1/8, z = `+0x04` taban m + `+0x18` ×1/256; `+0x03 & 0x10` dörtgen,
+`& 0x04` sonsuz duvar; `+0x00` ≠ 0 açılıp kapanan, çoğu bariyer). 18 437 düz çokgenin 18 349'u gömülü zemine
+0,5 m içinde oturuyor (medyan 2 mm). Duvar, korkuluk, çit, lamba bu çokgenlerle kaplı; kedi gözü, trafik ışığı,
+ağaç, çalı, zemin spotu değil. Oyunda artık çarpışma = gömülü şehir + oyunun sabit çokgenleri (`world::game_collision`,
+128 m'lik parçalar, iki yüzlü) + o yarışın açık bariyerleri; diğer örnekler yalnız çiziliyor
+(`Bundles::collision`, `NFS_GAME_COLLISION=off` eski kural). Pilotların kaybı 1 071 → 1 404'le büyük ölçüde
+geri geldi; ~21 700 sonsuz sınır duvarı da artık şehrin kenarında. **Açık:** açılıp kapanan çokgenlerin
+gruba nasıl bağlandığı (`+0x00` → `0x34135..37`?) okunmadı — bariyerin çarpışması şimdilik modelinden.
+
+**Kopyalar mesafeye göre çiziliyor** (2026-11-16, ölçülmedi). `nfs_cruise` örnek kopyalarını hücre×doku
+başına her LOD seviyesinde ayrı birleştirip motorun `LodGroup`'uyla koyuyor (`world::build_lods`,
+`scene::spawn_lod`): hücre merkezine ≤200 m `_1A`, ≤450 m `_1B`, ötesi `_1Z` (`world::LOD_BANDS`);
+seviyesi eksik kopya en kaba mevcut seviyesini tekrarlıyor. RA'da kopya üçgenleri A 3,1 M · B 2,0 M ·
+Z 1,3 M. `NFS_LOD=off` her şeyi tam ayrıntıda çizer. Pencereli koşu bu ortamda kare üretmedi (iki kolda da,
+Wayland'in görünmeyen pencereyi kısması olası) — kare süresi kullanıcının ekranında ölçülecek.
+
+**Kalan açık (1 404 / eski 1 498) neden.** Varsayılanda takılan 37 arabanın 31'i oyunun **sonsuz
+duvarlarından** birinin dibinde (`+0x03 & 0x04`; RA'da 21 699, neredeyse hepsi tür `+0x02 = 20`), kalan
+6'sının 6 m içinde duvar yok. Arabalar düğümlerinden 47–82 m sapmış: parkurdan çıkıp şehrin görünmez
+sınırına dayanıyorlar; eski şehirde o duvarlar olmadığı için dolaşıp geri dönebiliyorlardı. Yani dünya artık
+oyununki, açık pilotun parkurda kalmasında. Sonsuz duvarların parkurla ilişkisi yarış dış hattıyla
+ölçülemedi (dış hat yolun etrafına çizilmiş bir çokgen, kesişim sayısı anlamsız).

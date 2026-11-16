@@ -62,8 +62,9 @@ fn main() {
 fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> FlyState {
     let path = nfsu2::world::tracks_path(std::env::args().nth(1));
 
-    let nfsu2::world::Bundles { mut meshes, packs, shared, .. } = nfsu2::world::load(&path);
+    let nfsu2::world::Bundles { mut meshes, scenery, packs, shared, .. } = nfsu2::world::load(&path);
     meshes.retain(|m| nfsu2::world::is_drawn(&m.header.name));
+    meshes.extend(scenery);
     println!("{} shared textures", shared.len());
 
     let start = nfsu2::world::start_at(Vec3::new(640.0, 40.0, -2816.0));

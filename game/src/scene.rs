@@ -152,6 +152,24 @@ where
     ids
 }
 
+/// Spawn a mesh with distance-chosen detail levels: `levels` is `(mesh, max_distance)`, finest
+/// first. The first level is also the entity's own mesh, which the `LodGroup` overrides.
+pub fn spawn_lod(world: &mut World, levels: &[(Mesh, f32)], material: Material, t: Transform) -> u32 {
+    let e = world.spawn();
+    add_transform(world, e, t);
+    world.add_component(e, levels[0].0.clone());
+    if levels.len() > 1 {
+        let lods = levels
+            .iter()
+            .map(|(m, d)| gizmo::renderer::LodLevel::new(m.clone(), *d))
+            .collect();
+        world.add_component(e, gizmo::renderer::LodGroup::new(lods));
+    }
+    world.add_component(e, material);
+    world.add_component(e, MeshRenderer::new());
+    e.id()
+}
+
 /// Spawn one mesh + material as an entity at `t`, returning its id.
 pub fn spawn_mesh(world: &mut World, mesh: Mesh, material: Material, t: Transform) -> u32 {
     let e = world.spawn();

@@ -85,42 +85,17 @@ pub fn nearest(objects: &mut Vec<WorldMesh>, around: Vec3, budget: Option<usize>
     objects.truncate(n);
 }
 
-/// Build one region's meshes.
-///
-/// `budget` is applied here for callers that want only visuals; one that also builds colliders
-/// should call [`nearest`] itself and pass `None`, so both are built from the same objects.
-pub fn build_region(
-    device: &wgpu::Device,
-    meshes: Vec<WorldMesh>,
+/// Append one object's triangles to the buckets of `cell`, one bucket per texture.
+fn emit(
+    object: &WorldMesh,
+    cell: (i32, i32),
     packs: &[TrackPack<'_>],
     shared: Option<&super::SharedTextures>,
-    around: Vec3,
-    budget: Option<usize>,
-) -> CityVisuals {
-    let declared = meshes.len();
-    let mut objects = dedup(meshes);
-    let duplicates = declared - objects.len();
-
-    nearest(&mut objects, around, budget);
-
-    // (cell, texture) → vertices. `BTreeMap` rather than a hash map so a run over the same region
-    // twice produces the same meshes in the same order — a golden screenshot needs that.
-    let mut buckets: BTreeMap<BucketKey, Vec<Vertex>> = BTreeMap::new();
-    let mut unresolved_runs = 0usize;
-    let mut unresolved_keys: std::collections::BTreeSet<u32> = std::collections::BTreeSet::new();
-
-    for object in &objects {
-        if object.positions.is_empty() {
-            continue;
-        }
-        // The whole object lands in one cell, chosen by its centre. Splitting a solid across cells
-        // would cut road surfaces at cell edges for no visibility gained; a solid is already the
-        // granularity the game authored.
-        let centre = world_point(&object.header, object.header.bbox_min)
-            .midpoint(world_point(&object.header, object.header.bbox_max));
-        let cell = cell_of(centre);
-        let origin = cell_centre(cell);
-
+    unresolved_runs: &mut usize,
+    unresolved_keys: &mut std::collections::BTreeSet<u32>,
+    buckets: &mut BTreeMap<BucketKey, Vec<Vertex>>,
+) {
+    let origin = cell_centre(cell);
         // A run with no group table still draws — it is the whole index buffer with slot 0.
         let runs: Vec<(usize, usize, Option<AssetHash>)> = if object.groups.is_empty() {
             let key = object.texture_slots.first().copied();
@@ -132,7 +107,7 @@ pub fn build_region(
                 .map(|g| {
                     let tex = texture_for(g.hash, packs, shared);
                     if tex.is_none() {
-                        unresolved_runs += 1;
+                        *unresolved_runs += 1;
                         unresolved_keys.insert(g.hash.0);
                     }
                     (g.index_offset, g.index_count, tex)
@@ -183,6 +158,43 @@ pub fn build_region(
                 });
             }
         }
+}
+
+/// Build one region's meshes.
+///
+/// `budget` is applied here for callers that want only visuals; one that also builds colliders
+/// should call [`nearest`] itself and pass `None`, so both are built from the same objects.
+pub fn build_region(
+    device: &wgpu::Device,
+    meshes: Vec<WorldMesh>,
+    packs: &[TrackPack<'_>],
+    shared: Option<&super::SharedTextures>,
+    around: Vec3,
+    budget: Option<usize>,
+) -> CityVisuals {
+    let declared = meshes.len();
+    let mut objects = dedup(meshes);
+    let duplicates = declared - objects.len();
+
+    nearest(&mut objects, around, budget);
+
+    // (cell, texture) → vertices. `BTreeMap` rather than a hash map so a run over the same region
+    // twice produces the same meshes in the same order — a golden screenshot needs that.
+    let mut buckets: BTreeMap<BucketKey, Vec<Vertex>> = BTreeMap::new();
+    let mut unresolved_runs = 0usize;
+    let mut unresolved_keys: std::collections::BTreeSet<u32> = std::collections::BTreeSet::new();
+
+    for object in &objects {
+        if object.positions.is_empty() {
+            continue;
+        }
+        // The whole object lands in one cell, chosen by its centre. Splitting a solid across cells
+        // would cut road surfaces at cell edges for no visibility gained; a solid is already the
+        // granularity the game authored.
+        let centre = world_point(&object.header, object.header.bbox_min)
+            .midpoint(world_point(&object.header, object.header.bbox_max));
+        let cell = cell_of(centre);
+        emit(object, cell, packs, shared, &mut unresolved_runs, &mut unresolved_keys, &mut buckets);
     }
 
     let meshes = buckets
@@ -209,4 +221,65 @@ pub fn build_region(
         unresolved_runs,
         unresolved_keys: unresolved_keys.into_iter().map(AssetHash).collect(),
     }
+}
+
+/// How far each detail level of an instanced copy is drawn, in metres from the cell's centre to
+/// the camera: `_1A` close, `_1B` across the neighbouring cells, `_1Z` beyond. A cell is 256 m, so
+/// the camera's own cell is always within the first band.
+pub const LOD_BANDS: [f32; 3] = [200.0, 450.0, f32::MAX];
+
+/// One merged draw of instanced copies with its detail levels — spawn [`Self::levels`]' first
+/// mesh with a `LodGroup` of all of them.
+pub struct LodCityMesh {
+    /// The cell it belongs to.
+    pub cell: (i32, i32),
+    /// The texture every triangle in it uses.
+    pub texture: Option<AssetHash>,
+    /// Where to spawn it.
+    pub origin: Vec3,
+    /// `(mesh, max_distance)`, finest first; a level whose bucket is empty is absent, and the next
+    /// coarser one covers its band.
+    pub levels: Vec<(Mesh, f32)>,
+}
+
+/// Build instanced copies, each given with its detail levels finest first (`Bundles::scenery_lods`),
+/// into per-(cell, texture) meshes with one level per [`LOD_BANDS`] entry. A copy with fewer than
+/// three levels repeats its coarsest, so it is still drawn far away.
+pub fn build_lods(
+    device: &wgpu::Device,
+    copies: &[Vec<WorldMesh>],
+    packs: &[TrackPack<'_>],
+    shared: Option<&super::SharedTextures>,
+) -> Vec<LodCityMesh> {
+    let mut buckets: [BTreeMap<BucketKey, Vec<Vertex>>; 3] = Default::default();
+    let mut runs = 0usize;
+    let mut keys = std::collections::BTreeSet::new();
+    for levels in copies {
+        let Some(first) = levels.first() else { continue };
+        let centre = world_point(&first.header, first.header.bbox_min)
+            .midpoint(world_point(&first.header, first.header.bbox_max));
+        let cell = cell_of(centre);
+        for (band, bucket) in buckets.iter_mut().enumerate() {
+            let object = &levels[band.min(levels.len() - 1)];
+            if object.positions.is_empty() {
+                continue;
+            }
+            emit(object, cell, packs, shared, &mut runs, &mut keys, bucket);
+        }
+    }
+    let mut out: BTreeMap<BucketKey, Vec<(Mesh, f32)>> = BTreeMap::new();
+    for (band, bucket) in buckets.into_iter().enumerate() {
+        for ((cell, texture), verts) in bucket {
+            if verts.is_empty() {
+                continue;
+            }
+            let label = format!("scenery_{}_{}_{band}", cell.0, cell.1);
+            out.entry((cell, texture))
+                .or_default()
+                .push((Mesh::from_vertices(device, &verts, label), LOD_BANDS[band]));
+        }
+    }
+    out.into_iter()
+        .map(|((cell, texture), levels)| LodCityMesh { cell, texture, origin: cell_centre(cell), levels })
+        .collect()
 }

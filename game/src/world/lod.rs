@@ -1,5 +1,12 @@
 //! The city's own detail tiers: `_1A`, `_1B`, `_1Z`.
 //!
+//! > **2026-11-16: what these families were.** Every solid this module groups is an *instanced*
+//! > model (`gizmo_nfs::world::scenery`), standing by its own header at its authoring position;
+//! > the streaming sections place its real copies. With [`super::instance`] taking those solids
+//! > out (the default), the families below are empty on Bayview and the copies arrive through
+//! > `Bundles::scenery` instead. The analysis is kept because it is what `NFS_SCENERY=off` still
+//! > draws, and because "a grid of copies 651 m apart on one axis" was the clue.
+//!
 //! Every second world object carries a `_1<LETTER>` token in its name, and the letters are not a
 //! sequence — across the eight bundles they are **A (1,819), B (1,392), Z (1,203)** and then
 //! almost nothing (C 41, D 3, and four singletons). Three levels, not an alphabet, which is what

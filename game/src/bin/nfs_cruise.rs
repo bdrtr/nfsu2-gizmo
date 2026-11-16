@@ -216,6 +216,8 @@ struct RailRace {
     best_place: Option<usize>,
     /// When each entrant finished, in race seconds: the player first, then the rivals in field order.
     finished: Vec<Option<f32>>,
+    /// Whether the race has closed on the clock and that has been said ([`Race::GRACE`]).
+    closed: bool,
     /// The running order, leader first. Entrant 0 is the player.
     order: Vec<Standing>,
     /// `NFS_DEMO=1`: the player's own rail. The player's car is then placed like a rival's and the
@@ -285,7 +287,7 @@ impl RailRace {
             rig.place(world, pose, pose, FIXED_DT);
             rigs.push(rig);
         }
-        let race = Race::new(line.course(from), line.closed());
+        let race = Race::new(line.course(from), line.closed()).with_player(0);
         println!(
             "raylar: {} rakip · hat {:.0} m · {} · bitiş {} m · ideal tur {:.1} s",
             field.len(),
@@ -301,6 +303,7 @@ impl RailRace {
             player_v: 0.0,
             player_start: player.s(),
             finished: vec![None; field.len() + 1],
+            closed: false,
             line,
             limits,
             rigs,
@@ -330,13 +333,14 @@ impl RailRace {
             let p = r.pose(&self.line, rig.ride());
             rig.place(world, p, p, FIXED_DT);
         }
-        self.race = Race::new(self.line.course(self.from), self.line.closed());
+        self.race = Race::new(self.line.course(self.from), self.line.closed()).with_player(0);
         self.player_s = self.player_start;
         self.player_v = 0.0;
         self.clock = 0.0;
         self.nos_mark = None;
         self.best_place = None;
         self.finished = vec![None; self.field.len() + 1];
+        self.closed = false;
         self.order.clear();
         println!("yarış yeniden başlıyor");
     }
@@ -494,6 +498,18 @@ impl RailRace {
                 }
             }
         }
+        // Oyuncu kazandıysa 30 s sonra yarış kapanır; bitiremeyenler ilerlemelerine göre sıralanır.
+        if self.race.timed_out() && !self.closed {
+            self.closed = true;
+            let rest: Vec<String> = self
+                .order
+                .iter()
+                .enumerate()
+                .filter(|(_, s)| !s.done)
+                .map(|(p, s)| format!("{}. rakip {}", p + 1, s.car))
+                .collect();
+            println!("süre doldu · {}", rest.join(", "));
+        }
     }
 
     /// Move the rails' visible parts onto their bodies, wheels turning at the speed they go.
@@ -592,7 +608,7 @@ fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> CruiseState
         println!("region: {} — the bundle {what}", b.display());
     }
     let source = region.map_or_else(|| tracks.clone(), |b| b.display().to_string());
-    let city::Bundles { files, meshes, packs, shared } = city::load(&source);
+    let city::Bundles { files, meshes, scenery, scenery_lods, collision, packs, shared } = city::load(&source);
     println!(
         "{} bundle(s), {} objects, {} packs, {} shared textures",
         files.len(),
@@ -630,6 +646,11 @@ fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> CruiseState
         objects = city::lod::keep_finest(objects);
         println!("detail tiers: dropped {} coarser members, {} objects left", before - objects.len(), objects.len());
     }
+    // The streaming sections' instanced copies — barriers, rails, lamps, trees — after the tier
+    // pass, which must not see them (`world::load::Bundles::scenery`).
+    let mut scenery = scenery;
+    city::nearest(&mut scenery, at, budget);
+    println!("scenery: {} instanced copies, {} collision pieces", scenery.len(), collision.len());
 
     let mut phys = PhysicsWorld::new();
     phys.integrator.gravity = Vec3::new(0.0, -9.81, 0.0);
@@ -640,7 +661,11 @@ fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> CruiseState
     // with every dynamic body every step) and not one per solid (14,000 bodies). The cell is the
     // unit that is neither, and it is the same 256 m cell the visuals merge into, so the collider
     // under the car and the mesh in front of it come from the same objects.
-    let colliders = city::collision_cells(&objects);
+    // What is solid is not what is drawn: the game's own collision soup and the barriers this race
+    // raises, beside the baked city — not the trees and cat's-eyes (`world::load::Bundles::collision`).
+    let solid: Vec<_> = objects.iter().chain(&collision).cloned().collect();
+    let colliders = city::collision_cells(&solid);
+    drop(solid);
     let bounds = city::Bounds::of(&colliders);
 
     // Where the ground actually is, instead of where the spawn constant guesses it is. Every
@@ -852,7 +877,21 @@ fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> CruiseState
     // `None` for the budget: `nearest` has already run, and running it again on an already-trimmed
     // list would be a second sort for nothing.
     let visuals = city::build_region(&renderer.device, objects, &packs, Some(&shared), at, None);
-    stats.meshes = visuals.meshes.len();
+    // The instanced copies, merged per cell and texture at each of their detail levels and drawn
+    // through a `LodGroup`: `_1A` near, `_1B` across the next cells, `_1Z` beyond
+    // (`city::LOD_BANDS`). `NFS_LOD=off` draws every copy at full detail instead.
+    let lod_off = std::env::var("NFS_LOD").as_deref() == Ok("off");
+    let scenery_lods: Vec<Vec<_>> =
+        if lod_off { scenery_lods.into_iter().map(|mut l| { l.truncate(1); l }).collect() } else { scenery_lods };
+    let scenery_meshes = city::build_lods(&renderer.device, &scenery_lods, &packs, Some(&shared));
+    drop(scenery_lods);
+    drop(scenery);
+    println!(
+        "scenery: {} merged meshes, {} of them with more than one detail level",
+        scenery_meshes.len(),
+        scenery_meshes.iter().filter(|m| m.levels.len() > 1).count()
+    );
+    stats.meshes = visuals.meshes.len() + scenery_meshes.len();
 
     // The sky and the painted panorama, through the same builder — they are ordinary geometry, and
     // only their *material* is unusual. `at` for the budget centre is irrelevant here: `None` keeps
@@ -884,7 +923,8 @@ fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> CruiseState
         };
         let mut bound: HashMap<AssetHash, _> = HashMap::new();
         let mut cut: std::collections::HashSet<_> = std::collections::HashSet::new();
-        for key in visuals.meshes.iter().chain(&sky.meshes).filter_map(|m| m.texture) {
+        let scenery_keys = scenery_meshes.iter().filter_map(|m| m.texture);
+        for key in visuals.meshes.iter().chain(&sky.meshes).filter_map(|m| m.texture).chain(scenery_keys) {
             if bound.contains_key(&key) {
                 continue;
             }
@@ -944,6 +984,19 @@ fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> CruiseState
                 material
             };
             scene::spawn_mesh(world, m.mesh.clone(), material, Transform::new(m.origin));
+        }
+        for m in &scenery_meshes {
+            let material = match m.texture.and_then(|k| bound.get(&k)) {
+                Some(bg) => Material::new(bg.clone()).with_baked_lit(Vec4::new(1.0, 1.0, 1.0, 1.0)),
+                None => Material::new(white.clone()).with_baked_lit(Vec4::new(0.35, 0.35, 0.38, 1.0)),
+            };
+            let material = material.with_ambient(lift.0).with_emissive(lift.1);
+            let material = if m.texture.is_some_and(|k| cut.contains(&k)) {
+                material.with_alpha_cutoff(CUT_ALPHA)
+            } else {
+                material
+            };
+            scene::spawn_lod(world, &m.levels, material, Transform::new(m.origin));
         }
 
         // `MaterialType::Backdrop`: drawn first, camera-locked, depth writes off — the three

@@ -361,7 +361,7 @@ async fn run() {
         (_, Some(b)) if !whole => b.display().to_string(),
         _ => tracks.clone(),
     };
-    let city::Bundles { meshes, .. } = city::load(&source);
+    let city::Bundles { meshes, collision, .. } = city::load(&source);
 
     // The same preparation the game does, and in the same order: the drivers must be given the
     // world the player would have been given, or the answer is about a different city.
@@ -419,7 +419,10 @@ async fn run() {
         })
         .collect();
     let before = objects.len();
-    let objects = if collide_all { objects } else { city::lod::keep_finest(objects) };
+    let mut objects = if collide_all { objects } else { city::lod::keep_finest(objects) };
+    let solid = collision.len();
+    objects.extend(collision);
+    println!("collision: {solid} extra pieces — the game's soup and this race's barriers (NFS_GAME_COLLISION=off: every drawn copy instead)");
     println!(
         "objects: {before} kept of {} · {backdrop} backdrop, {distant} distant-LOD proxies · \
          {} coarse tiers dropped{}",

@@ -101,10 +101,11 @@ async fn run() {
     let mut outcomes: Vec<Outcome> = Vec::new();
     for (bundle, routes) in &by_region {
         let source = bundle.display().to_string();
-        let city::Bundles { meshes, .. } = city::load(&source);
+        let city::Bundles { meshes, collision, .. } = city::load(&source);
         let meshes = city::dedup(meshes);
         let objects: Vec<_> = meshes.into_iter().filter(|m| city::is_drawn(&m.header.name)).collect();
-        let objects = city::lod::keep_finest(objects);
+        let mut objects = city::lod::keep_finest(objects);
+        objects.extend(collision);
         let colliders = city::collision_cells(&objects);
         let ground = city::Ground::of(&colliders);
         let walls = city::Walls::of(&colliders);

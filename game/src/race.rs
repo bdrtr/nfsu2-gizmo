@@ -12,8 +12,8 @@
 //! - a **circuit** is laps of a closed course, and finishing means completing them;
 //! - a **sprint** is one pass along an open one, and finishing means reaching the end.
 //!
-//! How many laps a circuit runs is *not* in anything decoded, so it is a caller's choice and
-//! [`Race::LAPS`] is a default rather than a fact.
+//! How many laps a circuit runs is in the game's event records but not in anything decoded here,
+//! so it is a caller's choice and [`Race::LAPS`] is a default rather than a fact.
 //!
 //! ## Units
 //!
@@ -77,18 +77,35 @@ pub struct Race {
     countdown: f32,
     /// The order cars crossed the line in, first finisher first.
     finished: Vec<usize>,
+    /// The human's car, if the race has one: whose win starts the [`Race::GRACE`] clock.
+    player: Option<usize>,
+    /// Seconds left before the race closes on whoever has not finished, once the clock is running.
+    closing: Option<f32>,
 }
 
 impl Race {
     /// Laps a circuit runs when nothing says otherwise.
     ///
-    /// Three, because that is what NFSU2's circuits mostly are — and it is a choice, not a reading:
-    /// nothing decoded carries a lap count. Kept as a constant so the next person meets the
-    /// assumption instead of inheriting it.
+    /// Three, because that is what NFSU2's circuits mostly are — and it is a choice, not a reading.
+    /// The game does have the number: `SPEED2.EXE` takes it from the career event's record
+    /// (`0x5322E0`, `DAT_0085EF48[2]`) or the quick-race mode's (`0x83AACC + mode·0x14`, second
+    /// `u16`) into `DAT_0089E7BC`. Where the career record comes from on disc is not found, so
+    /// nothing this crate decodes carries it yet (`SPEED2-ATLAS.md` §9).
     pub const LAPS: u32 = 3;
 
     /// How long the field is held on the line.
     pub const COUNTDOWN: f32 = 3.0;
+
+    /// Seconds the rest of the field gets once the human has **won**; then the race closes and the
+    /// unfinished keep the places their progress gives them.
+    ///
+    /// `SPEED2.EXE`'s finish routine `0x606CB0` starts this clock — once, `0x401820` guards it —
+    /// when a car finishes a normal race (`reason == 1`, race kind 1) **in first place**
+    /// (`+0xC`, the place it has just been given) **and** is human (`0x5EFA00`); the limit is
+    /// `0x7A5690` = 30 s. The per-frame update `0x6076D0` then finishes everyone left with reason
+    /// `0xB`, "time ran out". A human who does not win starts nothing: the race runs until the
+    /// field is home. Drift races use a different limit and are not modelled here.
+    pub const GRACE: f32 = 30.0;
 
     /// Set up a race over a course of `course` waypoints.
     ///
@@ -101,7 +118,22 @@ impl Race {
             laps: circuit.then_some(Self::LAPS),
             countdown: Self::COUNTDOWN,
             finished: Vec::new(),
+            player: None,
+            closing: None,
         }
+    }
+
+    /// Name the human's car, so that their win can start the [`Race::GRACE`] clock.
+    #[must_use]
+    pub fn with_player(mut self, car: usize) -> Self {
+        self.player = Some(car);
+        self
+    }
+
+    /// Seconds left before the race closes on the unfinished, once a human win has started it.
+    #[must_use]
+    pub fn closing(&self) -> Option<f32> {
+        self.closing
     }
 
     /// Seconds left before the field is released, or zero once it is running.
@@ -119,6 +151,9 @@ impl Race {
     /// Advance the clock.
     pub fn tick(&mut self, dt: f32) {
         self.countdown = (self.countdown - dt).max(0.0);
+        if let Some(left) = self.closing.as_mut() {
+            *left = (*left - dt).max(0.0);
+        }
     }
 
     /// How far a car has to get to finish, in waypoints driven.
@@ -148,9 +183,16 @@ impl Race {
             })
             .collect();
         for s in &out {
-            if s.done && !self.finished.contains(&s.car) {
+            if s.done && !self.finished.contains(&s.car) && !self.timed_out() {
                 self.finished.push(s.car);
+                if self.finished.len() == 1 && self.player == Some(s.car) {
+                    self.closing.get_or_insert(Self::GRACE);
+                }
             }
+        }
+        // After the clock, crossing the line no longer counts as finishing.
+        for s in &mut out {
+            s.done = self.finished.contains(&s.car);
         }
         // Finishers first, in the order they finished; everyone else by how far they have got.
         let place = |c: usize| self.finished.iter().position(|f| *f == c);
@@ -163,10 +205,17 @@ impl Race {
         out
     }
 
-    /// Whether every car has finished.
+    /// Whether the race is over: every car has finished, or the clock a human win started has
+    /// run out.
     #[must_use]
     pub fn over(&self, field: usize) -> bool {
-        self.finished.len() >= field && field > 0
+        (self.finished.len() >= field && field > 0) || self.timed_out()
+    }
+
+    /// Whether the race closed on the clock rather than on the last finisher.
+    #[must_use]
+    pub fn timed_out(&self) -> bool {
+        self.closing == Some(0.0)
     }
 
     /// The finishing order so far.
@@ -189,6 +238,45 @@ mod tests {
         assert_eq!(Race::new(100, true).distance(), 100 * Race::LAPS as usize);
         // A course with no waypoints must not wrap into a very long race.
         assert_eq!(Race::new(0, false).distance(), 0);
+    }
+
+    struct At(usize);
+    impl Runner for At {
+        fn laps(&self) -> u32 {
+            0
+        }
+        fn along(&self, _course: usize) -> usize {
+            self.0
+        }
+    }
+
+    /// A human win gives the rest thirty seconds, and then the race is over with them unfinished,
+    /// in the order their progress puts them.
+    #[test]
+    fn a_human_win_closes_the_race_thirty_seconds_later() {
+        let mut r = Race::new(10, false).with_player(0);
+        r.tick(Race::COUNTDOWN);
+        r.standings(&[At(9), At(4), At(6)]);
+        assert_eq!(r.closing(), Some(Race::GRACE));
+        r.tick(Race::GRACE - 1.0);
+        assert!(!r.over(3));
+        r.tick(1.0);
+        assert!(r.over(3) && r.timed_out());
+        let order: Vec<usize> = r.standings(&[At(9), At(9), At(6)]).iter().map(|s| s.car).collect();
+        assert_eq!(order, [0, 1, 2], "the unfinished by progress, the winner first");
+        assert_eq!(r.finishers(), [0], "nobody finishes after the clock");
+        assert!(!r.standings(&[At(9), At(9), At(6)])[1].done);
+    }
+
+    /// The clock is for a win only: a human who comes in second starts nothing.
+    #[test]
+    fn a_human_who_does_not_win_starts_no_clock() {
+        let mut r = Race::new(10, false).with_player(0);
+        r.standings(&[At(4), At(9)]);
+        r.standings(&[At(9), At(9)]);
+        assert_eq!(r.closing(), None);
+        r.tick(Race::GRACE * 2.0);
+        assert!(r.over(2) && !r.timed_out());
     }
 
     /// The countdown runs down and stops, rather than going negative and reading as "released a

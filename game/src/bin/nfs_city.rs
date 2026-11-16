@@ -95,12 +95,30 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
         .collect();
 
     let mut meshes = Vec::new();
+    let mut scenery = Vec::new();
     let mut packs = Vec::new();
-    for bytes in &loaded {
-        meshes.extend(gizmo_nfs::world::meshes(bytes).expect("read a region's meshes"));
+    for (bytes, file) in loaded.iter().zip(&files) {
+        let mut own = gizmo_nfs::world::meshes(bytes).expect("read a region's meshes");
+        if std::env::var("NFS_SCENERY").as_deref() != Ok("off") {
+            let event = std::env::var("NFS_ROUTE")
+                .ok()
+                .and_then(|r| nfsu2::world::event_of(std::path::Path::new(&r)));
+            let region = nfsu2::world::region_beside(file).unwrap_or_default();
+            let groups = nfsu2::world::shown_groups(&region, event);
+            scenery.extend(nfsu2::world::instance(bytes, &mut own, &groups));
+        }
+        meshes.extend(own);
         packs.extend(gizmo_nfs::world::packs(bytes).expect("read a region's texture packs"));
     }
-    println!("{} bundle(s), {} objects, {} packs", loaded.len(), meshes.len(), packs.len());
+    scenery.retain(|m| nfsu2::world::is_drawn(&m.header.name));
+    let scenery = nfsu2::world::dedup(scenery);
+    println!(
+        "{} bundle(s), {} objects, {} instanced copies, {} packs",
+        loaded.len(),
+        meshes.len(),
+        scenery.len(),
+        packs.len()
+    );
 
     // NFS_BUNDLES=1: what each of the eight regions is. They are not eight versions of one city
     // and not eight tiles of it either — one is Bayview, one is Bayview again, four are standalone
@@ -474,11 +492,13 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
     // Only the richest member of each detail family, by default — see [`nfsu2::world::lod`] for
     // what the coarse ones turned out to be up close. `NFS_TIERS=all` puts them back and
     // `NFS_TIERS=coarse` draws *only* them, which is the frame that shows what is being left out.
-    let meshes = match std::env::var("NFS_TIERS").ok().as_deref() {
+    let mut meshes = match std::env::var("NFS_TIERS").ok().as_deref() {
         Some("all") => meshes,
         Some("coarse") => nfsu2::world::lod::keep_coarser(meshes),
         _ => nfsu2::world::lod::keep_finest(meshes),
     };
+    // The streaming sections' instanced copies, after the tier pass (see `world::load::Bundles`).
+    meshes.extend(scenery);
 
     // NFS_VCOL=1: the distribution of the city's baked vertex colour.
     //

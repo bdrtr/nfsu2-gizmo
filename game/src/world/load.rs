@@ -15,7 +15,27 @@ pub struct Bundles {
     pub files: Vec<PathBuf>,
     /// Every region's objects, concatenated. Not filtered — [`super::is_drawn`] is the caller's
     /// call, because `nfs_city` counts what it is about to drop and the others do not.
+    ///
+    /// **The instanced models' own solids are not in here** — see [`instance`]. They stand at their
+    /// authoring positions, and [`Self::scenery`] is where they really go.
     pub meshes: Vec<WorldMesh>,
+    /// The copies the streaming sections place ([`instance`]): barriers, guard rails, lamps,
+    /// trees. Already deduplicated and filtered with [`super::is_drawn`]. Kept apart from
+    /// [`Self::meshes`] so that [`super::lod::keep_finest`] never sees them: one design is
+    /// sometimes instanced through a `_1A` model and a `_1B` one, and the tier pass would delete
+    /// every copy of the second.
+    pub scenery: Vec<WorldMesh>,
+    /// The same copies with all their detail levels, finest first — for a caller that draws them
+    /// through a distance-chosen `LodGroup` (`world::build_lods`) rather than at full detail.
+    /// Same order and filtering as [`Self::scenery`].
+    pub scenery_lods: Vec<Vec<WorldMesh>>,
+    /// What the game collides with, beyond [`Self::meshes`]: its own polygon soup
+    /// (`gizmo_nfs::world::collision`, the fixed polygons only) cut into [`game_collision`]'s
+    /// cells, plus the race barriers this event raises. **The rest of [`Self::scenery`] is drawn
+    /// and not collided with** — trees, cat's-eyes, ground spotlights have no polygon in the game's
+    /// soup, while its walls stand along every guard rail, fence and lamp post.
+    /// `NFS_GAME_COLLISION=off` puts the old rule back: everything drawn is solid.
+    pub collision: Vec<WorldMesh>,
     /// Every region's texture packs.
     pub packs: Vec<TrackPack<'static>>,
     /// `TRACKS/LOC4DYNTEX.BIN` and `GLOBAL/` — the keys no region carries itself. Empty rather than
@@ -58,6 +78,21 @@ pub fn bundles(path: &Path) -> Vec<PathBuf> {
 /// threading a lifetime through every caller to save memory at exit.
 #[must_use]
 pub fn load(path: &str) -> Bundles {
+    let event = std::env::var("NFS_ROUTE").ok().and_then(|r| event_of(Path::new(&r)));
+    load_event(path, event)
+}
+
+/// The race a route file belongs to: `Paths4102.bin` → `4102`. The number is what the game builds
+/// its barrier-group names from (`BARRIERS_%d`).
+#[must_use]
+pub fn event_of(route: &Path) -> Option<u32> {
+    let stem = route.file_stem()?.to_str()?;
+    stem.strip_prefix("Paths")?.parse().ok()
+}
+
+/// [`load`] for a given race (`None`: free roam), rather than the one `NFS_ROUTE` names.
+#[must_use]
+pub fn load_event(path: &str, event: Option<u32>) -> Bundles {
     let files = bundles(Path::new(path));
     assert!(!files.is_empty(), "{path}: no STREAM*.BUN here");
     let loaded: &'static [Vec<u8>] = Box::leak(
@@ -69,10 +104,37 @@ pub fn load(path: &str) -> Bundles {
     );
 
     let mut meshes = Vec::new();
+    let mut scenery: Vec<Vec<WorldMesh>> = Vec::new();
+    let mut collision = Vec::new();
     let mut packs = Vec::new();
-    for bytes in loaded {
-        meshes.extend(gizmo_nfs::world::meshes(bytes).expect("read a region's meshes"));
+    let game_collision_on = std::env::var("NFS_GAME_COLLISION").as_deref() != Ok("off");
+    for (bytes, file) in loaded.iter().zip(&files) {
+        if game_collision_on {
+            collision.extend(game_collision(bytes));
+        }
+        let mut own = gizmo_nfs::world::meshes(bytes).expect("read a region's meshes");
+        // NFS_SCENERY=off: the city as it was read before the instances were — every solid at its
+        // own header, nothing copied. For A/B runs (the sweep), not for playing.
+        if std::env::var("NFS_SCENERY").as_deref() != Ok("off") {
+            let groups = region_beside(file).map(|r| shown_groups(&r, event)).unwrap_or_default();
+            scenery.extend(instance_lods(bytes, &mut own, &groups).into_iter().filter(|l| !l.is_empty()));
+        }
+        meshes.extend(own);
         packs.extend(gizmo_nfs::world::packs(bytes).expect("read a region's texture packs"));
+    }
+    scenery.retain(|l| super::is_drawn(&l[0].header.name));
+    // The same duplicate rule as `dedup`, decided on each copy's finest level.
+    let mut seen = std::collections::HashSet::new();
+    scenery.retain(|l| {
+        let m = &l[0];
+        seen.insert((m.header.hash.0, m.header.matrix.map(|row| row.map(f32::to_bits))))
+    });
+    let scenery_lods = scenery;
+    let scenery: Vec<WorldMesh> = scenery_lods.iter().map(|l| l[0].clone()).collect();
+    if game_collision_on {
+        collision.extend(scenery.iter().filter(|m| is_race_barrier(&m.header.name)).cloned());
+    } else {
+        collision.extend(scenery.iter().cloned());
     }
 
     // The shared tiers live beside the install's `GLOBAL/`, which is above `TRACKS`. Walking up
@@ -80,7 +142,7 @@ pub fn load(path: &str) -> Bundles {
     let root = Path::new(path).ancestors().find(|a| a.join("GLOBAL").is_dir());
     let shared = root.map(SharedTextures::load).unwrap_or_default();
 
-    Bundles { files, meshes, packs, shared }
+    Bundles { files, meshes, scenery, scenery_lods, collision, packs, shared }
 }
 
 /// Where in the city to start, from `NFS_AT="x,y,z"`, else `default`.
@@ -218,3 +280,201 @@ pub fn free_roam_bundle(tracks: &std::path::Path) -> Option<std::path::PathBuf> 
     let bundle = tracks.join("STREAML4RA.BUN");
     bundle.is_file().then_some(bundle)
 }
+
+/// Place a region's instanced scenery, and take the models it instances out of `meshes`.
+///
+/// Each streaming section lists the models it uses and the copies it places
+/// (`gizmo_nfs::world::scenery`). A copy here is the model's richest solid with its header matrix
+/// replaced by the instance's, so everything downstream — [`super::place`], cells, collision —
+/// treats it as one more placed object. Two cases are left alone:
+///
+/// - an instance whose model is a **baked** solid (identity matrix, vertices already in world
+///   space) is that solid where it already is — 4,393 of `STREAML4RA`'s 48,270;
+/// - a **mirrored** instance (negative determinant) gets its triangles' winding reversed, or the
+///   backface cull would show it inside out.
+///
+/// The instanced models themselves (every non-baked solid an instance names) are removed from
+/// `meshes`: by their own headers they stand at authoring positions — `(-8093, -527, -978)` is a
+/// kilometre under the city — and that grid of stray copies is what `lod.rs` once measured as coarse
+/// tiers "standing apart by up to 651 m on a line parallel to one world axis".
+pub fn instance(bytes: &[u8], meshes: &mut Vec<WorldMesh>, groups: &Visibility) -> Vec<WorldMesh> {
+    instance_lods(bytes, meshes, groups).into_iter().filter_map(|mut l| (!l.is_empty()).then(|| l.swap_remove(0))).collect()
+}
+
+/// [`instance`], with every detail level of each copy: finest first, as many as the model has
+/// solids for (`_1A`, `_1B`, `_1Z`). Level 0 is what [`instance`] returns.
+pub fn instance_lods(bytes: &[u8], meshes: &mut Vec<WorldMesh>, groups: &Visibility) -> Vec<Vec<WorldMesh>> {
+    let Ok(sections) = gizmo_nfs::world::scenery::sections(bytes) else { return Vec::new() };
+    let index: std::collections::HashMap<u32, usize> =
+        meshes.iter().enumerate().map(|(i, m)| (m.header.hash.0, i)).rev().collect();
+    let mut models = std::collections::HashSet::new();
+    let mut out = Vec::new();
+    for section in &sections {
+        for (k, inst) in section.instances.iter().enumerate() {
+            let Some(model) = section.models.get(inst.model) else { continue };
+            let Some(&i) = model.lods.iter().flatten().find_map(|h| index.get(&h.0)) else { continue };
+            let key = (section.number as u16, k as u16);
+            let hidden = if groups.known {
+                groups.hidden.contains(&key)
+            } else {
+                is_race_barrier(&meshes[i].header.name)
+            };
+            if hidden {
+                // Still taken out of `meshes` below (it is an instanced model), just not placed.
+                for h in model.lods.iter().flatten() {
+                    models.insert(h.0);
+                }
+                continue;
+            }
+            for h in model.lods.iter().flatten() {
+                if index.get(&h.0).is_some_and(|&j| meshes[j].header.is_placed()) {
+                    models.insert(h.0);
+                }
+            }
+            if !meshes[i].header.is_placed() {
+                continue;
+            }
+            let mut levels = Vec::new();
+            let mut seen = std::collections::HashSet::new();
+            for h in model.lods.iter().flatten() {
+                let Some(&j) = index.get(&h.0) else { continue };
+                if !meshes[j].header.is_placed() || !seen.insert(j) {
+                    continue;
+                }
+                let mut copy = meshes[j].clone();
+                copy.header.matrix = inst.matrix;
+                if copy.header.basis_determinant() < 0.0 {
+                    for tri in copy.indices.as_chunks_mut::<3>().0 {
+                        tri.swap(1, 2);
+                    }
+                }
+                levels.push(copy);
+            }
+            out.push(levels);
+        }
+    }
+    meshes.retain(|m| !models.contains(&m.header.hash.0));
+    out
+}
+
+/// Whether a model is one of the race barriers, `XO_TRACKBARRIER*` — 5,622 copies in `STREAML4RA`.
+///
+/// Only the fallback for a bundle whose region file is missing: [`shown_groups`] is the real rule.
+/// Placing every event's barriers at once walls the courses off — the eight-route sweep fell from
+/// 1,498 waypoints driven past to 449 with all of them in.
+#[must_use]
+pub fn is_race_barrier(name: &str) -> bool {
+    name.to_ascii_uppercase().contains("TRACKBARRIER")
+}
+
+/// Which grouped instances to leave out, as `(section number, instance index)`.
+#[derive(Debug, Default)]
+pub struct Visibility {
+    /// Whether the region's groups were read. Without them [`is_race_barrier`] stands in.
+    pub known: bool,
+    /// Members of a group this race (or free roam) does not show.
+    pub hidden: std::collections::HashSet<(u16, u16)>,
+}
+
+/// The region file beside a stream bundle: `STREAML4RA.BUN` → `L4RA.BUN`.
+#[must_use]
+pub fn region_beside(bundle: &Path) -> Option<Vec<u8>> {
+    let name = bundle.file_name()?.to_str()?;
+    let region = name.strip_prefix("STREAM")?;
+    std::fs::read(bundle.with_file_name(region)).ok()
+}
+
+/// The game's scenery groups for one race, from a region file (`L4R?.BUN`, chunk `0x34108`).
+///
+/// `SPEED2.EXE` raises `BARRIERS_<race>` and `PLAYER_BARRIERS_<race>` (names built at `0x578060`
+/// and `0x5F54A0`) — the barriers that close that race's side streets and its own start and finish
+/// props. Every other race's are down, and so are the `FREE_ROAM*` groups during a race. In free
+/// roam (`event` = `None`) it is the reverse for `FREE_ROAM`, and every race's barriers are down.
+/// Groups this does not name (`SMOKEABLE`, the breakables) are always shown.
+#[must_use]
+pub fn shown_groups(region: &[u8], event: Option<u32>) -> Visibility {
+    let Ok(groups) = gizmo_nfs::world::scenery::groups(region) else { return Visibility::default() };
+    let wanted = |name: &str| match event {
+        Some(n) => name == format!("BARRIERS_{n}") || name == format!("PLAYER_BARRIERS_{n}"),
+        None => name == "FREE_ROAM",
+    };
+    let switchable = |name: &str| {
+        name.starts_with("BARRIERS") || name.starts_with("PLAYER_BARRIERS") || name.starts_with("FREE_ROAM")
+    };
+    let mut shown = std::collections::HashSet::new();
+    let mut hidden = std::collections::HashSet::new();
+    for (g, members) in &groups {
+        if !switchable(&g.name) {
+            continue;
+        }
+        if wanted(&g.name) {
+            shown.extend(members.iter().copied());
+        } else {
+            hidden.extend(members.iter().copied());
+        }
+    }
+    // An instance in a shown group and a hidden one (a barrier two races share) is shown.
+    hidden.retain(|k| !shown.contains(k));
+    Visibility { known: true, hidden }
+}
+
+/// Side of the square cells [`game_collision`] cuts the polygon soup into, in metres. Smaller than
+/// the 256 m collision cell so that no piece straddles more than its neighbours.
+const SOUP_CELL: f32 = 128.0;
+
+/// The game's own fixed collision polygons in a stream bundle, as meshes `collision_cells` can
+/// take: one per [`SOUP_CELL`] square, vertices already in world space (identity matrix).
+///
+/// Switchable polygons (`switch != 0`) are left out — 70 % of them stand in race barriers, which
+/// come in as the barrier instances this event raises instead.
+#[must_use]
+pub fn game_collision(bundle: &[u8]) -> Vec<WorldMesh> {
+    use gizmo_nfs::types::{AssetHash, IDENTITY};
+    let Ok(polys) = gizmo_nfs::world::collision::polygons(bundle) else { return Vec::new() };
+    type Piece = (Vec<[f32; 3]>, Vec<u32>);
+    let mut cells: std::collections::BTreeMap<(i32, i32), Piece> = std::collections::BTreeMap::new();
+    for p in polys.iter().filter(|p| p.switch == 0) {
+        let n = p.corners.len() as f32;
+        let cx = p.corners.iter().map(|c| c[0]).sum::<f32>() / n;
+        let cy = p.corners.iter().map(|c| c[1]).sum::<f32>() / n;
+        let key = ((cx / SOUP_CELL).floor() as i32, (cy / SOUP_CELL).floor() as i32);
+        let (pos, idx) = cells.entry(key).or_default();
+        let base = pos.len() as u32;
+        pos.extend(p.corners.iter().copied());
+        // Both windings: the soup's facing is not known, and a one-sided wall lets a car through
+        // from behind.
+        for t in 1..p.corners.len() as u32 - 1 {
+            idx.extend([base, base + t, base + t + 1, base, base + t + 1, base + t]);
+        }
+    }
+    cells
+        .into_iter()
+        .map(|((cx, cy), (positions, indices))| {
+            let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
+            for q in &positions {
+                for k in 0..3 {
+                    lo[k] = lo[k].min(q[k].clamp(-1000.0, 1000.0));
+                    hi[k] = hi[k].max(q[k].clamp(-1000.0, 1000.0));
+                }
+            }
+            let name = format!("GAME_COLLISION_{cx}_{cy}");
+            WorldMesh {
+                header: gizmo_nfs::world::WorldSolidHeader {
+                    hash: AssetHash(gizmo_nfs::hash::string_hash(&name)),
+                    name,
+                    bbox_min: lo,
+                    bbox_max: hi,
+                    matrix: IDENTITY,
+                },
+                normals: Vec::new(),
+                colours: Vec::new(),
+                uvs: Vec::new(),
+                groups: Vec::new(),
+                texture_slots: Vec::new(),
+                indices,
+                positions,
+            }
+        })
+        .collect()
+}
+

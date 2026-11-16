@@ -33,7 +33,7 @@ pub mod lod;
 pub mod route;
 mod tiers;
 
-pub use build::{build_region, nearest, CityMesh, CityVisuals};
+pub use build::{build_lods, build_region, nearest, CityMesh, CityVisuals, LodCityMesh, LOD_BANDS};
 pub use cell::{cell_centre, cell_of, CELL_SIZE};
 pub use collide::{
     collision_cells, surface_of, surfaces_by_object, Bounds, CityCollider, Ground, Surface, Walls,
@@ -41,7 +41,8 @@ pub use collide::{
 };
 pub use network::{Junction, Network};
 pub use load::{
-    bundle_for_route, bundles, free_roam_bundle, load, place_of, start_at, tracks_path, Bundles,
+    bundle_for_route, bundles, event_of, free_roam_bundle, instance, load, instance_lods, load_event, place_of,
+    region_beside, shown_groups, Visibility, start_at, tracks_path, Bundles,
     Place, REGIONS,
 };
 pub use route::{
