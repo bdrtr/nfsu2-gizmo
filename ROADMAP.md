@@ -8824,3 +8824,13 @@ yeni halka parkura daha yakın görünüyor, ama dış hattın konumu (904,−44
 hüküm kesin değil. Temaslar t = 0'da ızgarada: kısa, kıvrık bir parçada slotlar çizgiye aynı `s`'de, aynı
 şeritte izdüşüyor (ızgara açısı 0,90). Izgaranın 30 m çevresini duvar onarımından muaf tutmak denendi,
 düzeltmedi (temas 350), geri alındı. Açık: dar parkurda ızgara yerleştirmesi (`Rail::grid`).
+
+**Kırılabilir eşyalar cisim oldu** (2026-11-17, ekranda görülmedi). PryHUB `world::smokeable`: `L4R?.BUN`
+`0x34026` 79 tür (ad, `+0x20` kütle **ton**, `+0x80` ad hash'i, `+0xB0` ofset, `+0xDC` sınıf hash'i — 19 adlık
+tablo `0x7FC808`), bölümlerdeki `0x34027` yerleşimler (tür hash'i, model hash'i, kutu, matris; RA'da 514'ün
+hepsi bir türe ve pakette bir modele bağlanıyor). Oyunda `world::props`: kütlesi sıfırdan büyük, aynalı ya da
+ölçekli olmayan her yerleşim bir dinamik cisim (kutu = modelin kutusu, kütle ton×1000), aynı yerdeki statik
+kopya sahneden düşülüyor (RA'da 513 cisim, 515 kopya). `nfs_cruise` her eşyanın doku parçalarını ayrı
+varlık olarak çiziyor ve her fizik adımından sonra cisme eşitliyor (`sync_props`). `nfs_sim`/`nfs_rail` eşya
+koymuyor (ölçüler değişmedi). `NFS_PROPS=off` eski hâl. Görülmesi gerekenler: eşyalar yerinde mi, çarpınca
+devriliyor mu, cisimler uyurken titreşiyor mu, kare süresine etkisi.

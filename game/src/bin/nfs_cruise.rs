@@ -102,6 +102,9 @@ const OUT_OF_BOUNDS_GRACE: f32 = 5.0;
 const OUT_OF_BOUNDS_LOOKAHEAD: f32 = 2.0;
 
 struct CruiseState {
+    /// The breakable props: each body's entity and the entities that draw it, moved onto the body
+    /// after every physics step ([`sync_props`]).
+    props: Vec<(u32, Vec<u32>)>,
     /// The engine's voice; `None` with no audio device or under `NFS_MUTE=1`.
     engine: Option<nfsu2::sound::EngineSound>,
     rig: CarRig,
@@ -608,7 +611,7 @@ fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> CruiseState
         println!("region: {} — the bundle {what}", b.display());
     }
     let source = region.map_or_else(|| tracks.clone(), |b| b.display().to_string());
-    let city::Bundles { files, meshes, scenery, scenery_lods, collision, packs, shared } = city::load(&source);
+    let city::Bundles { files, meshes, scenery, scenery_lods, collision, props, packs, shared } = city::load(&source);
     println!(
         "{} bundle(s), {} objects, {} packs, {} shared textures",
         files.len(),
@@ -914,6 +917,7 @@ fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> CruiseState
         &renderer.scene.texture_bind_group_layout,
     );
     let mut race_line = None;
+    let mut prop_bodies: Vec<(u32, Vec<u32>)> = Vec::new();
     {
         let mut tex = Textures {
             assets: &mut assets,
@@ -923,7 +927,11 @@ fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> CruiseState
         };
         let mut bound: HashMap<AssetHash, _> = HashMap::new();
         let mut cut: std::collections::HashSet<_> = std::collections::HashSet::new();
-        let scenery_keys = scenery_meshes.iter().filter_map(|m| m.texture);
+        let prop_keys: Vec<AssetHash> = props
+            .iter()
+            .flat_map(|p| p.mesh.groups.iter().map(|g| g.hash).chain(p.mesh.texture_slots.iter().copied()))
+            .collect();
+        let scenery_keys = scenery_meshes.iter().filter_map(|m| m.texture).chain(prop_keys);
         for key in visuals.meshes.iter().chain(&sky.meshes).filter_map(|m| m.texture).chain(scenery_keys) {
             if bound.contains_key(&key) {
                 continue;
@@ -998,6 +1006,36 @@ fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> CruiseState
             };
             scene::spawn_lod(world, &m.levels, material, Transform::new(m.origin));
         }
+        // The breakable props: a body each, with the box and the mass the game gives the kind, drawn
+        // by its own meshes in its own frame and moved onto the body after every step.
+        for p in &props {
+            let t = Transform::new(p.position).with_rotation(p.rotation);
+            let body = world.spawn();
+            add_transform(world, body, t);
+            let mut rb = RigidBody::new(p.mass, true);
+            rb.calculate_box_inertia(p.half.x * 2.0, p.half.y * 2.0, p.half.z * 2.0);
+            let collider = Collider::offset_box(p.centre, p.half);
+            world.add_component(body, rb);
+            world.add_component(body, Velocity::default());
+            world.add_component(body, collider.clone());
+            phys.add_body(gizmo::physics::BodyHandle::from_id(body.id()), rb, t, Velocity::default(), collider);
+            let mut drawn = Vec::new();
+            for (mesh, texture) in city::build_local(&renderer.device, &p.mesh, &packs, Some(&shared), &p.name) {
+                let material = match texture.and_then(|k| bound.get(&k)) {
+                    Some(bg) => Material::new(bg.clone()).with_baked_lit(Vec4::new(1.0, 1.0, 1.0, 1.0)),
+                    None => Material::new(white.clone()).with_baked_lit(Vec4::new(0.35, 0.35, 0.38, 1.0)),
+                };
+                let material = material.with_ambient(lift.0).with_emissive(lift.1);
+                let material = if texture.is_some_and(|k| cut.contains(&k)) {
+                    material.with_alpha_cutoff(CUT_ALPHA)
+                } else {
+                    material
+                };
+                drawn.push(scene::spawn_mesh(world, mesh, material, t));
+            }
+            prop_bodies.push((body.id(), drawn));
+        }
+        println!("props: {} bodies", prop_bodies.len());
 
         // `MaterialType::Backdrop`: drawn first, camera-locked, depth writes off — the three
         // things a painted backdrop needs, which the note on `is_backdrop` had been asking for.
@@ -1200,6 +1238,7 @@ fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> CruiseState
     println!("cruising at {:?} — {} meshes drawn", rig.start.position, stats.meshes);
     println!("bounds: {} cells with ground", bounds.cells());
     CruiseState {
+        props: prop_bodies,
         engine: nfsu2::sound::EngineSound::start(),
         ground,
         walls,
@@ -1348,7 +1387,7 @@ fn update(world: &mut World, state: &mut CruiseState, dt: f32, input: &Input) {
     // The barrier the files do not carry, derived from the ground the city does have. Applied to
     // the player and to every rival through the same call: a fence one of them can drive through is
     // not a fence, it is a handicap.
-    let CruiseState { rig, driver, field, ground, rails, .. } = state;
+    let CruiseState { rig, driver, field, ground, rails, props, .. } = state;
     let demo = rails.as_ref().is_some_and(|r| r.demo.is_some());
     driver.step_physics_with(world, dt, |w| {
         rig.between_step(w, FIXED_DT);
@@ -1369,6 +1408,7 @@ fn update(world: &mut World, state: &mut CruiseState, dt: f32, input: &Input) {
             }
         }
     });
+    sync_props(world, props);
     if !demo {
         // Rüzgâr arkası, öndeki rakiplerden: raydakilerin hızı rayın, pilotlarınki kendi.
         let mut ahead: Vec<(Vec3, Vec3, f32)> = Vec::new();
@@ -1758,5 +1798,36 @@ fn race_ui(rr: &RailRace, ctx: &egui::Context) {
                     ui.label(format!("{}. {who} · {time}", i + 1));
                 }
             });
+    }
+}
+
+/// Put each prop's meshes where its body is. The body is the physics' own; the meshes are plain
+/// entities, so they follow by being told — the same way the car's body parts follow the chassis.
+fn sync_props(world: &mut World, props: &[(u32, Vec<u32>)]) {
+    if props.is_empty() {
+        return;
+    }
+    let poses: Vec<(Vec3, Quat)> = {
+        let transforms = world.borrow::<Transform>();
+        props
+            .iter()
+            .map(|(b, _)| transforms.get(*b).map_or((Vec3::ZERO, Quat::IDENTITY), |t| (t.position, t.rotation)))
+            .collect()
+    };
+    // The same two unchecked borrows `CarRig::sync_visuals` takes: two different component
+    // storages, held together for one loop.
+    let mut transforms = unsafe { world.borrow_mut_unchecked::<Transform>() };
+    let mut globals = unsafe { world.borrow_mut_unchecked::<GlobalTransform>() };
+    for ((_, drawn), (position, rotation)) in props.iter().zip(poses) {
+        for &id in drawn {
+            if let Some(mut t) = transforms.get_mut(id) {
+                t.position = position;
+                t.rotation = rotation;
+                t.update_local_matrix();
+                if let Some(mut g) = globals.get_mut(id) {
+                    g.matrix = t.local_matrix;
+                }
+            }
+        }
     }
 }

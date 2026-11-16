@@ -85,17 +85,20 @@ pub fn nearest(objects: &mut Vec<WorldMesh>, around: Vec3, budget: Option<usize>
     objects.truncate(n);
 }
 
+/// Runs whose texture resolved nowhere, and their keys.
+type Unresolved = (usize, std::collections::BTreeSet<u32>);
+
 /// Append one object's triangles to the buckets of `cell`, one bucket per texture.
 fn emit(
     object: &WorldMesh,
     cell: (i32, i32),
+    origin: Vec3,
     packs: &[TrackPack<'_>],
     shared: Option<&super::SharedTextures>,
-    unresolved_runs: &mut usize,
-    unresolved_keys: &mut std::collections::BTreeSet<u32>,
+    unresolved: &mut Unresolved,
     buckets: &mut BTreeMap<BucketKey, Vec<Vertex>>,
 ) {
-    let origin = cell_centre(cell);
+    let (unresolved_runs, unresolved_keys) = (&mut unresolved.0, &mut unresolved.1);
         // A run with no group table still draws — it is the whole index buffer with slot 0.
         let runs: Vec<(usize, usize, Option<AssetHash>)> = if object.groups.is_empty() {
             let key = object.texture_slots.first().copied();
@@ -181,8 +184,7 @@ pub fn build_region(
     // (cell, texture) → vertices. `BTreeMap` rather than a hash map so a run over the same region
     // twice produces the same meshes in the same order — a golden screenshot needs that.
     let mut buckets: BTreeMap<BucketKey, Vec<Vertex>> = BTreeMap::new();
-    let mut unresolved_runs = 0usize;
-    let mut unresolved_keys: std::collections::BTreeSet<u32> = std::collections::BTreeSet::new();
+    let mut unresolved: Unresolved = (0, std::collections::BTreeSet::new());
 
     for object in &objects {
         if object.positions.is_empty() {
@@ -194,7 +196,7 @@ pub fn build_region(
         let centre = world_point(&object.header, object.header.bbox_min)
             .midpoint(world_point(&object.header, object.header.bbox_max));
         let cell = cell_of(centre);
-        emit(object, cell, packs, shared, &mut unresolved_runs, &mut unresolved_keys, &mut buckets);
+        emit(object, cell, cell_centre(cell), packs, shared, &mut unresolved, &mut buckets);
     }
 
     let meshes = buckets
@@ -218,8 +220,8 @@ pub fn build_region(
         meshes,
         objects: objects.len(),
         duplicates,
-        unresolved_runs,
-        unresolved_keys: unresolved_keys.into_iter().map(AssetHash).collect(),
+        unresolved_runs: unresolved.0,
+        unresolved_keys: unresolved.1.into_iter().map(AssetHash).collect(),
     }
 }
 
@@ -252,8 +254,7 @@ pub fn build_lods(
     shared: Option<&super::SharedTextures>,
 ) -> Vec<LodCityMesh> {
     let mut buckets: [BTreeMap<BucketKey, Vec<Vertex>>; 3] = Default::default();
-    let mut runs = 0usize;
-    let mut keys = std::collections::BTreeSet::new();
+    let mut unresolved: Unresolved = (0, std::collections::BTreeSet::new());
     for levels in copies {
         let Some(first) = levels.first() else { continue };
         let centre = world_point(&first.header, first.header.bbox_min)
@@ -264,7 +265,7 @@ pub fn build_lods(
             if object.positions.is_empty() {
                 continue;
             }
-            emit(object, cell, packs, shared, &mut runs, &mut keys, bucket);
+            emit(object, cell, cell_centre(cell), packs, shared, &mut unresolved, bucket);
         }
     }
     let mut out: BTreeMap<BucketKey, Vec<(Mesh, f32)>> = BTreeMap::new();
@@ -281,5 +282,24 @@ pub fn build_lods(
     }
     out.into_iter()
         .map(|((cell, texture), levels)| LodCityMesh { cell, texture, origin: cell_centre(cell), levels })
+        .collect()
+}
+
+/// One object's meshes in its own frame — one per texture — for something that moves on its own,
+/// like a prop's body: vertices relative to the object's origin, not a cell's.
+pub fn build_local(
+    device: &wgpu::Device,
+    object: &WorldMesh,
+    packs: &[TrackPack<'_>],
+    shared: Option<&super::SharedTextures>,
+    label: &str,
+) -> Vec<(Mesh, Option<AssetHash>)> {
+    let mut buckets: BTreeMap<BucketKey, Vec<Vertex>> = BTreeMap::new();
+    let mut unresolved: Unresolved = (0, std::collections::BTreeSet::new());
+    emit(object, (0, 0), Vec3::ZERO, packs, shared, &mut unresolved, &mut buckets);
+    buckets
+        .into_iter()
+        .filter(|(_, v)| !v.is_empty())
+        .map(|((_, texture), verts)| (Mesh::from_vertices(device, &verts, label.to_string()), texture))
         .collect()
 }

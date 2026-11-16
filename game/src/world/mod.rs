@@ -28,12 +28,13 @@ mod build;
 mod cell;
 mod collide;
 mod load;
+pub mod props;
 mod network;
 pub mod lod;
 pub mod route;
 mod tiers;
 
-pub use build::{build_lods, build_region, nearest, CityMesh, CityVisuals, LodCityMesh, LOD_BANDS};
+pub use build::{build_local, build_lods, build_region, nearest, CityMesh, CityVisuals, LodCityMesh, LOD_BANDS};
 pub use cell::{cell_centre, cell_of, CELL_SIZE};
 pub use collide::{
     collision_cells, surface_of, surfaces_by_object, Bounds, CityCollider, Ground, Surface, Walls,

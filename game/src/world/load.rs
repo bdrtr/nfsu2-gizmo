@@ -6,6 +6,7 @@
 //! `TRACKS` directory, not from the current directory). It is written once here.
 
 use super::SharedTextures;
+use gizmo::prelude::Vec3;
 use gizmo_nfs::world::{TrackPack, WorldMesh};
 use std::path::{Path, PathBuf};
 
@@ -36,6 +37,9 @@ pub struct Bundles {
     /// soup, while its walls stand along every guard rail, fence and lamp post.
     /// `NFS_GAME_COLLISION=off` puts the old rule back: everything drawn is solid.
     pub collision: Vec<WorldMesh>,
+    /// The breakable props ([`super::props`]) — barrels, cans, signs — as bodies to spawn. Their
+    /// scenery copies are not in [`Self::scenery`]. `NFS_PROPS=off` leaves them as scenery.
+    pub props: Vec<super::props::Prop>,
     /// Every region's texture packs.
     pub packs: Vec<TrackPack<'static>>,
     /// `TRACKS/LOC4DYNTEX.BIN` and `GLOBAL/` — the keys no region carries itself. Empty rather than
@@ -106,6 +110,8 @@ pub fn load_event(path: &str, event: Option<u32>) -> Bundles {
     let mut meshes = Vec::new();
     let mut scenery: Vec<Vec<WorldMesh>> = Vec::new();
     let mut collision = Vec::new();
+    let mut props: Vec<super::props::Prop> = Vec::new();
+    let props_on = std::env::var("NFS_PROPS").as_deref() != Ok("off");
     let mut packs = Vec::new();
     let game_collision_on = std::env::var("NFS_GAME_COLLISION").as_deref() != Ok("off");
     for (bytes, file) in loaded.iter().zip(&files) {
@@ -116,7 +122,13 @@ pub fn load_event(path: &str, event: Option<u32>) -> Bundles {
         // NFS_SCENERY=off: the city as it was read before the instances were — every solid at its
         // own header, nothing copied. For A/B runs (the sweep), not for playing.
         if std::env::var("NFS_SCENERY").as_deref() != Ok("off") {
-            let groups = region_beside(file).map(|r| shown_groups(&r, event)).unwrap_or_default();
+            let region = region_beside(file);
+            if props_on {
+                if let Some(r) = &region {
+                    props.extend(super::props::props(bytes, r, &own));
+                }
+            }
+            let groups = region.map(|r| shown_groups(&r, event)).unwrap_or_default();
             scenery.extend(instance_lods(bytes, &mut own, &groups).into_iter().filter(|l| !l.is_empty()));
         }
         meshes.extend(own);
@@ -129,6 +141,31 @@ pub fn load_event(path: &str, event: Option<u32>) -> Bundles {
         let m = &l[0];
         seen.insert((m.header.hash.0, m.header.matrix.map(|row| row.map(f32::to_bits))))
     });
+    // A prop is drawn by its body: the scenery copy standing where it stands goes.
+    if !props.is_empty() {
+        let mut at: std::collections::HashMap<(i32, i32, i32), Vec<Vec3>> = Default::default();
+        let cell = |p: Vec3| ((p.x / 2.0).floor() as i32, (p.y / 2.0).floor() as i32, (p.z / 2.0).floor() as i32);
+        for p in &props {
+            at.entry(cell(p.position)).or_default().push(p.position);
+        }
+        let before = scenery.len();
+        scenery.retain(|l| {
+            let m = &l[0].header.matrix;
+            let q = super::remap([m[3][0], m[3][1], m[3][2]]);
+            let (x, y, z) = cell(q);
+            let near = (x - 1..=x + 1).any(|i| {
+                (y - 1..=y + 1).any(|j| {
+                    (z - 1..=z + 1).any(|k| {
+                        at.get(&(i, j, k)).is_some_and(|v| v.iter().any(|p| (*p - q).length() < 0.3))
+                    })
+                })
+            });
+            !near
+        });
+        if std::env::var("NFS_DIAG").is_ok() {
+            println!("props: {} bodies, {} scenery copies handed over", props.len(), before - scenery.len());
+        }
+    }
     let scenery_lods = scenery;
     let scenery: Vec<WorldMesh> = scenery_lods.iter().map(|l| l[0].clone()).collect();
     if game_collision_on {
@@ -142,7 +179,7 @@ pub fn load_event(path: &str, event: Option<u32>) -> Bundles {
     let root = Path::new(path).ancestors().find(|a| a.join("GLOBAL").is_dir());
     let shared = root.map(SharedTextures::load).unwrap_or_default();
 
-    Bundles { files, meshes, scenery, scenery_lods, collision, packs, shared }
+    Bundles { files, meshes, scenery, scenery_lods, collision, props, packs, shared }
 }
 
 /// Where in the city to start, from `NFS_AT="x,y,z"`, else `default`.
