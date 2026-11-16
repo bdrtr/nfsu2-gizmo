@@ -8806,3 +8806,13 @@ bacağı halkanın kendi bacağının kesmediği bir duvarı kesiyorsa örneği 
 onarımının aynısı). Sonuç 2 276 → **1 549** (80 yarışta azaldı, 3'ünde arttı), basamak 112 → 94, yolsuz
 %15,6 → %16,3, bitiren 840/840. Kalanların çoğu halkanın kendi bacağında (en çok 4104: 58, 4401: 53).
 `NFS_RAILWALLS=off` (yalnız `nfs_rail`) eski hattı kurar.
+
+**Kalan duvar geçişleri: halka ve sonsuz duvarın yüksekliği.** (1) `clear_ring`: halkanın kendi bacağı duvar
+kesiyorsa uçları yana (≤6 m, 1 m adım) kaydırılıyor — 1 549 → 1 472 (36 yarışta azaldı, 2'sinde arttı).
+(2) Kalanların çoğu sonsuz duvar: 4104/4401'deki 83 geçişin 56'sı, tabanı hattın çok altındaki bir duvar —
+sonsuz duvarın yüksekliği yok (RA'nın 21 699'unda taban 0), exe ±2048 m'ye uzatıyor, alt yolun korkuluğu
+üstteki köprüyü kesiyor. `world::load::level_endless`: bir zemin çokgeninin kenarı boyunca uzanan
+16 536 duvar o zeminin 2 m altı–8 m üstüne kesiliyor; 320 çok katlı ve 4 843 kenarsız sonsuz kalıyor.
+Ray: 1 472 → **1 353**, bitiren 840/840, basamak 94 → 98, temas adımı 1 042 → 1 342. Pilot süpürmesi
+1 404 → 1 462 ama **TAŞINIYOR** (4061 +85, 4121 −60) — iyileşme sayılmaz, nötr. Veriye dayandığı için
+tutuldu: köprüyü kesen ±2 km'lik duvar yanlış. Oyunun kendi ayrımı (`0x34135`–`0x34137` ağacı) okunmadı.

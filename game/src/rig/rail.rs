@@ -333,11 +333,16 @@ impl RaceLine {
         // The same question `through_walls` asks of the finished line, asked of each leg while the
         // corners are being rounded — so a rounded corner stays on the near side of a guard rail.
         let walled = |a: Vec3, b: Vec3| walls.is_some_and(|w| w.across(ground, a, b, 0.5, 3.0));
+        // The ring's own legs can cross a wall too — a route point a few metres too far into a
+        // corner. Those are cleared first, by sliding the ends sideways, so the rounding below
+        // starts from a ring that already stays on the open side.
+        let mut orig = orig;
+        let cleared = if walls.is_some() { clear_ring(&mut orig, closed, &on_road, &walled) } else { 0 };
         let (mut at, repaired) = smooth(&orig, closed, on_road, walled);
         let off_road = at.iter().filter(|p| !on_road(**p)).count();
         let bridged = stand(&mut at, closed, roads, ground);
         let mut line = Self::from_points(at, closed, limits)?;
-        line.report.repaired = repaired;
+        line.report.repaired = repaired + cleared;
         line.report.off_road = off_road;
         line.report.bridged = bridged;
         Some(line)
@@ -780,6 +785,58 @@ fn unspur(pts: &mut Vec<Vec3>, closed: bool) -> usize {
         });
         removed += keep.iter().filter(|x| !**x).count();
     }
+}
+
+/// How far [`clear_ring`] may slide a ring sample sideways, and in what steps, in metres.
+const CLEAR_MAX: f32 = 6.0;
+const CLEAR_STEP: f32 = 1.0;
+
+/// Slide ring samples sideways off walls their legs cross. For every leg that crosses one, each of
+/// its two ends is tried at offsets across the leg — smallest first, either side — and the first
+/// position that keeps the sample on road and leaves both of its legs clear is taken. Returns how
+/// many samples moved.
+fn clear_ring(
+    p: &mut [Vec3],
+    closed: bool,
+    on_road: &impl Fn(Vec3) -> bool,
+    walled: &impl Fn(Vec3, Vec3) -> bool,
+) -> usize {
+    let n = p.len();
+    let legs = if closed { n } else { n - 1 };
+    let mut moved = 0;
+    for i in 0..legs {
+        let j = (i + 1) % n;
+        if !walled(p[i], p[j]) {
+            continue;
+        }
+        let dir = Vec3::new(p[j].x - p[i].x, 0.0, p[j].z - p[i].z).normalize_or_zero();
+        let side = Vec3::new(-dir.z, 0.0, dir.x);
+        let neighbours = |k: usize| -> (Option<usize>, Option<usize>) {
+            let prev = if k > 0 { Some(k - 1) } else if closed { Some(n - 1) } else { None };
+            let next = if k + 1 < n { Some(k + 1) } else if closed { Some(0) } else { None };
+            (prev, next)
+        };
+        'ends: for k in [j, i] {
+            let (a, b) = neighbours(k);
+            let steps = (CLEAR_MAX / CLEAR_STEP) as i32;
+            for m in 1..=steps {
+                for sign in [1.0f32, -1.0] {
+                    let q = p[k] + side * (sign * m as f32 * CLEAR_STEP);
+                    if !on_road(q) {
+                        continue;
+                    }
+                    let ok_a = a.is_none_or(|a| !walled(p[a], q));
+                    let ok_b = b.is_none_or(|b| !walled(q, p[b]));
+                    if ok_a && ok_b {
+                        p[k] = q;
+                        moved += 1;
+                        break 'ends;
+                    }
+                }
+            }
+        }
+    }
+    moved
 }
 
 /// Round the ring's corners, never by more than [`SHIFT_MAX`] and never off a road it was on.

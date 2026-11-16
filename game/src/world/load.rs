@@ -430,7 +430,11 @@ const SOUP_CELL: f32 = 128.0;
 #[must_use]
 pub fn game_collision(bundle: &[u8]) -> Vec<WorldMesh> {
     use gizmo_nfs::types::{AssetHash, IDENTITY};
-    let Ok(polys) = gizmo_nfs::world::collision::polygons(bundle) else { return Vec::new() };
+    let Ok(mut polys) = gizmo_nfs::world::collision::polygons(bundle) else { return Vec::new() };
+    let leveled = level_endless(&mut polys);
+    if std::env::var("NFS_DIAG").is_ok() {
+        println!("game collision: {leveled} endless walls given the height of the floor they edge");
+    }
     type Piece = (Vec<[f32; 3]>, Vec<u32>);
     let mut cells: std::collections::BTreeMap<(i32, i32), Piece> = std::collections::BTreeMap::new();
     for p in polys.iter().filter(|p| p.switch == 0) {
@@ -478,3 +482,90 @@ pub fn game_collision(bundle: &[u8]) -> Vec<WorldMesh> {
         .collect()
 }
 
+
+/// How far below and above the floor it edges an endless wall is made to reach, in metres.
+const ENDLESS_BELOW: f32 = 2.0;
+const ENDLESS_ABOVE: f32 = 8.0;
+
+/// Give the game's endless walls a height.
+///
+/// An endless wall (`flags & 0x04`) carries no height at all — its base field is 0 in every one of
+/// `STREAML4RA`'s 21,699 — and `SPEED2.EXE` stretches it to ±2,048 m. Taken literally that makes
+/// the guard rail of a road under a bridge a wall across the bridge: 56 of the 83 places where the
+/// rails' line still crossed a wall in `Paths4104`/`Paths4401` were such a wall, its floor far
+/// below the line. The game keeps them apart through its own spatial tree (`0x34135`–`0x34137`,
+/// not read).
+///
+/// What the soup does say is which floor a wall runs along: 16,536 of the 21,699 lie on an edge of
+/// a floor polygon at one level. Those are cut to [`ENDLESS_BELOW`] under and [`ENDLESS_ABOVE`]
+/// over that floor; the rest (320 at several levels, 4,843 beside no floor edge) stay endless.
+/// Returns how many were cut.
+fn level_endless(polys: &mut [gizmo_nfs::world::collision::CollisionPolygon]) -> usize {
+    const CELL: f32 = 8.0;
+    const NEAR: f32 = 0.6;
+    let key = |x: f32, y: f32| ((x / CELL).floor() as i32, (y / CELL).floor() as i32);
+    let mut floors: std::collections::HashMap<(i32, i32), Vec<usize>> = Default::default();
+    for (i, p) in polys.iter().enumerate() {
+        if p.switch != 0 || p.is_endless() || p.uprightness() < 0.5 {
+            continue;
+        }
+        let (lo, hi) = p.corners.iter().fold(([f32::MAX; 2], [f32::MIN; 2]), |(lo, hi), c| {
+            ([lo[0].min(c[0]), lo[1].min(c[1])], [hi[0].max(c[0]), hi[1].max(c[1])])
+        });
+        let (a, b) = (key(lo[0], lo[1]), key(hi[0], hi[1]));
+        for x in a.0..=b.0 {
+            for y in a.1..=b.1 {
+                floors.entry((x, y)).or_default().push(i);
+            }
+        }
+    }
+    let dist = |p: [f32; 2], a: [f32; 2], b: [f32; 2]| {
+        let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+        let l = dx * dx + dy * dy;
+        let t = if l > 0.0 { (((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / l).clamp(0.0, 1.0) } else { 0.0 };
+        (p[0] - a[0] - t * dx).hypot(p[1] - a[1] - t * dy)
+    };
+    let mut levels: Vec<(usize, f32, f32)> = Vec::new();
+    for (i, w) in polys.iter().enumerate() {
+        if w.switch != 0 || !w.is_endless() {
+            continue;
+        }
+        // The wall's foot: its two distinct plan points.
+        let mut foot: Vec<[f32; 2]> = Vec::new();
+        for c in &w.corners {
+            let q = [c[0], c[1]];
+            if foot.iter().all(|f| (f[0] - q[0]).hypot(f[1] - q[1]) > 0.05) {
+                foot.push(q);
+            }
+        }
+        if foot.len() < 2 {
+            continue;
+        }
+        let (a, b) = (foot[0], foot[1]);
+        let mid = key((a[0] + b[0]) * 0.5, (a[1] + b[1]) * 0.5);
+        let mut lo = f32::MAX;
+        let mut hi = f32::MIN;
+        for &k in floors.get(&mid).into_iter().flatten() {
+            let f = &polys[k].corners;
+            for e in 0..f.len() {
+                let (p, q) = (f[e], f[(e + 1) % f.len()]);
+                let (pp, qq) = ([p[0], p[1]], [q[0], q[1]]);
+                let along = (dist(pp, a, b) < NEAR && dist(qq, a, b) < NEAR)
+                    || (dist(a, pp, qq) < NEAR && dist(b, pp, qq) < NEAR);
+                if along {
+                    lo = lo.min(p[2].min(q[2]));
+                    hi = hi.max(p[2].max(q[2]));
+                }
+            }
+        }
+        if lo <= hi && hi - lo < 4.0 {
+            levels.push((i, lo, hi));
+        }
+    }
+    for &(i, lo, hi) in &levels {
+        for c in &mut polys[i].corners {
+            c[2] = if c[2] < 0.0 { lo - ENDLESS_BELOW } else { hi + ENDLESS_ABOVE };
+        }
+    }
+    levels.len()
+}
