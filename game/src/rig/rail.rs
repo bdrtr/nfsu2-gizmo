@@ -299,6 +299,7 @@ impl RaceLine {
         grid: Option<(&[Vec3], Vec3)>,
         roads: &Ground,
         ground: &Ground,
+        walls: Option<&crate::world::Walls>,
         limits: &Limits,
     ) -> Option<Self> {
         let mut ring = ring.to_vec();
@@ -329,7 +330,10 @@ impl RaceLine {
             return None;
         }
         let on_road = |p: Vec3| !roads.heights_at(p.x, p.z).is_empty();
-        let (mut at, repaired) = smooth(&orig, closed, on_road);
+        // The same question `through_walls` asks of the finished line, asked of each leg while the
+        // corners are being rounded — so a rounded corner stays on the near side of a guard rail.
+        let walled = |a: Vec3, b: Vec3| walls.is_some_and(|w| w.across(ground, a, b, 0.5, 3.0));
+        let (mut at, repaired) = smooth(&orig, closed, on_road, walled);
         let off_road = at.iter().filter(|p| !on_road(**p)).count();
         let bridged = stand(&mut at, closed, roads, ground);
         let mut line = Self::from_points(at, closed, limits)?;
@@ -784,7 +788,12 @@ fn unspur(pts: &mut Vec<Vec3>, closed: bool) -> usize {
 /// smoothing carried from road to no road is moved back towards where it was until it has road
 /// under it again, and pinned there for the next round. Returns the samples and how many were
 /// pinned.
-fn smooth(orig: &[Vec3], closed: bool, on_road: impl Fn(Vec3) -> bool) -> (Vec<Vec3>, usize) {
+fn smooth(
+    orig: &[Vec3],
+    closed: bool,
+    on_road: impl Fn(Vec3) -> bool,
+    walled: impl Fn(Vec3, Vec3) -> bool,
+) -> (Vec<Vec3>, usize) {
     let shift_max: f32 =
         std::env::var("NFS_RAILSHIFT").ok().and_then(|v| v.parse().ok()).unwrap_or(SHIFT_MAX);
     let n = orig.len();
@@ -817,6 +826,31 @@ fn smooth(orig: &[Vec3], closed: bool, on_road: impl Fn(Vec3) -> bool) -> (Vec<V
             }
         }
         let mut moved = 0usize;
+        // A leg the rounding pushed into a wall that the ring's own leg did not cross: pull the
+        // sample back towards where it was until neither of its legs crosses one, and pin it.
+        for i in 0..n {
+            if pinned[i] {
+                continue;
+            }
+            let Some((a, b)) = neighbours(i) else { continue };
+            let crosses = |q: Vec3| {
+                (walled(p[a], q) && !walled(orig[a], orig[i])) || (walled(q, p[b]) && !walled(orig[i], orig[b]))
+            };
+            if !crosses(p[i]) {
+                continue;
+            }
+            moved += 1;
+            pinned[i] = true;
+            let mut t = 0.75f32;
+            loop {
+                let q = orig[i] + (p[i] - orig[i]) * t;
+                if t <= 0.0 || !crosses(q) {
+                    p[i] = q;
+                    break;
+                }
+                t -= 0.25;
+            }
+        }
         for i in 0..n {
             if pinned[i] || on_road(p[i]) || !on_road(orig[i]) {
                 continue;

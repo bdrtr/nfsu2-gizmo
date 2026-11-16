@@ -181,7 +181,7 @@ fn race(
     }
     // The grid's heading is the reliable half; three outlines are written finish first.
     let (ring, flipped) = rail::orient_ring(&ring, ev.circuit, &slots, heading);
-    let line = RaceLine::build(&ring, ev.circuit, Some((&slots, heading)), roads, ground, limits)
+    let line = RaceLine::build(&ring, ev.circuit, Some((&slots, heading)), roads, ground, wall_index(walls), limits)
         .ok_or("ring too short")?;
 
     // `NFS_RAILDUMP=<event>`: the line sample by sample — where it is, the height it stands at, and
@@ -393,4 +393,10 @@ fn summary(all: &[Outcome], total: usize) {
             o.name, o.line.off_road, o.line.samples, o.line.steps, o.chords
         );
     }
+}
+
+/// The wall index the line is built against, unless `NFS_RAILWALLS=off` asks for the old line
+/// (rounded with no regard for walls) to compare against.
+fn wall_index(walls: &city::Walls) -> Option<&city::Walls> {
+    (std::env::var("NFS_RAILWALLS").as_deref() != Ok("off")).then_some(walls)
 }

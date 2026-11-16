@@ -1122,7 +1122,7 @@ fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> CruiseState
         if chords > 0 {
             println!("yarış hattı: {chords} bacak yol bulamayıp kirişte kaldı");
         }
-        rails = RaceLine::build(&ring, ev.circuit, Some((&grid_slots, heading)), &roads, &ground, &limits)
+        rails = RaceLine::build(&ring, ev.circuit, Some((&grid_slots, heading)), &roads, &ground, Some(&walls), &limits)
             .and_then(|line| {
                 let plan = RailPlan { line, limits, slots: grid_slots.clone(), heading, rivals };
                 RailRace::start(world, renderer, &mut assets, &mut phys, &car_path, plan)

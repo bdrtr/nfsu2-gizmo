@@ -8797,3 +8797,12 @@ duvarlarından** birinin dibinde (`+0x03 & 0x04`; RA'da 21 699, neredeyse hepsi 
 sınırına dayanıyorlar; eski şehirde o duvarlar olmadığı için dolaşıp geri dönebiliyorlardı. Yani dünya artık
 oyununki, açık pilotun parkurda kalmasında. Sonsuz duvarların parkurla ilişkisi yarış dış hattıyla
 ölçülemedi (dış hat yolun etrafına çizilmiş bir çokgen, kesişim sayısı anlamsız).
+
+**Oyundaki rakipler (raylar) yeni dünyada.** `nfs_rail` 105 yarış: eski ve yeni dünyada da 105/105 yarış,
+840/840 araba bitiriyor. Ama ray hattının duvardan geçtiği adım 676 → 2 276'ya çıkmıştı: yeni duvarlar
+(oyunun sonsuz tür-20 duvarları — korkuluk, çit, bina, lamba hep bu tür) gerçek yerinde ve hattın
+yuvarlanan köşeleri onları kesiyordu. `RaceLine::build` artık duvar dizinini alıyor; `smooth` bir örneğin
+bacağı halkanın kendi bacağının kesmediği bir duvarı kesiyorsa örneği geri çekip sabitliyor (yoldan çıkma
+onarımının aynısı). Sonuç 2 276 → **1 549** (80 yarışta azaldı, 3'ünde arttı), basamak 112 → 94, yolsuz
+%15,6 → %16,3, bitiren 840/840. Kalanların çoğu halkanın kendi bacağında (en çok 4104: 58, 4401: 53).
+`NFS_RAILWALLS=off` (yalnız `nfs_rail`) eski hattı kurar.
