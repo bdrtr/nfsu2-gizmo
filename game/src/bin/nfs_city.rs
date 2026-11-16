@@ -21,6 +21,7 @@
 //! - `NFS_EYE="x,y,z"` — camera eye, relative to the look-at point. Default is a high
 //!   three-quarter view framing the whole of what loaded.
 //! - `NFS_ONLY=<substr>` — draw only the objects whose name contains it.
+//! - `NFS_EVENT=<n>` — raise race n's barrier groups without drawing its line.
 //! - `NFS_TIERS=all|coarse` — put the coarse detail tiers back, or draw *only* them. Only the
 //!   richest member of each family is drawn by default; see [`nfsu2::world::lod`].
 //! - `NFS_TIERS_LIST=<n>` — the detail families in numbers, and the n widest by member spread.
@@ -100,9 +101,10 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
     for (bytes, file) in loaded.iter().zip(&files) {
         let mut own = gizmo_nfs::world::meshes(bytes).expect("read a region's meshes");
         if std::env::var("NFS_SCENERY").as_deref() != Ok("off") {
-            let event = std::env::var("NFS_ROUTE")
-                .ok()
-                .and_then(|r| nfsu2::world::event_of(std::path::Path::new(&r)));
+            // `NFS_EVENT=<n>` raises race n's barriers without drawing its line; else the route's.
+            let event = std::env::var("NFS_EVENT").ok().and_then(|v| v.parse().ok()).or_else(|| {
+                std::env::var("NFS_ROUTE").ok().and_then(|r| nfsu2::world::event_of(std::path::Path::new(&r)))
+            });
             let region = nfsu2::world::region_beside(file).unwrap_or_default();
             let groups = nfsu2::world::shown_groups(&region, event);
             scenery.extend(nfsu2::world::instance(bytes, &mut own, &groups));
