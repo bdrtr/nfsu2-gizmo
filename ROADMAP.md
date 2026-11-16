@@ -8834,3 +8834,10 @@ kopya sahneden düşülüyor (RA'da 513 cisim, 515 kopya). `nfs_cruise` her eşy
 varlık olarak çiziyor ve her fizik adımından sonra cisme eşitliyor (`sync_props`). `nfs_sim`/`nfs_rail` eşya
 koymuyor (ölçüler değişmedi). `NFS_PROPS=off` eski hâl. Görülmesi gerekenler: eşyalar yerinde mi, çarpınca
 devriliyor mu, cisimler uyurken titreşiyor mu, kare süresine etkisi.
+
+**Ekranda ilk bakış (2026-11-17, kullanıcının ekranı, `Paths4001`).** Medyan kare: varsayılan 29,1 ms · dinamik
+eşyalar kapalı **20,8 ms** · eşyalar + LOD kapalı 27,1 ms (merkezde 35,0 → 43,8 ms: LOD yardım ediyor). Eşyaları
+uyur başlatmak 50 ms tavana itti → **dinamik eşyalar varsayılan kapalı** (`NFS_PROPS=on`), `MOTOR-NOTLARI` #26.
+Şehir merkezi (≈ 830–860, 750–1060) en yavaş yer: 35 ms civarı. Kullanıcı ayrıca: "ışıklar yanıp sönüyor
+ilerledikçe" — LOD kapalıyken de sürüyor, yani eski "ışıklandırma patlıyor" şikâyeti, hâlâ tarif bekliyor;
+"tabelalarda sorunlar var" — tarif bekliyor. E/Q elle vitese geçirip otomatiği kapatıyor, T geri açıyor.

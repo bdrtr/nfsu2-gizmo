@@ -38,7 +38,7 @@ pub struct Bundles {
     /// `NFS_GAME_COLLISION=off` puts the old rule back: everything drawn is solid.
     pub collision: Vec<WorldMesh>,
     /// The breakable props ([`super::props`]) — barrels, cans, signs — as bodies to spawn. Their
-    /// scenery copies are not in [`Self::scenery`]. `NFS_PROPS=off` leaves them as scenery.
+    /// scenery copies are not in [`Self::scenery`]. Empty unless `NFS_PROPS=on` (see the loader).
     pub props: Vec<super::props::Prop>,
     /// Every region's texture packs.
     pub packs: Vec<TrackPack<'static>>,
@@ -111,7 +111,10 @@ pub fn load_event(path: &str, event: Option<u32>) -> Bundles {
     let mut scenery: Vec<Vec<WorldMesh>> = Vec::new();
     let mut collision = Vec::new();
     let mut props: Vec<super::props::Prop> = Vec::new();
-    let props_on = std::env::var("NFS_PROPS").as_deref() != Ok("off");
+    // Off by default: 513 dynamic bodies cost the frame ~8 ms (median 29.1 → 20.8 ms without them,
+    // measured on the user's screen), and starting them asleep made it worse (a 50 ms floor). Until
+    // the engine carries that many cheaply, `NFS_PROPS=on` is the way to try them.
+    let props_on = std::env::var("NFS_PROPS").as_deref() == Ok("on");
     let mut packs = Vec::new();
     let game_collision_on = std::env::var("NFS_GAME_COLLISION").as_deref() != Ok("off");
     for (bytes, file) in loaded.iter().zip(&files) {
