@@ -431,7 +431,7 @@ const SOUP_CELL: f32 = 128.0;
 pub fn game_collision(bundle: &[u8]) -> Vec<WorldMesh> {
     use gizmo_nfs::types::{AssetHash, IDENTITY};
     let Ok(mut polys) = gizmo_nfs::world::collision::polygons(bundle) else { return Vec::new() };
-    let leveled = level_endless(&mut polys);
+    let leveled = if std::env::var("NFS_LEVEL_ENDLESS").as_deref() == Ok("off") { 0 } else { level_endless(&mut polys) };
     if std::env::var("NFS_DIAG").is_ok() {
         println!("game collision: {leveled} endless walls given the height of the floor they edge");
     }

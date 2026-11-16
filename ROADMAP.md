@@ -8816,3 +8816,11 @@ sonsuz duvarın yüksekliği yok (RA'nın 21 699'unda taban 0), exe ±2048 m'ye 
 Ray: 1 472 → **1 353**, bitiren 840/840, basamak 94 → 98, temas adımı 1 042 → 1 342. Pilot süpürmesi
 1 404 → 1 462 ama **TAŞINIYOR** (4061 +85, 4121 −60) — iyileşme sayılmaz, nötr. Veriye dayandığı için
 tutuldu: köprüyü kesen ±2 km'lik duvar yanlış. Oyunun kendi ayrımı (`0x34135`–`0x34137` ağacı) okunmadı.
+
+**Temas artışı tek yarıştan: `Paths4305` (`ROUTESL4RC`).** 1 042 → 1 342'nin tamamı orada (0 → 308). Sebep çizgi
+onarımı değil, **halkanın kendisi**: duvar kısaltması bir bağlantıyı açtı, halka 1 177 m'den 810 m'ye kısaldı
+(`NFS_LEVEL_ENDLESS=off` ile 1 177 m, ızgara açısı 1,00, temas 0). Olay kaydının dış hat çevresi 871 m —
+yeni halka parkura daha yakın görünüyor, ama dış hattın konumu (904,−441) ızgarayla (459,−955) örtüşmüyor,
+hüküm kesin değil. Temaslar t = 0'da ızgarada: kısa, kıvrık bir parçada slotlar çizgiye aynı `s`'de, aynı
+şeritte izdüşüyor (ızgara açısı 0,90). Izgaranın 30 m çevresini duvar onarımından muaf tutmak denendi,
+düzeltmedi (temas 350), geri alındı. Açık: dar parkurda ızgara yerleştirmesi (`Rail::grid`).
