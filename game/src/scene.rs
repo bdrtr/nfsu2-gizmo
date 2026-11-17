@@ -8,7 +8,7 @@
 use crate::car::{composite_over_paint, CarVisuals, WheelFit, WheelSurface};
 use crate::geom::add_transform;
 use gizmo::prelude::*;
-use gizmo::renderer::components::LightRole;
+use gizmo::renderer::components::{LightRole, ShadowCasting};
 use gizmo::wgpu;
 use gizmo_nfs::CarTypeInfo;
 use std::sync::Arc;
@@ -154,6 +154,31 @@ where
 
 /// Spawn a mesh with distance-chosen detail levels: `levels` is `(mesh, max_distance)`, finest
 /// first. The first level is also the entity's own mesh, which the `LodGroup` overrides.
+/// Whether the city's own meshes cast the sun's shadow: no, unless `NFS_CITY_SHADOWS=on`.
+///
+/// Bayview is a night map with its light baked into vertex colours, and the sun is there for the
+/// car alone — but the engine's baked-lit path darkens a surface by up to 45 % where that sun is
+/// shadowed, within [`SHADOW_DISTANCE`](gizmo::renderer::SHADOW_DISTANCE) (100 m) of the camera,
+/// fading out at its edge. So every pole, sign and building near the camera threw a daylight
+/// shadow onto the night street, and that band moved with the camera: lights that seemed to switch
+/// as the car drove, signs whose faces dimmed and came back. The Bevy port of the same city, drawn
+/// unlit with no sun, shows none of it. The car still casts, so it still sits on the road.
+#[must_use]
+pub fn city_shadows() -> ShadowCasting {
+    if std::env::var("NFS_CITY_SHADOWS").as_deref() == Ok("on") { ShadowCasting::On } else { ShadowCasting::Off }
+}
+
+/// One mesh of the city: [`spawn_mesh`] with the city's shadow setting, [`city_shadows`].
+pub fn spawn_city(world: &mut World, mesh: Mesh, material: Material, t: Transform) -> u32 {
+    let e = world.spawn();
+    add_transform(world, e, t);
+    world.add_component(e, mesh);
+    world.add_component(e, material);
+    world.add_component(e, MeshRenderer::new().with_shadows(city_shadows()));
+    e.id()
+}
+
+/// A city mesh with its LOD levels, under the city's shadow setting ([`city_shadows`]).
 pub fn spawn_lod(world: &mut World, levels: &[(Mesh, f32)], material: Material, t: Transform) -> u32 {
     let e = world.spawn();
     add_transform(world, e, t);
@@ -166,7 +191,7 @@ pub fn spawn_lod(world: &mut World, levels: &[(Mesh, f32)], material: Material, 
         world.add_component(e, gizmo::renderer::LodGroup::new(lods));
     }
     world.add_component(e, material);
-    world.add_component(e, MeshRenderer::new());
+    world.add_component(e, MeshRenderer::new().with_shadows(city_shadows()));
     e.id()
 }
 

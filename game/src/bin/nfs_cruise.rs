@@ -576,8 +576,16 @@ fn main() {
             renderer.ssr = None;
             renderer.ssgi = None;
             renderer.volumetric = None;
-            // TAA stays on, unlike the small-world binaries: `nfs_fly` keeps it and this is the
-            // same city at the same distances.
+            // TAA off unless `NFS_TAA=on`: on the user's screen it made the city's lights blink as
+            // the car drove (bisected: bloom alone clean, bloom + TAA blinking; the Bevy port,
+            // which has none of the three, never blinked). MOTOR-NOTLARI #27. `NFS_SSAO=off`
+            // takes the ambient occlusion out too.
+            if std::env::var("NFS_TAA").as_deref() != Ok("on") {
+                renderer.taa = None;
+            }
+            if std::env::var("NFS_SSAO").as_deref() == Ok("off") {
+                renderer.ssao = None;
+            }
             gizmo::systems::default_render_pass(world, encoder, view, renderer);
         })
         .run()
@@ -991,7 +999,7 @@ fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> CruiseState
             } else {
                 material
             };
-            scene::spawn_mesh(world, m.mesh.clone(), material, Transform::new(m.origin));
+            scene::spawn_city(world, m.mesh.clone(), material, Transform::new(m.origin));
         }
         for m in &scenery_meshes {
             let material = match m.texture.and_then(|k| bound.get(&k)) {
@@ -1031,7 +1039,7 @@ fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> CruiseState
                 } else {
                     material
                 };
-                drawn.push(scene::spawn_mesh(world, mesh, material, t));
+                drawn.push(scene::spawn_city(world, mesh, material, t));
             }
             prop_bodies.push((body.id(), drawn));
         }
