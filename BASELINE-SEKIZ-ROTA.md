@@ -217,3 +217,23 @@ taşıyordu. `e4d56ebe` → `fd8825dd` arasındaki `befbc9f6` bu şehirde sonucu
 (4121: 91 → 156); her binary kendi içinde deterministik. Direksiyon işareti düzeltilmeden
 (`CarRig::drive`) aynı süpürme alanı ilk virajda duvara gömüyordu — bkz. `MOTOR-NOTLARI.md`.
 
+### Aynı gün — `7a6f6b46` (araç fiziği yine değişti, varsayılan kaldırma 0)
+
+Geçici çözümler kaldırılmış hâlde (teker sırası çevirmesi yok, `contact_spin_share` 0,4, nitro
+`extra_crank_torque`'ta). **Bundan sonraki süpürmelerin tabanı bu sütun (`p7a6f`).**
+
+```
+rota      old   base  p7a6f
+  4001      371    374    440
+  4002       80     59     68
+  4021      167    209    168
+  4041      188    210    209
+  4061      322    332    260
+  4081      148    134    143
+  4102      114    120    140
+  4121       72    156    139
+  TOPLAM   1462   1594   1567
+  old − base: alan -132 · rota rota [3, -21, 42, 22, 10, -14, 6, 84] · old 2/8 rotada önde, 0 berabere · en büyük tek rota +84 → sağlam
+  old − p7a6f: alan -105 · rota rota [69, -12, 1, 21, -62, -5, 26, 67] · old 3/8 rotada önde, 0 berabere · en büyük tek rota +69 → sağlam
+```
+

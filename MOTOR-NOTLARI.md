@@ -11,8 +11,8 @@ tahmin değil bir liste olur.
 |---|---|
 | paket | `gizmo-engine` (kütüphane adı `gizmo`), sürüm `0.10.0` |
 | kaynak | `https://github.com/bdrtr/Gizmo` |
-| commit | `fd8825ddcc7efb89a7aa37afd0a434fb6e7a1d01` — `main`, *"physics: a kinematic body with a contact mass"* |
-| sabitlendi | 2026-11-17 (önceki: `550a7dfd`, 2026-08-20; `58dc2623` aynı gün; `09c948a9` aynı gün — erişilebilirlik düzeltmesi, aynı ağaç; `3433aefe`, 2026-08-14; `48ac99e`, 2026-08-12; `ba969c0`, 2026-08-11) |
+| commit | `7a6f6b46d2fb9a7b2f943967e072b9e951bf093f` — `main`, *"vehicle: no default lift; the wheel and the chassis take the same tyre force"* |
+| sabitlendi | 2026-11-17 (önceki: `fd8825dd` aynı gün; `550a7dfd`, 2026-08-20; `58dc2623` aynı gün; `09c948a9` aynı gün — erişilebilirlik düzeltmesi, aynı ağaç; `3433aefe`, 2026-08-14; `48ac99e`, 2026-08-12; `ba969c0`, 2026-08-11) |
 | nerede yazılı | `game/Cargo.toml` → `rev = ...`; `Cargo.lock` aynı commit'i ayrıca kaydeder |
 
 **2026-11-17 yükseltmesi — `550a7dfd` → `fd8825dd`, 700 commit.** Bu dosyadaki kuyruğun çoğu bu
@@ -45,6 +45,30 @@ rota     old  fd88
   4121      72   156
   TOPLAM  1462  1594
   old − fd88: alan -132 · rota rota [3, -21, 42, 22, 10, -14, 6, 84] · old 2/8 rotada önde, 0 berabere · en büyük tek rota +84 → sağlam
+```
+
+**Aynı gün ikinci adım — `fd8825dd` → `7a6f6b46`.** Motor araç fiziğini yine bit düzeyinde
+değiştirdi: tekerlek ve gövde aynı lastik kuvvetini alıyor, yuvarlanma direnci temas kuvveti, kilitli
+teker tam kayma tutuşuyla frenliyor. `AeroPackage::default()` artık kaldırma vermiyor (Cl −0,8 → 0).
+Oyun `AeroPackage`'ı kurmuyor, NFSU2'nin ölçülmüş bastırmasını kendisi uyguluyor
+(`CarRig::apply_downforce`), yani o güne dek iki bastırma birden alıyordu; artık yalnız kendi
+kuvvetini alıyor. Tezgâh: 100 km/h'de yanal 11,85 → 11,16 m/s², son hız 209 → 213 km/h; ayna
+birebir, duvar aynı. Süpürme, `base` = `fd8825dd` + eski geçici çözümler, `p7a6f` = yeni pin +
+geçici çözümler kaldırılmış:
+
+```
+rota      old   base  p7a6f
+  4001      371    374    440
+  4002       80     59     68
+  4021      167    209    168
+  4041      188    210    209
+  4061      322    332    260
+  4081      148    134    143
+  4102      114    120    140
+  4121       72    156    139
+  TOPLAM   1462   1594   1567
+  old − base: alan -132 · rota rota [3, -21, 42, 22, 10, -14, 6, 84] · old 2/8 rotada önde, 0 berabere · en büyük tek rota +84 → sağlam
+  old − p7a6f: alan -105 · rota rota [69, -12, 1, 21, -62, -5, 26, 67] · old 3/8 rotada önde, 0 berabere · en büyük tek rota +69 → sağlam
 ```
 
 **Süpürmenin gürültü tabanı (2026-11-17).** Sonucu değiştirmemesi gereken bir motor değişikliği
