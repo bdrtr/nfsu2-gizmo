@@ -26,9 +26,11 @@ aralıkta kapandı; motor oturumu maddeleri tek tek bu dosyadan aldı. Oyunda ge
   temiz, testler yeşil, düz kalkış tezgâhı ve `nfs_cruise`'un düz otomatik sürüşü sorunsuzdu;
   yalnız süpürme gördü: pilot sola kırınca araba sağa gidiyor, alan ilk virajda duvara gömülüyordu
   (4001 tek araba 30 s: 19 → 3 işaret).
-- **`befbc9f6` bu şehirde bit düzeyinde aynı değil** (motor "aynı" diyordu): her binary kendi
-  içinde deterministik, ama 4121 rotası `e4d56ebe`'de 91, `befbc9f6`/`fd8825dd`'de 156. Motor
-  oturumuna bildirildi.
+- **Pin taşırken `Cargo.lock` sabit tutulmalı.** Bir ara `befbc9f6`'nın bu şehirde sonucu değiştirdiğini
+  sandım (4121: 91 → 156). Motor oturumu aynı kilit dosyasıyla (`--locked`) iki commit'i birebir
+  aynı buldu: fark büyük olasılıkla `rev` değişirken kilidin başka glam/rayon sürümlerine
+  çözülmesindendi. Pin taşınırken `Cargo.lock` commit'lenmeli ve karşılaştırma derlemeleri aynı
+  kilitle yapılmalı.
 
 Süpürme (8 rota × 90 s, araba başına geçilen işaret, `tools/sweep-table.py`), geçici çözümler
 henüz yerinde:
@@ -71,12 +73,12 @@ rota      old   base  p7a6f
   old − p7a6f: alan -105 · rota rota [69, -12, 1, 21, -62, -5, 26, 67] · old 3/8 rotada önde, 0 berabere · en büyük tek rota +69 → sağlam
 ```
 
-**Süpürmenin gürültü tabanı (2026-11-17).** Sonucu değiştirmemesi gereken bir motor değişikliği
-(`e4d56ebe` → `befbc9f6`: küçük döngüler paralelden sıralıya; kayan nokta ortamı iki iş parçacığında
-aynı, `0x1fa7`) sekiz rotanın toplamını 1391 → 1594 oynattı, tek rotada 91 → 156. Her binary kendi
-içinde deterministik, ama sahne kaotik: toplama sırasındaki bir son-hane farkı birkaç saniyede başka
-bir yarışa dönüşüyor. Yani bu süpürmede ±150–200'lük toplam farkı bir *sinyal değil*; kısa
-deneylerle (tezgâh: ayna, duvar, kalkış) desteklenmeyen kararlar ona dayandırılmamalı.
+**Süpürmenin gürültü tabanı (2026-11-17).** Sonucu değiştirmemesi gereken bir şey — burada büyük
+olasılıkla kilit dosyasının başka bağımlılık sürümlerine çözülmesi; kayan nokta ortamı iki iş
+parçacığında aynı, `0x1fa7` — sekiz rotanın toplamını 1391 → 1594, tek rotayı 91 → 156 oynattı. Her
+binary kendi içinde deterministik, ama sahne kaotik: son hanedeki bir fark birkaç saniyede başka bir
+yarışa dönüşüyor. Yani bu süpürmede ±150–200'lük toplam farkı bir *sinyal değil*; kısa deneylerle
+(tezgâh: ayna, duvar, kalkış) desteklenmeyen kararlar ona dayandırılmamalı.
 
 **2026-08-11 yükseltmesi.** `4d1a8cb..main` beş commit ve ikisi doğrudan bu dosyaya cevap:
 `1dcab55` *"engine: close six gaps a game hit against a pinned build"* — 1, 3, 4, 5, 6 ve 7
