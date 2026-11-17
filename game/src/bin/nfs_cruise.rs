@@ -27,7 +27,10 @@
 //! and a result · `NFS_DEMO=1` with it, your car rides a rail too — the race runs itself, start to
 //! result · `NFS_RIVALDRIVER=pilot` drive the rivals with the simulated pilot instead · `NFS_AT="x,y,z"` where to start — downtown sits near `y ≈ 27` and the airport near
 //! `y ≈ -11`, so the height matters as much as the place · `NFS_BUDGET=<n>` caps objects,
-//! nearest-first · `NFS_DEBUG=1` start with the F3 overlay on · `NFS_DIAG=1` prints the physics' own view once a second · plus everything
+//! nearest-first · `NFS_DEBUG=1` start with the F3 overlay on · `NFS_DIAG=1` prints the physics' own view and the frame's
+//! split (physics/update/render/encode) once a second · `NFS_HOLD=1` keys ignored, brakes on, for timing one spot ·
+//! `NFS_PTRACE=1` lets `eu-stack -p` sample the process · `NFS_LOD=on` detail levels as `LodGroup`s
+//! (default: every copy at `_1A`, merged with the city) · `NFS_TAA=on` · `NFS_SSAO=off` · `NFS_CITY_SHADOWS=on` · plus everything
 //! [`nfsu2::rig`] reads (`NFS_PAINT`, `NFS_KIT`, `NFS_ENGINE`, `NFS_SHOTCAM`, …).
 
 use gizmo::egui;
@@ -558,6 +561,7 @@ const CUT_MID_BAND: f32 = 0.02;
 
 fn main() {
     gizmo::app::setup_panic_hook();
+    allow_sampling();
     App::<CruiseState>::new("Gizmo — NFSU2 Bayview", 1600, 900)
         .add_plugin(gizmo::plugins::TransformPlugin)
         .set_setup(setup)
@@ -586,13 +590,24 @@ fn main() {
             if std::env::var("NFS_SSAO").as_deref() == Ok("off") {
                 renderer.ssao = None;
             }
+            if let Some(mut p) = world.get_resource_mut::<gizmo::core::profiler::FrameProfiler>() {
+                p.begin_scope("encode");
+            }
             gizmo::systems::default_render_pass(world, encoder, view, renderer);
+            if let Some(mut p) = world.get_resource_mut::<gizmo::core::profiler::FrameProfiler>() {
+                p.end_scope("encode");
+            }
         })
         .run()
         .expect("failed to run app");
 }
 
 fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> CruiseState {
+    // `NFS_DIAG`: the engine's own frame profiler, which the app loop fills with `physics`,
+    // `update` and `render` scopes once the resource exists. `encode` is ours, inside `render`.
+    if std::env::var("NFS_DIAG").is_ok() {
+        world.insert_resource(gizmo::core::profiler::FrameProfiler::new());
+    }
     let tracks = city::tracks_path(std::env::args().nth(1));
     let car_path = std::env::args()
         .nth(2)
@@ -887,13 +902,24 @@ fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> CruiseState
     // ── The city as something to look at ──
     // `None` for the budget: `nearest` has already run, and running it again on an already-trimmed
     // list would be a second sort for nothing.
+    //
+    // The instanced copies go into the same per-(cell, texture) buckets as the city, at their
+    // finest level: a lamp and the pavement under it that share a texture share a draw. Drawn as
+    // their own `LodGroup`s they were 12,825 of the frame's 15,120 entities, and every one of them
+    // costs CPU every frame — the engine walks every entity to collect draws (`collect_draw_items`,
+    // `LodGroup::pick`), refreshes every transform and syncs every material, and that is where the
+    // downtown frame went (MOTOR-NOTLARI #29). The detail levels bought no measurable frame time
+    // (`city::LOD_BANDS`), and the coarse ones lose sign faces and facades.
+    // `NFS_LOD=on` puts the `LodGroup`s back, with `NFS_LOD_BANDS`.
+    let lod_on = std::env::var("NFS_LOD").as_deref() == Ok("on");
+    let (objects, scenery_lods): (Vec<_>, Vec<Vec<_>>) = if lod_on {
+        (objects, scenery_lods)
+    } else {
+        let mut all = objects;
+        all.extend(scenery_lods.into_iter().filter_map(|mut l| (!l.is_empty()).then(|| l.swap_remove(0))));
+        (all, Vec::new())
+    };
     let visuals = city::build_region(&renderer.device, objects, &packs, Some(&shared), at, None);
-    // The instanced copies, merged per cell and texture at each of their detail levels and drawn
-    // through a `LodGroup`: `_1A` near, `_1B` across the next cells, `_1Z` beyond
-    // (`city::LOD_BANDS`). `NFS_LOD=off` draws every copy at full detail instead.
-    let lod_off = std::env::var("NFS_LOD").as_deref() == Ok("off");
-    let scenery_lods: Vec<Vec<_>> =
-        if lod_off { scenery_lods.into_iter().map(|mut l| { l.truncate(1); l }).collect() } else { scenery_lods };
     let scenery_meshes = city::build_lods(&renderer.device, &scenery_lods, &packs, Some(&shared));
     drop(scenery_lods);
     drop(scenery);
@@ -903,6 +929,7 @@ fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> CruiseState
         scenery_meshes.iter().filter(|m| m.levels.len() > 1).count()
     );
     stats.meshes = visuals.meshes.len() + scenery_meshes.len();
+    println!("city: {} merged meshes ({}), {} in all", visuals.meshes.len(), if lod_on { "city only, copies apart" } else { "city and copies together" }, stats.meshes);
 
     // The sky and the painted panorama, through the same builder — they are ordinary geometry, and
     // only their *material* is unusual. `at` for the budget centre is irrelevant here: `None` keeps
@@ -1289,6 +1316,23 @@ fn set_drawn(world: &mut World, id: u32, drawn: bool) {
     }
 }
 
+/// `NFS_PTRACE=1` (Linux): let any process of this user attach — `eu-stack -p` sampling the main
+/// thread is the profiler this machine has (no `perf`), and Yama's `ptrace_scope = 1` otherwise
+/// lets only a parent attach. `prctl(PR_SET_PTRACER, PR_SET_PTRACER_ANY)`; off unless asked.
+fn allow_sampling() {
+    #[cfg(target_os = "linux")]
+    if std::env::var("NFS_PTRACE").is_ok_and(|v| v != "0") {
+        unsafe extern "C" {
+            fn prctl(option: i32, arg2: u64, arg3: u64, arg4: u64, arg5: u64) -> i32;
+        }
+        const PR_SET_PTRACER: i32 = 0x5961_6d61;
+        const PR_SET_PTRACER_ANY: u64 = u64::MAX;
+        // SAFETY: prctl with integer arguments only; it touches no memory of ours.
+        let rc = unsafe { prctl(PR_SET_PTRACER, PR_SET_PTRACER_ANY, 0, 0, 0) };
+        println!("NFS_PTRACE: sampling allowed (prctl {rc})");
+    }
+}
+
 /// The window's median and 95th percentile in milliseconds, or `None` before it has filled.
 ///
 /// Both, because a median alone says the frame is fine while every twentieth one is not, and a
@@ -1648,6 +1692,20 @@ fn diagnose(world: &World, state: &mut CruiseState, pose: nfsu2::rig::Pose) {
         }
     }
     let (med, p95) = frame_ms(&state.frames).unwrap_or((f32::NAN, f32::NAN));
+    // Where the frame goes, over the last 60: the app loop's scopes and our command recording.
+    // `render` minus `encode` is the acquire, the submit and the present — waiting on the GPU.
+    if let Some(p) = world.get_resource::<gizmo::core::profiler::FrameProfiler>() {
+        let ms = |n: &str| p.avg_scope_ms(n, 60);
+        println!(
+            "prof  frame {:.1} ms · physics {:.1} · update {:.1} · render {:.1} (encode {:.1}, rest {:.1})",
+            p.avg_frame_ms(60),
+            ms("physics"),
+            ms("update"),
+            ms("render"),
+            ms("encode"),
+            ms("render") - ms("encode"),
+        );
+    }
     println!(
         "diag  pos ({:+.1},{:+.2},{:+.1})  vel ({:+.2},{:+.2},{:+.2})  speed {:+.1} km/h  cell {:?}           grounded {grounded:?}  frame {med:.1}/{p95:.1} ms ({:.0} fps)",
         pose.position.x, pose.position.y, pose.position.z,

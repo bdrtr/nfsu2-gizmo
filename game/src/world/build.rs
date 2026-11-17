@@ -234,7 +234,8 @@ pub fn build_region(
 /// `XO_SIGNHARDHAT` keep only the post or the frame), so a face was gone past 450 m. Downtown
 /// at (845, 900), car held, six runs: 200/450 → 27.4 / 20.5 ms median, 500/1200 → 23.8 / 21.6,
 /// no LOD → 23.4 / 24.3 — differences inside the run-to-run noise, so the farther bands cost
-/// nothing measurable. `NFS_LOD_BANDS="near,mid"` overrides, `NFS_LOD=off` draws `_1A` everywhere.
+/// nothing measurable. Used only under `NFS_LOD=on`: by default `nfs_cruise` draws every copy at
+/// `_1A`, merged into the city's own buckets. `NFS_LOD_BANDS="near,mid"` overrides.
 pub const LOD_BANDS: [f32; 3] = [500.0, 1200.0, f32::MAX];
 
 /// [`LOD_BANDS`], or `NFS_LOD_BANDS="near,mid"` in metres in its place.
