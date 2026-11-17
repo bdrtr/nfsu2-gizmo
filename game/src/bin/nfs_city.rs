@@ -21,6 +21,8 @@
 //! - `NFS_EYE="x,y,z"` — camera eye, relative to the look-at point. Default is a high
 //!   three-quarter view framing the whole of what loaded.
 //! - `NFS_ONLY=<substr>` — draw only the objects whose name contains it.
+//! - `NFS_LOD_BANDS="near,mid"` with `NFS_AT` and `NFS_EYE` — draw each instanced copy at the
+//!   detail level `nfs_cruise` would from that eye, instead of the finest everywhere.
 //! - `NFS_EVENT=<n>` — raise race n's barrier groups without drawing its line.
 //! - `NFS_TIERS=all|coarse` — put the coarse detail tiers back, or draw *only* them. Only the
 //!   richest member of each family is drawn by default; see [`nfsu2::world::lod`].
@@ -107,7 +109,26 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
             });
             let region = nfsu2::world::region_beside(file).unwrap_or_default();
             let groups = nfsu2::world::shown_groups(&region, event);
-            scenery.extend(nfsu2::world::instance(bytes, &mut own, &groups));
+            match lod_eye() {
+                // `NFS_LOD_BANDS` with a camera: each copy at the level `nfs_cruise`'s LodGroup would
+                // pick from that eye — its cell centre's distance against `world::lod_bands`.
+                Some(eye) => {
+                    let bands = nfsu2::world::lod_bands();
+                    for mut levels in nfsu2::world::instance_lods(bytes, &mut own, &groups) {
+                        if levels.is_empty() {
+                            continue;
+                        }
+                        let h = &levels[0].header;
+                        let centre = nfsu2::world::world_point(h, h.bbox_min)
+                            .midpoint(nfsu2::world::world_point(h, h.bbox_max));
+                        let d = nfsu2::world::cell_centre(nfsu2::world::cell_of(centre)).distance(eye);
+                        let band = bands.iter().position(|b| d <= *b).unwrap_or(2);
+                        let pick = band.min(levels.len() - 1);
+                        scenery.push(levels.swap_remove(pick));
+                    }
+                }
+                None => scenery.extend(nfsu2::world::instance(bytes, &mut own, &groups)),
+            }
         }
         meshes.extend(own);
         packs.extend(gizmo_nfs::world::packs(bytes).expect("read a region's texture packs"));
@@ -1794,3 +1815,10 @@ fn probe(dir: &str, meshes: &[gizmo_nfs::world::WorldMesh]) {
     );
 }
 
+/// The camera for `NFS_LOD_BANDS`: `NFS_AT + NFS_EYE`, when all three are set.
+fn lod_eye() -> Option<Vec3> {
+    std::env::var("NFS_LOD_BANDS").ok()?;
+    let at = vec3_of(&std::env::var("NFS_AT").ok()?)?;
+    let eye = vec3_of(&std::env::var("NFS_EYE").ok()?)?;
+    Some(at + eye)
+}

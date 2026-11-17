@@ -1310,6 +1310,11 @@ fn update(world: &mut World, state: &mut CruiseState, dt: f32, input: &Input) {
     state.frames.push(dt * 1000.0);
 
     let mut controls = state.driver.read(input, dt);
+    // `NFS_HOLD=1`: the keys ignored and the brakes on — for timing frames at one spot, where a
+    // touched key would turn a comparison of settings into a comparison of views.
+    if std::env::var("NFS_HOLD").is_ok_and(|v| v != "0") {
+        controls = nfsu2::rig::Controls { brake: 1.0, ..Default::default() };
+    }
     // The keyboard read the way NFSU2 reads it: steering scaled to the speed, Down brakes before it
     // reverses, Space is the handbrake — `CarRig::for_human`.
     controls = state.rig.for_human(world, controls);

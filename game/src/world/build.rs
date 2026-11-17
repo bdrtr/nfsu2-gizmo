@@ -226,9 +226,27 @@ pub fn build_region(
 }
 
 /// How far each detail level of an instanced copy is drawn, in metres from the cell's centre to
-/// the camera: `_1A` close, `_1B` across the neighbouring cells, `_1Z` beyond. A cell is 256 m, so
-/// the camera's own cell is always within the first band.
-pub const LOD_BANDS: [f32; 3] = [200.0, 450.0, f32::MAX];
+/// the camera: `_1A` close, `_1B` across the next cells, `_1Z` beyond. A cell is 256 m, so the
+/// camera's own cell is always within the first band.
+///
+/// Not the game's own numbers — those are not read yet. Was 200/450, and signs read late: many
+/// `_1Z` levels drop the sign face's texture altogether (`XO_POLOCLUBSIGNA`, `XS_KINGGASSIGNA`,
+/// `XO_SIGNHARDHAT` keep only the post or the frame), so a face was gone past 450 m. Downtown
+/// at (845, 900), car held, six runs: 200/450 → 27.4 / 20.5 ms median, 500/1200 → 23.8 / 21.6,
+/// no LOD → 23.4 / 24.3 — differences inside the run-to-run noise, so the farther bands cost
+/// nothing measurable. `NFS_LOD_BANDS="near,mid"` overrides, `NFS_LOD=off` draws `_1A` everywhere.
+pub const LOD_BANDS: [f32; 3] = [500.0, 1200.0, f32::MAX];
+
+/// [`LOD_BANDS`], or `NFS_LOD_BANDS="near,mid"` in metres in its place.
+#[must_use]
+pub fn lod_bands() -> [f32; 3] {
+    let Ok(v) = std::env::var("NFS_LOD_BANDS") else { return LOD_BANDS };
+    let n: Vec<f32> = v.split(',').filter_map(|p| p.trim().parse().ok()).collect();
+    match n[..] {
+        [a, b] if a > 0.0 && b > a => [a, b, f32::MAX],
+        _ => LOD_BANDS,
+    }
+}
 
 /// One merged draw of instanced copies with its detail levels — spawn [`Self::levels`]' first
 /// mesh with a `LodGroup` of all of them.
@@ -268,6 +286,7 @@ pub fn build_lods(
             emit(object, cell, cell_centre(cell), packs, shared, &mut unresolved, bucket);
         }
     }
+    let bands = lod_bands();
     let mut out: BTreeMap<BucketKey, Vec<(Mesh, f32)>> = BTreeMap::new();
     for (band, bucket) in buckets.into_iter().enumerate() {
         for ((cell, texture), verts) in bucket {
@@ -277,7 +296,7 @@ pub fn build_lods(
             let label = format!("scenery_{}_{}_{band}", cell.0, cell.1);
             out.entry((cell, texture))
                 .or_default()
-                .push((Mesh::from_vertices(device, &verts, label), LOD_BANDS[band]));
+                .push((Mesh::from_vertices(device, &verts, label), bands[band]));
         }
     }
     out.into_iter()
