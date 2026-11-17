@@ -54,6 +54,7 @@ use gizmo::physics::world::PhysicsWorld;
 use gizmo::prelude::*;
 use gizmo::renderer::Renderer;
 use gizmo_nfs::parse_geometry;
+use crate::ecs::{ById, ByIdMut};
 
 /// The paint to fall back on when the install's palette is unreadable — the deep blue every
 /// binary has always defaulted to. `NFS_PAINT` picks a real colour out of the palette instead.
@@ -836,17 +837,17 @@ impl CarRig {
         if per_mps <= 0.0 {
             return;
         }
-        let Some(rotation) = world.borrow::<Transform>().get(self.chassis).map(|t| t.rotation)
+        let Some(rotation) = world.query::<&Transform>().by_id(self.chassis).map(|t| t.rotation)
         else {
             return;
         };
-        let Some(mass) = world.borrow::<RigidBody>().get(self.chassis).map(|rb| rb.mass) else {
+        let Some(mass) = world.query::<&RigidBody>().by_id(self.chassis).map(|rb| rb.mass) else {
             return;
         };
         if mass <= 0.0 {
             return;
         }
-        if let Some(mut v) = world.borrow_mut::<Velocity>().get_mut(self.chassis) {
+        if let Some(mut v) = world.query_mut::<&mut Velocity>().by_id_mut(self.chassis) {
             let speed = v.linear.length();
             if speed < 0.1 {
                 return;
@@ -864,10 +865,10 @@ impl CarRig {
     /// vehicle controller, which pushes what it meets and is pushed by nothing — a rival on rails
     /// ([`rail`]). Keeps its collider, so the player can still hit it.
     pub fn make_kinematic(&self, world: &mut World) {
-        if let Some(mut rb) = world.borrow_mut::<RigidBody>().get_mut(self.chassis) {
+        if let Some(mut rb) = world.query_mut::<&mut RigidBody>().by_id_mut(self.chassis) {
             *rb = RigidBody::new_kinematic();
         }
-        if let Some(mut v) = world.borrow_mut::<Velocity>().get_mut(self.chassis) {
+        if let Some(mut v) = world.query_mut::<&mut Velocity>().by_id_mut(self.chassis) {
             *v = Velocity::default();
         }
         if let Some(e) = world.get_entity(self.chassis) {
@@ -876,7 +877,7 @@ impl CarRig {
         // Out of the solver altogether: to it a kinematic body is a wall of infinite mass, and the
         // player met rivals as walls. Contacts with the player are resolved by [`bump`] instead,
         // and rails keep their distance from each other by themselves.
-        if let Some(mut c) = world.borrow_mut::<Collider>().get_mut(self.chassis) {
+        if let Some(mut c) = world.query_mut::<&mut Collider>().by_id_mut(self.chassis) {
             c.collision_layer = gizmo::physics::components::CollisionLayer::new(RAIL_LAYER).with_mask(0);
         }
     }
@@ -886,12 +887,12 @@ impl CarRig {
     /// rail knows better.
     #[must_use]
     pub fn bump_body(&self, world: &World, velocity: Option<Vec3>) -> Option<bump::Body> {
-        let transforms = world.borrow::<Transform>();
-        let t = transforms.get(self.chassis)?;
-        let bodies = world.borrow::<RigidBody>();
-        let rb = bodies.get(self.chassis);
-        let vels = world.borrow::<Velocity>();
-        let v = vels.get(self.chassis);
+        let transforms = world.query::<&Transform>();
+        let t = transforms.by_id(self.chassis)?;
+        let bodies = world.query::<&RigidBody>();
+        let rb = bodies.by_id(self.chassis);
+        let vels = world.query::<&Velocity>();
+        let v = vels.by_id(self.chassis);
         let (mass, inertia) = match (rb, velocity) {
             (Some(rb), None) if rb.mass > 0.0 => (rb.mass, rb.local_inertia),
             _ => (self.tune.as_ref().map_or(1200.0, |t| t.mass_kg), Vec3::ZERO),
@@ -909,12 +910,12 @@ impl CarRig {
 
     /// Apply what a contact did to this (driven) car: its velocity and spin, and the step apart.
     pub fn take_bump(&self, world: &mut World, dv: Vec3, dw: Vec3, moved: Vec3) {
-        if let Some(mut v) = world.borrow_mut::<Velocity>().get_mut(self.chassis) {
+        if let Some(mut v) = world.query_mut::<&mut Velocity>().by_id_mut(self.chassis) {
             v.linear += dv;
             v.angular += dw;
         }
         if moved != Vec3::ZERO {
-            if let Some(mut t) = world.borrow_mut::<Transform>().get_mut(self.chassis) {
+            if let Some(mut t) = world.query_mut::<&mut Transform>().by_id_mut(self.chassis) {
                 t.position += moved;
                 t.update_local_matrix();
             }
@@ -939,12 +940,12 @@ impl CarRig {
     /// physics step and the velocity that carries it to `next` by the end of one, so what it meets
     /// in between is pushed rather than passed through.
     pub fn place(&self, world: &mut World, now: (Vec3, Quat), next: (Vec3, Quat), dt: f32) {
-        if let Some(mut t) = world.borrow_mut::<Transform>().get_mut(self.chassis) {
+        if let Some(mut t) = world.query_mut::<&mut Transform>().by_id_mut(self.chassis) {
             t.position = now.0;
             t.rotation = now.1;
             t.update_local_matrix();
         }
-        if let Some(mut v) = world.borrow_mut::<Velocity>().get_mut(self.chassis) {
+        if let Some(mut v) = world.query_mut::<&mut Velocity>().by_id_mut(self.chassis) {
             let turn = next.1 * now.1.inverse();
             let (axis, angle) = turn.to_axis_angle();
             let angle = if angle > std::f32::consts::PI { angle - std::f32::consts::TAU } else { angle };
@@ -956,11 +957,11 @@ impl CarRig {
     /// Read the chassis' pose and speed. `None` once the chassis is gone, which ends the frame.
     #[must_use]
     pub fn pose(&self, world: &World) -> Option<Pose> {
-        let transforms = world.borrow::<Transform>();
-        let vehicles = world.borrow::<VehicleController>();
-        let speed = vehicles.get(self.chassis).map_or(0.0, |v| v.current_speed_kmh / 3.6);
+        let transforms = world.query::<&Transform>();
+        let vehicles = world.query::<&VehicleController>();
+        let speed = vehicles.by_id(self.chassis).map_or(0.0, |v| v.current_speed_kmh / 3.6);
         transforms
-            .get(self.chassis)
+            .by_id(self.chassis)
             .map(|t| Pose { position: t.position, rotation: t.rotation, speed })
     }
 
@@ -986,8 +987,8 @@ impl CarRig {
         if std::env::var("NFS_STEERASSIST").is_ok_and(|v| v == "0") {
             return steer;
         }
-        let vehicles = world.borrow::<VehicleController>();
-        let Some(v) = vehicles.get(self.chassis) else { return steer };
+        let vehicles = world.query::<&VehicleController>();
+        let Some(v) = vehicles.by_id(self.chassis) else { return steer };
         let speed = (v.current_speed_kmh / 3.6).abs().max(1.0);
         let wheelbase = if v.tuning.wheelbase > 0.5 { v.tuning.wheelbase } else { 2.6 };
         let lock = v.max_steering_angle.max(1e-3);
@@ -1001,8 +1002,8 @@ impl CarRig {
     /// kilidinde düşük hızda oyunun açısı kırpılırdı.
     #[must_use]
     pub fn game_steer(&self, world: &World, steer: f32, throttle: f32, brake: f32) -> f32 {
-        let vehicles = world.borrow::<VehicleController>();
-        let Some(v) = vehicles.get(self.chassis) else { return steer };
+        let vehicles = world.query::<&VehicleController>();
+        let Some(v) = vehicles.by_id(self.chassis) else { return steer };
         let mult = self.tune.as_ref().map_or(1.0, |t| t.steer_mult);
         let deg = steer::angle_deg(steer, v.current_speed_kmh / 3.6, throttle, brake, mult);
         (deg.to_radians() / v.max_steering_angle.max(1e-3)).clamp(-1.0, 1.0)
@@ -1012,8 +1013,8 @@ impl CarRig {
     /// m/s. Hız 1 m/s'nin altındayken açı 0 — oyunun da yaptığı gibi (`0x59FA10`).
     #[must_use]
     pub fn sideslip(&self, world: &World) -> Option<(f32, f32)> {
-        let lin = world.borrow::<Velocity>().get(self.chassis)?.linear;
-        let rot = world.borrow::<Transform>().get(self.chassis)?.rotation;
+        let lin = world.query::<&Velocity>().by_id(self.chassis)?.linear;
+        let rot = world.query::<&Transform>().by_id(self.chassis)?.rotation;
         let v = Vec3::new(lin.x, 0.0, lin.z);
         let speed = v.length();
         if speed < 1.0 {
@@ -1035,13 +1036,13 @@ impl CarRig {
         let Some((slip, speed)) = self.sideslip(world) else { return };
         let (down, _) = self.wheels_down(world);
         let (forward, yaw_rate, heading) = {
-            let vel = world.borrow::<Velocity>();
-            let tr = world.borrow::<Transform>();
-            let (Some(v), Some(t)) = (vel.get(self.chassis), tr.get(self.chassis)) else { return };
+            let vel = world.query::<&Velocity>();
+            let tr = world.query::<&Transform>();
+            let (Some(v), Some(t)) = (vel.by_id(self.chassis), tr.by_id(self.chassis)) else { return };
             let nose = t.rotation * Vec3::NEG_Z;
             (v.linear.dot(nose), v.angular.y, nose.x.atan2(-nose.z))
         };
-        let draft = world.borrow::<powertrain::Powertrain>().get(self.chassis).map_or(0.0, |p| p.draft);
+        let draft = world.query::<&powertrain::Powertrain>().by_id(self.chassis).map_or(0.0, |p| p.draft);
         let Some((scorer, moves)) = &mut self.style else { return };
         let motion = style::Motion { slip, speed, forward, wheels_down: down, yaw_rate, heading, draft };
         moves.observe(motion, scorer, dt);
@@ -1054,7 +1055,7 @@ impl CarRig {
     /// Nitro şu an yanıyor mu.
     #[must_use]
     pub fn nitro_firing(&self, world: &World) -> bool {
-        world.borrow::<powertrain::Powertrain>().get(self.chassis).is_some_and(|p| p.nitro.firing)
+        world.query::<&powertrain::Powertrain>().by_id(self.chassis).is_some_and(|p| p.nitro.firing)
     }
 
     /// Bu arabanın rüzgâr arkasını öndeki arabalardan hesaplayıp sürüklemesine yaz
@@ -1062,7 +1063,7 @@ impl CarRig {
     pub fn set_draft(&self, world: &mut World, others: &[(Vec3, Vec3, f32)]) {
         let Some(me) = self.pose(world) else { return };
         let d = powertrain::draft(me.position, others);
-        if let Some(mut p) = world.borrow_mut::<powertrain::Powertrain>().get_mut(self.chassis) {
+        if let Some(mut p) = world.query_mut::<&mut powertrain::Powertrain>().by_id_mut(self.chassis) {
             p.draft = d;
         }
     }
@@ -1070,7 +1071,7 @@ impl CarRig {
     /// Nitro deposuna `tank` kesri ekle (2'ye kadar taşabilir, `0x592640`); nitro takılı değilse
     /// hiçbir şey.
     pub fn add_nitro(&self, world: &mut World, tank: f32) {
-        if let Some(mut p) = world.borrow_mut::<powertrain::Powertrain>().get_mut(self.chassis) {
+        if let Some(mut p) = world.query_mut::<&mut powertrain::Powertrain>().by_id_mut(self.chassis) {
             if p.spec.nitro_tank_s > 0.0 {
                 p.nitro.fill = powertrain::nitro_add(p.nitro.fill, tank);
             }
@@ -1121,16 +1122,16 @@ impl CarRig {
             steer::lock_deg(speed, 1.0, throttle, brake)
         } else {
             let lock = world
-                .borrow::<VehicleController>()
-                .get(self.chassis)
+                .query::<&VehicleController>()
+                .by_id(self.chassis)
                 .map_or(0.0, |v| v.max_steering_angle);
             (self.steer_for_speed(world, 1.0).abs() * lock).to_degrees()
         };
         let Some(lock) = steer::catch_lock_deg(key, slip_left_deg, self.drifting, full_deg) else {
             return steer;
         };
-        let vehicles = world.borrow::<VehicleController>();
-        let Some(v) = vehicles.get(self.chassis) else { return steer };
+        let vehicles = world.query::<&VehicleController>();
+        let Some(v) = vehicles.by_id(self.chassis) else { return steer };
         let mult = self.tune.as_ref().map_or(1.0, |t| t.steer_mult);
         let deg = steer::shaped_deg(key, lock, mult);
         (deg.to_radians() / v.max_steering_angle.max(1e-3)).clamp(-1.0, 1.0)
@@ -1183,7 +1184,7 @@ impl CarRig {
     pub fn between_step(&self, world: &mut World, dt: f32) {
         self.apply_downforce(world, dt);
         if self.handbrake {
-            if let Some(mut v) = world.borrow_mut::<VehicleController>().get_mut(self.chassis) {
+            if let Some(mut v) = world.query_mut::<&mut VehicleController>().by_id_mut(self.chassis) {
                 for w in v.wheels.iter_mut().filter(|w| w.axle_type == Axle::Rear) {
                     w.angular_velocity = 0.0;
                 }
@@ -1193,12 +1194,15 @@ impl CarRig {
 
     /// Hand this frame's controls to the vehicle controller.
     pub fn drive(&self, world: &mut World, c: &Controls) {
-        let mut vehicles = world.borrow_mut::<VehicleController>();
-        let Some(mut v) = vehicles.get_mut(self.chassis) else { return };
+        let mut vehicles = world.query_mut::<&mut VehicleController>();
+        let Some(mut v) = vehicles.by_id_mut(self.chassis) else { return };
         v.set_reverse(c.throttle < 0.0);
         v.throttle_input = c.throttle.abs().min(1.0);
         v.brake_input = c.brake;
-        v.steering_input = c.steer.clamp(-1.0, 1.0);
+        // The game's steer is positive **left** — the engine's own convention until `a9a1b1f2`
+        // (2026-11-15), which turned it to positive right. Negated once, here, so every pilot,
+        // limit and measurement written against the old sign keeps its meaning.
+        v.steering_input = -c.steer.clamp(-1.0, 1.0);
         if self.human {
             v.max_steering_angle = PLAYER_LOCK;
         }
@@ -1210,7 +1214,7 @@ impl CarRig {
             v.current_gear = manual_gear(v.current_gear, c.shift, v.tuning.gear_ratios.len());
         }
         drop(vehicles);
-        if let Some(mut p) = world.borrow_mut::<powertrain::Powertrain>().get_mut(self.chassis) {
+        if let Some(mut p) = world.query_mut::<&mut powertrain::Powertrain>().by_id_mut(self.chassis) {
             p.nitro.request = c.nitro;
             p.human = self.human;
         }
@@ -1222,13 +1226,13 @@ impl CarRig {
     /// `y = 1.5`, which is neither where the car started nor a height any particular car should be
     /// dropped from.
     pub fn reset(&self, world: &mut World) {
-        let mut transforms = unsafe { world.borrow_mut_unchecked::<Transform>() };
-        let mut velocities = unsafe { world.borrow_mut_unchecked::<Velocity>() };
-        if let Some(mut t) = transforms.get_mut(self.chassis) {
+        let mut transforms = unsafe { world.query_unchecked::<&mut Transform>() };
+        let mut velocities = unsafe { world.query_unchecked::<&mut Velocity>() };
+        if let Some(mut t) = transforms.by_id_mut(self.chassis) {
             *t = self.start;
             t.update_local_matrix();
         }
-        if let Some(mut v) = velocities.get_mut(self.chassis) {
+        if let Some(mut v) = velocities.by_id_mut(self.chassis) {
             *v = Velocity::default();
         }
     }
@@ -1244,8 +1248,8 @@ impl CarRig {
     /// anyone reading this.
     #[must_use]
     pub fn wheels_down(&self, world: &World) -> (usize, usize) {
-        let vehicles = world.borrow::<VehicleController>();
-        vehicles.get(self.chassis).map_or((0, 0), |v| {
+        let vehicles = world.query::<&VehicleController>();
+        vehicles.by_id(self.chassis).map_or((0, 0), |v| {
             (v.wheels.iter().filter(|w| w.is_grounded).count(), v.wheels.len())
         })
     }
@@ -1263,13 +1267,13 @@ impl CarRig {
     /// reads 0.0 rather than dividing by it.
     #[must_use]
     pub fn wheel_load(&self, world: &World) -> f32 {
-        let bodies = world.borrow::<RigidBody>();
-        let weight = bodies.get(self.chassis).map_or(0.0, |b| b.mass * 9.81);
+        let bodies = world.query::<&RigidBody>();
+        let weight = bodies.by_id(self.chassis).map_or(0.0, |b| b.mass * 9.81);
         if weight <= 0.0 {
             return 0.0;
         }
-        let vehicles = world.borrow::<VehicleController>();
-        vehicles.get(self.chassis).map_or(0.0, |v| {
+        let vehicles = world.query::<&VehicleController>();
+        vehicles.by_id(self.chassis).map_or(0.0, |v| {
             v.wheels.iter().map(|w| w.suspension_force).sum::<f32>() / weight
         })
     }
@@ -1291,8 +1295,8 @@ impl CarRig {
     /// under the same torque is being held, which are opposite faults.
     #[must_use]
     pub fn drivetrain(&self, world: &World) -> (usize, f32, f32, f32) {
-        let vehicles = world.borrow::<VehicleController>();
-        vehicles.get(self.chassis).map_or((0, 0.0, 0.0, 0.0), |v| {
+        let vehicles = world.query::<&VehicleController>();
+        vehicles.by_id(self.chassis).map_or((0, 0.0, 0.0, 0.0), |v| {
             (
                 v.current_gear,
                 v.engine_rpm,
@@ -1392,8 +1396,8 @@ impl CarRig {
         }
 
         let v = {
-            let velocities = world.borrow::<Velocity>();
-            velocities.get(self.chassis).map_or(Vec3::ZERO, |x| x.linear)
+            let velocities = world.query::<&Velocity>();
+            velocities.by_id(self.chassis).map_or(Vec3::ZERO, |x| x.linear)
         };
         let flat = Vec3::new(v.x, 0.0, v.z);
         let speed = flat.length();
@@ -1465,8 +1469,8 @@ impl CarRig {
             return Fence { held: false, off_level };
         }
 
-        let mut velocities = unsafe { world.borrow_mut_unchecked::<Velocity>() };
-        if let Some(mut x) = velocities.get_mut(self.chassis) {
+        let mut velocities = unsafe { world.query_unchecked::<&mut Velocity>() };
+        if let Some(mut x) = velocities.by_id_mut(self.chassis) {
             x.linear -= n * outward;
         }
         Fence { held: true, off_level }
@@ -1568,13 +1572,13 @@ impl CarRig {
         self.airborne_for = 0.0;
         self.grounded_for = 0.0;
         let safe = self.last_safe;
-        let mut transforms = unsafe { world.borrow_mut_unchecked::<Transform>() };
-        let mut velocities = unsafe { world.borrow_mut_unchecked::<Velocity>() };
-        if let Some(mut t) = transforms.get_mut(self.chassis) {
+        let mut transforms = unsafe { world.query_unchecked::<&mut Transform>() };
+        let mut velocities = unsafe { world.query_unchecked::<&mut Velocity>() };
+        if let Some(mut t) = transforms.by_id_mut(self.chassis) {
             *t = safe;
             t.update_local_matrix();
         }
-        if let Some(mut v) = velocities.get_mut(self.chassis) {
+        if let Some(mut v) = velocities.by_id_mut(self.chassis) {
             *v = Velocity::default();
         }
     }
@@ -1617,9 +1621,9 @@ impl CarRig {
         // the static compression of its spring. The controller states the strut's length every
         // step, and [`strut_centre`] puts the wheel at its end.
         let (angles, centres): (Vec<f32>, Vec<Option<Vec3>>) = {
-            let vehicles = world.borrow::<VehicleController>();
+            let vehicles = world.query::<&VehicleController>();
             vehicles
-                .get(self.chassis)
+                .by_id(self.chassis)
                 .map(|v| v.wheels.iter().map(|w| (w.steering_angle, Some(strut_centre(w)))).unzip())
                 // A placed car has no controller: its rail says how the wheels should point, and
                 // they stand where its ride height was measured from: the mount, lifted by the
@@ -1634,14 +1638,14 @@ impl CarRig {
         // plain meaning: how far the wheel has rolled *forward*.
         let spin = Quat::from_axis_angle(Vec3::NEG_X, self.spin);
 
-        let mut transforms = unsafe { world.borrow_mut_unchecked::<Transform>() };
-        let mut globals = unsafe { world.borrow_mut_unchecked::<GlobalTransform>() };
+        let mut transforms = unsafe { world.query_unchecked::<&mut Transform>() };
+        let mut globals = unsafe { world.query_unchecked::<&mut GlobalTransform>() };
         let mut place = |id: u32, position: Vec3, rotation: Quat| {
-            if let Some(mut t) = transforms.get_mut(id) {
+            if let Some(mut t) = transforms.by_id_mut(id) {
                 t.position = position;
                 t.rotation = rotation;
                 t.update_local_matrix();
-                if let Some(mut g) = globals.get_mut(id) {
+                if let Some(mut g) = globals.by_id_mut(id) {
                     g.matrix = t.local_matrix;
                 }
             }

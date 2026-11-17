@@ -20,6 +20,7 @@ use gizmo_nfs::types::AssetHash;
 use nfsu2::scene::{self, Textures};
 use nfsu2::world::build_region;
 use std::collections::HashMap;
+use nfsu2::ecs::{ByIdMut};
 
 /// Metres per second at a walk, before the Shift multiplier. A city block is ~100 m, so this
 /// crosses one in about two seconds — fast enough to get somewhere, slow enough to look.
@@ -59,7 +60,7 @@ fn main() {
         .expect("failed to run app");
 }
 
-fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> FlyState {
+fn setup(world: &mut World, renderer: &mut gizmo::renderer::Renderer) -> FlyState {
     let path = nfsu2::world::tracks_path(std::env::args().nth(1));
 
     let nfsu2::world::Bundles { mut meshes, scenery, packs, shared, .. } = nfsu2::world::load(&path);
@@ -115,12 +116,12 @@ fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> FlyState {
     );
 
     let cam = world.spawn();
-    world.add_component(cam, Transform::new(start));
+    world.add_component(cam, Transform::new(start).with_rotation(Camera::rotation_from(-1.6, -0.35)));
     world.add_component(cam, GlobalTransform::default());
     // near 0.5 / far 20 000: the ratio is what costs depth precision, and a city needs the far
     // plane. A near tied to the framed radius — right for a car viewer — clips whatever the camera
     // is standing next to.
-    world.add_component(cam, Camera::new(std::f32::consts::FRAC_PI_4, 0.5, 20_000.0, -1.6, -0.35, true));
+    world.add_component(cam, Camera::new(std::f32::consts::FRAC_PI_4, 0.5, 20_000.0, true));
 
     println!("{} objects, {} meshes — flying at {start:?}", city.objects, city.meshes.len());
     FlyState {
@@ -172,21 +173,17 @@ fn update(world: &mut World, state: &mut FlyState, dt: f32, input: &Input) {
     };
 
     let cam_id = state.camera_id;
-    let mut transforms = unsafe { world.borrow_mut_unchecked::<Transform>() };
-    let mut globals = unsafe { world.borrow_mut_unchecked::<GlobalTransform>() };
-    let mut cameras = unsafe { world.borrow_mut_unchecked::<Camera>() };
+    let mut transforms = unsafe { world.query_unchecked::<&mut Transform>() };
+    let mut globals = unsafe { world.query_unchecked::<&mut GlobalTransform>() };
     let mut pos = Vec3::ZERO;
-    if let Some(mut t) = transforms.get_mut(cam_id) {
+    if let Some(mut t) = transforms.by_id_mut(cam_id) {
         t.position += step;
+        t.rotation = Camera::rotation_from(state.yaw, state.pitch);
         pos = t.position;
         t.update_local_matrix();
-        if let Some(mut g) = globals.get_mut(cam_id) {
+        if let Some(mut g) = globals.by_id_mut(cam_id) {
             g.matrix = t.local_matrix;
         }
-    }
-    if let Some(mut c) = cameras.get_mut(cam_id) {
-        c.yaw = state.yaw;
-        c.pitch = state.pitch;
     }
     if input.is_key_just_pressed(KeyCode::KeyF as u32) {
         println!("NFS_AT=\"{:.0},{:.0},{:.0}\"", pos.x, pos.y, pos.z);

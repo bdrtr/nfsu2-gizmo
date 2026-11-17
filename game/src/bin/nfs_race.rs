@@ -19,6 +19,7 @@ use gizmo::renderer::gpu_types::Vertex;
 use nfsu2::geom::add_transform;
 use nfsu2::rig::{spawn_car, CarRig, ChaseCamera, Driver, Placement, Rescue, FIXED_DT};
 use nfsu2::scene;
+use nfsu2::ecs::{ById};
 
 const DEFAULT_CAR: &str =
     "/home/bedir/Games/need-for-speed-underground-2/drive_c/Need for Speed Underground 2/CARS/240SX/GEOMETRY.BIN";
@@ -128,7 +129,7 @@ fn main() {
         .expect("failed to run app");
 }
 
-fn setup_scene(world: &mut World, renderer: &gizmo::renderer::Renderer) -> RaceState {
+fn setup_scene(world: &mut World, renderer: &mut gizmo::renderer::Renderer) -> RaceState {
     let path = scene::car_path(DEFAULT_CAR);
 
     let mut assets = AssetManager::new();
@@ -288,7 +289,7 @@ fn update(world: &mut World, state: &mut RaceState, dt: f32, input: &Input) {
     if state.autodrive {
         controls.throttle = 1.0;
         // Steer toward the next checkpoint so it actually laps the track.
-        if let Some(t) = world.borrow::<Transform>().get(state.rig.chassis) {
+        if let Some(t) = world.query::<&Transform>().by_id(state.rig.chassis) {
             let to = (state.checkpoints[state.next_cp] - t.position).normalize_or_zero();
             let fwd = t.rotation * Vec3::NEG_Z;
             let right = t.rotation * Vec3::X;
@@ -302,7 +303,7 @@ fn update(world: &mut World, state: &mut RaceState, dt: f32, input: &Input) {
     }
     state.rig.drive(world, &controls);
     if let Some(engine) = state.engine.as_mut() {
-        if let Some(v) = world.borrow::<gizmo::physics::vehicle::VehicleController>().get(state.rig.chassis) {
+        if let Some(v) = world.query::<&gizmo::physics::vehicle::VehicleController>().by_id(state.rig.chassis) {
             engine.follow(v, dt);
         }
     }
@@ -380,13 +381,13 @@ fn diagnose(world: &World, state: &mut RaceState, pose: nfsu2::rig::Pose) {
         return;
     }
     state.diag_tick = tick;
-    let vehicles = world.borrow::<gizmo::physics::vehicle::VehicleController>();
-    let Some(v) = vehicles.get(state.rig.chassis) else { return };
+    let vehicles = world.query::<&gizmo::physics::vehicle::VehicleController>();
+    let Some(v) = vehicles.by_id(state.rig.chassis) else { return };
     let grounded: Vec<bool> = v.wheels.iter().map(|w| w.is_grounded).collect();
     let drive: Vec<f32> = v.wheels.iter().map(|w| w.drive_torque.round()).collect();
     // The rigid body's *own* velocity, beside the controller's idea of speed. If the two disagree
     // the bug is not in the car, it is in what is being integrated.
-    let vel = world.borrow::<Velocity>().get(state.rig.chassis).map_or(Vec3::ZERO, |v| v.linear);
+    let vel = world.query::<&Velocity>().by_id(state.rig.chassis).map_or(Vec3::ZERO, |v| v.linear);
     println!(
         "diag  pos ({:+.2},{:+.2},{:+.2})  vel ({:+.2},{:+.2},{:+.2})  fwd_speed {:+.2}  gear {}  rpm {:.0}  throttle {:.2}  grounded {grounded:?}  drive {drive:?}",
         pose.position.x, pose.position.y, pose.position.z,

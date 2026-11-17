@@ -47,6 +47,7 @@ use nfsu2::scene::{self, Textures};
 // characters from a variable of another type is a re-read waiting to happen.
 use nfsu2::world as city;
 use std::collections::HashMap;
+use nfsu2::ecs::{ById, ByIdMut};
 
 /// How far apart the driven waypoints are after the outline is subdivided.
 ///
@@ -602,7 +603,7 @@ fn main() {
         .expect("failed to run app");
 }
 
-fn setup(world: &mut World, renderer: &gizmo::renderer::Renderer) -> CruiseState {
+fn setup(world: &mut World, renderer: &mut gizmo::renderer::Renderer) -> CruiseState {
     // `NFS_DIAG`: the engine's own frame profiler, which the app loop fills with `physics`,
     // `update` and `render` scopes once the resource exists. `encode` is ours, inside `render`.
     if std::env::var("NFS_DIAG").is_ok() {
@@ -1386,7 +1387,7 @@ fn update(world: &mut World, state: &mut CruiseState, dt: f32, input: &Input) {
     }
     state.rig.drive(world, &controls);
     if let Some(engine) = state.engine.as_mut() {
-        if let Some(v) = world.borrow::<gizmo::physics::vehicle::VehicleController>().get(state.rig.chassis) {
+        if let Some(v) = world.query::<&gizmo::physics::vehicle::VehicleController>().by_id(state.rig.chassis) {
             engine.follow(v, dt);
         }
     }
@@ -1622,10 +1623,28 @@ fn diagnose(world: &World, state: &mut CruiseState, pose: nfsu2::rig::Pose) {
         return;
     }
     state.diag_tick = tick;
-    let vehicles = world.borrow::<gizmo::physics::vehicle::VehicleController>();
-    let Some(v) = vehicles.get(state.rig.chassis) else { return };
+    let vehicles = world.query::<&gizmo::physics::vehicle::VehicleController>();
+    let Some(v) = vehicles.by_id(state.rig.chassis) else { return };
     let grounded: Vec<bool> = v.wheels.iter().map(|w| w.is_grounded).collect();
-    let vel = world.borrow::<Velocity>().get(state.rig.chassis).map_or(Vec3::ZERO, |v| v.linear);
+    // `NFS_DIAG_WHEELS=1`: each wheel's torques, spin, load and grip — what a car that will not move
+    // is made of.
+    if std::env::var("NFS_DIAG_WHEELS").is_ok() {
+        for (k, w) in v.wheels.iter().enumerate() {
+            println!(
+                "wheel {k} {:?}{} drive {:+.0} N·m · brake {:.0} N·m · ω {:+.2} rad/s · Fz {:.0} N · μ {:.2} · susp {:.3} m",
+                w.axle_type,
+                if w.is_left { "L" } else { "R" },
+                w.drive_torque,
+                w.brake_torque,
+                w.angular_velocity,
+                w.suspension_force,
+                w.surface_friction,
+                w.suspension_length,
+            );
+        }
+        println!("engine rpm {:.0} · gear {} · throttle {:.2}", v.engine_rpm, v.current_gear, v.throttle_input);
+    }
+    let vel = world.query::<&Velocity>().by_id(state.rig.chassis).map_or(Vec3::ZERO, |v| v.linear);
     // The two things a pilot is judged on, and both are numbers rather than impressions: does it
     // stay inside the corridor the race defines, and does its progress only go up. A rival that
     // drifts out is lost; one whose progress falls has been pulled onto a crossing branch, which
@@ -1879,23 +1898,23 @@ fn sync_props(world: &mut World, props: &[(u32, Vec<u32>)]) {
         return;
     }
     let poses: Vec<(Vec3, Quat)> = {
-        let transforms = world.borrow::<Transform>();
+        let transforms = world.query::<&Transform>();
         props
             .iter()
-            .map(|(b, _)| transforms.get(*b).map_or((Vec3::ZERO, Quat::IDENTITY), |t| (t.position, t.rotation)))
+            .map(|(b, _)| transforms.by_id(*b).map_or((Vec3::ZERO, Quat::IDENTITY), |t| (t.position, t.rotation)))
             .collect()
     };
     // The same two unchecked borrows `CarRig::sync_visuals` takes: two different component
     // storages, held together for one loop.
-    let mut transforms = unsafe { world.borrow_mut_unchecked::<Transform>() };
-    let mut globals = unsafe { world.borrow_mut_unchecked::<GlobalTransform>() };
+    let mut transforms = unsafe { world.query_unchecked::<&mut Transform>() };
+    let mut globals = unsafe { world.query_unchecked::<&mut GlobalTransform>() };
     for ((_, drawn), (position, rotation)) in props.iter().zip(poses) {
         for &id in drawn {
-            if let Some(mut t) = transforms.get_mut(id) {
+            if let Some(mut t) = transforms.by_id_mut(id) {
                 t.position = position;
                 t.rotation = rotation;
                 t.update_local_matrix();
-                if let Some(mut g) = globals.get_mut(id) {
+                if let Some(mut g) = globals.by_id_mut(id) {
                     g.matrix = t.local_matrix;
                 }
             }

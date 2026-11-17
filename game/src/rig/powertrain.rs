@@ -32,6 +32,7 @@
 use gizmo::core::component::Component;
 use gizmo::physics::vehicle::VehicleController;
 use gizmo::prelude::*;
+use crate::ecs::{ById, ByIdMut};
 
 /// Hava yoğunluğu; motorun aero kodundakiyle aynı sayı, çünkü sürüklenme oraya `C_d` olarak
 /// yazılıyor ve motor onu bununla çarpıyor.
@@ -317,15 +318,15 @@ pub fn before_step(world: &mut World, dt: f32) {
     if !enabled() {
         return;
     }
-    let ids: Vec<u32> = world.borrow::<Powertrain>().entities().collect();
+    let ids: Vec<u32> = world.query::<(gizmo::core::entity::Entity, &Powertrain)>().iter().map(|(e, _)| e.id()).collect();
     for id in ids {
-        let Some(mut p) = world.borrow::<Powertrain>().get(id).cloned() else { continue };
+        let Some(mut p) = world.query::<&Powertrain>().by_id(id).cloned() else { continue };
         {
-            let mut vehicles = world.borrow_mut::<VehicleController>();
-            let Some(mut vc) = vehicles.get_mut(id) else { continue };
+            let mut vehicles = world.query_mut::<&mut VehicleController>();
+            let Some(mut vc) = vehicles.by_id_mut(id) else { continue };
             prepare(&mut p, &mut vc, dt);
         }
-        if let Some(mut slot) = world.borrow_mut::<Powertrain>().get_mut(id) {
+        if let Some(mut slot) = world.query_mut::<&mut Powertrain>().by_id_mut(id) {
             *slot = p;
         }
     }
@@ -461,11 +462,11 @@ pub fn after_step(world: &mut World, dt: f32) {
     if !enabled() {
         return;
     }
-    let ids: Vec<u32> = world.borrow::<Powertrain>().entities().collect();
+    let ids: Vec<u32> = world.query::<(gizmo::core::entity::Entity, &Powertrain)>().iter().map(|(e, _)| e.id()).collect();
     for id in ids {
-        let Some(p) = world.borrow::<Powertrain>().get(id).cloned() else { continue };
-        let mut vehicles = world.borrow_mut::<VehicleController>();
-        let Some(mut vc) = vehicles.get_mut(id) else { continue };
+        let Some(p) = world.query::<&Powertrain>().by_id(id).cloned() else { continue };
+        let mut vehicles = world.query_mut::<&mut VehicleController>();
+        let Some(mut vc) = vehicles.by_id_mut(id) else { continue };
         engine_braking(&p, &mut vc, dt);
         vc.throttle_input = p.driver;
     }

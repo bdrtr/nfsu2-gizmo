@@ -63,6 +63,7 @@
 //! and the car's own top speed in the speed scale, of which the code's fallback of 100 is used.
 
 use gizmo::prelude::*;
+use crate::ecs::{ByIdMut};
 
 /// The game's field of view for its chase views, vertical, radians: see the module notes.
 pub const GAME_FOV: f32 = GAME_HFOV * 0.75;
@@ -446,8 +447,9 @@ impl ChaseCamera {
     pub fn spawn(world: &mut World, at: Vec3, near: f32, far: f32) -> Self {
         let (yaw, pitch) = (-std::f32::consts::FRAC_PI_2, -0.3);
         let camera = world.spawn();
-        crate::geom::add_transform(world, camera, Transform::new(at));
-        world.add_component(camera, Camera::new(std::f32::consts::FRAC_PI_4, near, far, yaw, pitch, true));
+        // Where a camera looks is its transform's rotation now (`Camera::rotation_from`).
+        crate::geom::add_transform(world, camera, Transform::new(at).with_rotation(Camera::rotation_from(yaw, pitch)));
+        world.add_component(camera, Camera::new(std::f32::consts::FRAC_PI_4, near, far, true));
         // `NFS_CAM="uzaklık,yükseklik,dönüş"`: kovalamanın oturduğu yer, deneme için.
         let cam: Vec<f32> = std::env::var("NFS_CAM")
             .map(|v| v.split(',').filter_map(|x| x.trim().parse().ok()).collect())
@@ -609,19 +611,18 @@ impl ChaseCamera {
 
     /// Write the camera state onto its entity.
     fn write(&self, world: &mut World) {
-        let mut transforms = unsafe { world.borrow_mut_unchecked::<Transform>() };
-        let mut globals = unsafe { world.borrow_mut_unchecked::<GlobalTransform>() };
-        let mut cameras = unsafe { world.borrow_mut_unchecked::<Camera>() };
-        if let Some(mut t) = transforms.get_mut(self.id) {
+        let mut transforms = unsafe { world.query_unchecked::<&mut Transform>() };
+        let mut globals = unsafe { world.query_unchecked::<&mut GlobalTransform>() };
+        let mut cameras = unsafe { world.query_unchecked::<&mut Camera>() };
+        if let Some(mut t) = transforms.by_id_mut(self.id) {
             t.position = self.position;
+            t.rotation = Camera::rotation_from(self.yaw + self.shake.0, self.pitch + self.shake.1);
             t.update_local_matrix();
-            if let Some(mut g) = globals.get_mut(self.id) {
+            if let Some(mut g) = globals.by_id_mut(self.id) {
                 g.matrix = t.local_matrix;
             }
         }
-        if let Some(mut c) = cameras.get_mut(self.id) {
-            c.yaw = self.yaw + self.shake.0;
-            c.pitch = self.pitch + self.shake.1;
+        if let Some(mut c) = cameras.by_id_mut(self.id) {
             c.fov = self.fov;
         }
     }

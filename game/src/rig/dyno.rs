@@ -28,6 +28,7 @@ use crate::geom::add_transform;
 use gizmo::physics::world::PhysicsWorld;
 use gizmo::prelude::*;
 use gizmo::renderer::Renderer;
+use crate::ecs::{ById, ByIdMut};
 
 /// How long the car stands before anything is asked of it, so the suspension has settled and the
 /// first sample of the acceleration run is from rest rather than from a drop.
@@ -254,10 +255,20 @@ impl Bench {
         let plane = world.spawn();
         let at = Transform::new(Vec3::ZERO);
         add_transform(&mut world, plane, at);
-        let collider = crate::scene::road(Collider::offset_box(
-            Vec3::new(0.0, -PLANE_THICK / 2.0, 0.0),
-            Vec3::new(PLANE_HALF, PLANE_THICK / 2.0, PLANE_HALF),
-        ));
+        // `NFS_BENCH_TRIMESH=1`: the plane as two triangles instead of a box — the city's colliders
+        // are triangle meshes, and the bench is otherwise the one place a car is known to behave.
+        let collider = if std::env::var("NFS_BENCH_TRIMESH").is_ok_and(|v| v == "1") {
+            let h = PLANE_HALF;
+            crate::scene::road(Collider::trimesh(
+                vec![Vec3::new(-h, 0.0, -h), Vec3::new(h, 0.0, -h), Vec3::new(h, 0.0, h), Vec3::new(-h, 0.0, h)],
+                vec![0, 2, 1, 0, 3, 2],
+            ))
+        } else {
+            crate::scene::road(Collider::offset_box(
+                Vec3::new(0.0, -PLANE_THICK / 2.0, 0.0),
+                Vec3::new(PLANE_HALF, PLANE_THICK / 2.0, PLANE_HALF),
+            ))
+        };
         world.add_component(plane, RigidBody::new_static());
         world.add_component(plane, Velocity::default());
         world.add_component(plane, collider.clone());
@@ -276,7 +287,7 @@ impl Bench {
         // `NFS_DYNO_DAMPING=<x>` / `NFS_DYNO_ANGDAMP=<x>`: the chassis' linear and angular damping
         // replaced, for the bench only — so each one's share of a number can be read directly.
         let knob = |name: &str| std::env::var(name).ok().and_then(|v| v.parse::<f32>().ok());
-        if let Some(mut rb) = world.borrow_mut::<RigidBody>().get_mut(rig.chassis) {
+        if let Some(mut rb) = world.query_mut::<&mut RigidBody>().by_id_mut(rig.chassis) {
             if let Some(d) = knob("NFS_DYNO_DAMPING") {
                 println!("tezgâh: linear_damping {} → {d}", rb.linear_damping);
                 rb.linear_damping = d;
@@ -334,8 +345,8 @@ impl Bench {
 
     /// How far the car has gone along −Z from where it stood.
     pub fn travelled(&self) -> f32 {
-        let tr = self.world.borrow::<Transform>();
-        tr.get(self.rig.chassis).map_or(0.0, |t| -t.position.z)
+        let tr = self.world.query::<&Transform>();
+        tr.by_id(self.rig.chassis).map_or(0.0, |t| -t.position.z)
     }
 
     /// The car's own up axis, world space — `y` below zero is a car on its roof.
@@ -383,7 +394,7 @@ impl Bench {
         b.world.insert_resource(phys);
         rival.make_kinematic(&mut b.world);
         if solver {
-            if let Some(mut c) = b.world.borrow_mut::<Collider>().get_mut(rival.chassis) {
+            if let Some(mut c) = b.world.query_mut::<&mut Collider>().by_id_mut(rival.chassis) {
                 c.collision_layer = gizmo::physics::components::CollisionLayer::default();
             }
         }
@@ -458,10 +469,10 @@ impl Bench {
     }
 
     fn velocity(&self) -> (Vec3, Vec3, Quat) {
-        let vel = self.world.borrow::<Velocity>();
-        let tr = self.world.borrow::<Transform>();
-        let v = vel.get(self.rig.chassis).map_or((Vec3::ZERO, Vec3::ZERO), |v| (v.linear, v.angular));
-        let r = tr.get(self.rig.chassis).map_or(Quat::IDENTITY, |t| t.rotation);
+        let vel = self.world.query::<&Velocity>();
+        let tr = self.world.query::<&Transform>();
+        let v = vel.by_id(self.rig.chassis).map_or((Vec3::ZERO, Vec3::ZERO), |v| (v.linear, v.angular));
+        let r = tr.by_id(self.rig.chassis).map_or(Quat::IDENTITY, |t| t.rotation);
         (v.0, v.1, r)
     }
 
@@ -480,8 +491,8 @@ impl Bench {
     /// The gear the box is in and the engine speed — what a trace needs to say why the car stopped
     /// gaining.
     pub fn gearbox(&self) -> (usize, f32) {
-        let vehicles = self.world.borrow::<gizmo::physics::vehicle::VehicleController>();
-        vehicles.get(self.rig.chassis).map_or((0, 0.0), |v| (v.current_gear, v.engine_rpm))
+        let vehicles = self.world.query::<&gizmo::physics::vehicle::VehicleController>();
+        vehicles.by_id(self.rig.chassis).map_or((0, 0.0), |v| (v.current_gear, v.engine_rpm))
     }
 
     /// Yaw rate, in rad/s.
@@ -512,8 +523,8 @@ impl Bench {
     /// Every wheel as the controller sees it: whether it touches, the suspension force it carries
     /// in newtons, and the friction of what it stands on.
     pub fn wheels(&self) -> Vec<(bool, f32, f32)> {
-        let vehicles = self.world.borrow::<gizmo::physics::vehicle::VehicleController>();
-        vehicles.get(self.rig.chassis).map_or_else(Vec::new, |v| {
+        let vehicles = self.world.query::<&gizmo::physics::vehicle::VehicleController>();
+        vehicles.by_id(self.rig.chassis).map_or_else(Vec::new, |v| {
             v.wheels.iter().map(|w| (w.is_grounded, w.suspension_force, w.surface_friction)).collect()
         })
     }
@@ -522,10 +533,10 @@ impl Bench {
     /// (where the eye used to see it) and at the end of its strut (where the controller has it,
     /// [`super::strut_centre`]). Zero is a wheel standing on the road; negative is one sunk into it.
     pub fn wheel_bottoms(&self) -> Vec<(f32, f32)> {
-        let tr = self.world.borrow::<Transform>();
-        let Some(t) = tr.get(self.rig.chassis) else { return Vec::new() };
-        let vehicles = self.world.borrow::<gizmo::physics::vehicle::VehicleController>();
-        let Some(v) = vehicles.get(self.rig.chassis) else { return Vec::new() };
+        let tr = self.world.query::<&Transform>();
+        let Some(t) = tr.by_id(self.rig.chassis) else { return Vec::new() };
+        let vehicles = self.world.query::<&gizmo::physics::vehicle::VehicleController>();
+        let Some(v) = vehicles.by_id(self.rig.chassis) else { return Vec::new() };
         let bottom = |local: Vec3| (t.position + t.rotation * local).y - self.rig.radius;
         self.rig
             .wheels
@@ -538,8 +549,8 @@ impl Bench {
     /// Every strut's compression from its rest length, in metres, in the rig's order — how far the
     /// wheel has moved up into the body.
     pub fn travel(&self) -> Vec<f32> {
-        let vehicles = self.world.borrow::<gizmo::physics::vehicle::VehicleController>();
-        vehicles.get(self.rig.chassis).map_or_else(Vec::new, |v| {
+        let vehicles = self.world.query::<&gizmo::physics::vehicle::VehicleController>();
+        vehicles.by_id(self.rig.chassis).map_or_else(Vec::new, |v| {
             v.wheels.iter().map(|w| w.suspension_rest_length - w.suspension_length).collect()
         })
     }
@@ -567,14 +578,14 @@ impl Bench {
         let step = Vec3::new(0.0, 0.0, -speed * FIXED_DT);
         self.rig.place(&mut self.world, (at, rot), (at + step, rot), FIXED_DT);
         // A body at rest is asleep, and a sleeping body's velocity is not integrated.
-        if let Some(mut rb) = self.world.borrow_mut::<RigidBody>().get_mut(self.rig.chassis) {
+        if let Some(mut rb) = self.world.query_mut::<&mut RigidBody>().by_id_mut(self.rig.chassis) {
             rb.wake_up();
         }
     }
 
     /// The chassis' position, world space.
     pub fn position(&self) -> Vec3 {
-        self.world.borrow::<Transform>().get(self.rig.chassis).map_or(Vec3::ZERO, |t| t.position)
+        self.world.query::<&Transform>().by_id(self.rig.chassis).map_or(Vec3::ZERO, |t| t.position)
     }
 
     /// Roll rate: the angular velocity about the car's own nose axis, rad/s.
@@ -596,13 +607,13 @@ impl Bench {
 
     /// The chassis' mass in kilograms, as its rigid body has it.
     pub fn mass(&self) -> f32 {
-        self.world.borrow::<RigidBody>().get(self.rig.chassis).map_or(0.0, |rb| rb.mass)
+        self.world.query::<&RigidBody>().by_id(self.rig.chassis).map_or(0.0, |rb| rb.mass)
     }
 
     /// The chassis' height over the plane, and the bottom of its collider box over the plane, in
     /// metres — a box that reaches the plane is carrying weight the tyres should be.
     pub fn clearance(&self) -> (f32, f32) {
-        let y = self.world.borrow::<Transform>().get(self.rig.chassis).map_or(0.0, |t| t.position.y);
+        let y = self.world.query::<&Transform>().by_id(self.rig.chassis).map_or(0.0, |t| t.position.y);
         let size = self.rig.size;
         // The rig's own box: centre `0.12 h` up, half-height `0.30 h` (see `spawn_car`).
         (y, y + size.y * 0.12 - size.y * 0.30)
@@ -646,8 +657,9 @@ impl Bench {
     /// full lock in a left turn the left front reads 28° against a 25° lock — so reading either
     /// one makes a lock look bigger than it is, and more so the harder the car is steered.
     pub fn steer_angle(&self) -> f32 {
-        let vehicles = self.world.borrow::<gizmo::physics::vehicle::VehicleController>();
-        vehicles.get(self.rig.chassis).map_or(0.0, |v| v.steering_input * v.max_steering_angle)
+        let vehicles = self.world.query::<&gizmo::physics::vehicle::VehicleController>();
+        // In the game's sign (positive left): the controller's input is negated in `CarRig::drive`.
+        vehicles.by_id(self.rig.chassis).map_or(0.0, |v| -v.steering_input * v.max_steering_angle)
     }
 }
 

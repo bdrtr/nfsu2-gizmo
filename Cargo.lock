@@ -283,12 +283,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9e1b586273c5702936fe7b7d6896644d8be71e6314cfe09d3167c95f712589e8"
 
 [[package]]
-name = "base64"
-version = "0.21.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9d297deb1925b89f2ccc13d7635fa0714f12c87adce1c75356b39ca9b7178567"
-
-[[package]]
 name = "bincode"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -635,6 +629,15 @@ dependencies = [
  "bitflags 1.3.2",
  "core-foundation 0.9.4",
  "libc",
+]
+
+[[package]]
+name = "core_maths"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "77745e017f5edba1a9c1d854f6f3a52dac8a12dd5af5d2f54aecf61e43d80d30"
+dependencies = [
+ "libm",
 ]
 
 [[package]]
@@ -1160,6 +1163,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5baebc0774151f905a1a2cc41989300b1e6fbb29aff0ceffa1064fdd3088d582"
 
 [[package]]
+name = "fixed_decimal"
+version = "0.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "79c3c892f121fff406e5dd6b28c1b30096b95111c30701a899d4f2b18da6d1bd"
+dependencies = [
+ "displaydoc",
+ "smallvec",
+ "writeable",
+]
+
+[[package]]
 name = "flate2"
 version = "1.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1372,13 +1386,14 @@ checksum = "e629b9b98ef3dd8afe6ca2bd0f89306cec16d43d907889945bc5d6687f2f13c7"
 
 [[package]]
 name = "gizmo-ai"
-version = "0.10.0"
-source = "git+https://github.com/bdrtr/Gizmo?rev=550a7dfd3aa1673022d588642b77fd533018d09c#550a7dfd3aa1673022d588642b77fd533018d09c"
+version = "0.11.0"
+source = "git+https://github.com/bdrtr/Gizmo?rev=fd8825ddcc7efb89a7aa37afd0a434fb6e7a1d01#fd8825ddcc7efb89a7aa37afd0a434fb6e7a1d01"
 dependencies = [
  "gizmo-core",
  "gizmo-math",
  "gizmo-physics-core",
  "gizmo-physics-rigid",
+ "rayon",
  "serde",
  "tracing",
  "web-time",
@@ -1386,8 +1401,8 @@ dependencies = [
 
 [[package]]
 name = "gizmo-analysis"
-version = "0.10.0"
-source = "git+https://github.com/bdrtr/Gizmo?rev=550a7dfd3aa1673022d588642b77fd533018d09c#550a7dfd3aa1673022d588642b77fd533018d09c"
+version = "0.11.0"
+source = "git+https://github.com/bdrtr/Gizmo?rev=fd8825ddcc7efb89a7aa37afd0a434fb6e7a1d01#fd8825ddcc7efb89a7aa37afd0a434fb6e7a1d01"
 dependencies = [
  "egui",
  "gizmo-core",
@@ -1395,8 +1410,8 @@ dependencies = [
 
 [[package]]
 name = "gizmo-animation"
-version = "0.10.0"
-source = "git+https://github.com/bdrtr/Gizmo?rev=550a7dfd3aa1673022d588642b77fd533018d09c#550a7dfd3aa1673022d588642b77fd533018d09c"
+version = "0.11.0"
+source = "git+https://github.com/bdrtr/Gizmo?rev=fd8825ddcc7efb89a7aa37afd0a434fb6e7a1d01#fd8825ddcc7efb89a7aa37afd0a434fb6e7a1d01"
 dependencies = [
  "gizmo-core",
  "gizmo-math",
@@ -1407,17 +1422,19 @@ dependencies = [
 
 [[package]]
 name = "gizmo-app"
-version = "0.10.0"
-source = "git+https://github.com/bdrtr/Gizmo?rev=550a7dfd3aa1673022d588642b77fd533018d09c#550a7dfd3aa1673022d588642b77fd533018d09c"
+version = "0.11.0"
+source = "git+https://github.com/bdrtr/Gizmo?rev=fd8825ddcc7efb89a7aa37afd0a434fb6e7a1d01#fd8825ddcc7efb89a7aa37afd0a434fb6e7a1d01"
 dependencies = [
  "backtrace",
  "console_error_panic_hook",
  "console_log",
+ "dirs",
  "egui",
  "egui-wgpu",
  "egui-winit",
  "gilrs",
  "gizmo-ai",
+ "gizmo-animation",
  "gizmo-audio",
  "gizmo-core",
  "gizmo-editor",
@@ -1429,11 +1446,17 @@ dependencies = [
  "gizmo-renderer",
  "gizmo-scene",
  "gizmo-scripting",
+ "icu_locale_core",
+ "icu_plurals",
+ "icu_provider",
  "image",
+ "jni 0.21.1",
  "js-sys",
  "log",
- "pollster 0.4.0",
+ "pollster 1.0.1",
  "rfd",
+ "serde",
+ "serde_json",
  "tracing",
  "tracing-wasm",
  "wasm-bindgen",
@@ -1446,8 +1469,8 @@ dependencies = [
 
 [[package]]
 name = "gizmo-audio"
-version = "0.10.0"
-source = "git+https://github.com/bdrtr/Gizmo?rev=550a7dfd3aa1673022d588642b77fd533018d09c#550a7dfd3aa1673022d588642b77fd533018d09c"
+version = "0.11.0"
+source = "git+https://github.com/bdrtr/Gizmo?rev=fd8825ddcc7efb89a7aa37afd0a434fb6e7a1d01#fd8825ddcc7efb89a7aa37afd0a434fb6e7a1d01"
 dependencies = [
  "gizmo-core",
  "log",
@@ -1457,13 +1480,14 @@ dependencies = [
 
 [[package]]
 name = "gizmo-core"
-version = "0.10.0"
-source = "git+https://github.com/bdrtr/Gizmo?rev=550a7dfd3aa1673022d588642b77fd533018d09c#550a7dfd3aa1673022d588642b77fd533018d09c"
+version = "0.11.0"
+source = "git+https://github.com/bdrtr/Gizmo?rev=fd8825ddcc7efb89a7aa37afd0a434fb6e7a1d01#fd8825ddcc7efb89a7aa37afd0a434fb6e7a1d01"
 dependencies = [
  "chrono",
  "crossbeam-queue",
  "rayon",
- "ron 0.8.1",
+ "ron",
+ "rustc-hash 2.1.3",
  "serde",
  "serde_json",
  "tracing",
@@ -1473,8 +1497,8 @@ dependencies = [
 
 [[package]]
 name = "gizmo-editor"
-version = "0.10.0"
-source = "git+https://github.com/bdrtr/Gizmo?rev=550a7dfd3aa1673022d588642b77fd533018d09c#550a7dfd3aa1673022d588642b77fd533018d09c"
+version = "0.11.0"
+source = "git+https://github.com/bdrtr/Gizmo?rev=fd8825ddcc7efb89a7aa37afd0a434fb6e7a1d01#fd8825ddcc7efb89a7aa37afd0a434fb6e7a1d01"
 dependencies = [
  "dirs",
  "egui",
@@ -1498,8 +1522,8 @@ dependencies = [
 
 [[package]]
 name = "gizmo-engine"
-version = "0.10.0"
-source = "git+https://github.com/bdrtr/Gizmo?rev=550a7dfd3aa1673022d588642b77fd533018d09c#550a7dfd3aa1673022d588642b77fd533018d09c"
+version = "0.11.0"
+source = "git+https://github.com/bdrtr/Gizmo?rev=fd8825ddcc7efb89a7aa37afd0a434fb6e7a1d01#fd8825ddcc7efb89a7aa37afd0a434fb6e7a1d01"
 dependencies = [
  "bytemuck",
  "egui",
@@ -1521,6 +1545,7 @@ dependencies = [
  "gizmo-scripting",
  "gizmo-ui",
  "gizmo-window",
+ "rustc-hash 2.1.3",
  "serde",
  "tracing",
  "wgpu",
@@ -1529,8 +1554,8 @@ dependencies = [
 
 [[package]]
 name = "gizmo-math"
-version = "0.10.0"
-source = "git+https://github.com/bdrtr/Gizmo?rev=550a7dfd3aa1673022d588642b77fd533018d09c#550a7dfd3aa1673022d588642b77fd533018d09c"
+version = "0.11.0"
+source = "git+https://github.com/bdrtr/Gizmo?rev=fd8825ddcc7efb89a7aa37afd0a434fb6e7a1d01#fd8825ddcc7efb89a7aa37afd0a434fb6e7a1d01"
 dependencies = [
  "getrandom 0.2.17",
  "glam",
@@ -1539,8 +1564,8 @@ dependencies = [
 
 [[package]]
 name = "gizmo-net"
-version = "0.10.0"
-source = "git+https://github.com/bdrtr/Gizmo?rev=550a7dfd3aa1673022d588642b77fd533018d09c#550a7dfd3aa1673022d588642b77fd533018d09c"
+version = "0.11.0"
+source = "git+https://github.com/bdrtr/Gizmo?rev=fd8825ddcc7efb89a7aa37afd0a434fb6e7a1d01#fd8825ddcc7efb89a7aa37afd0a434fb6e7a1d01"
 dependencies = [
  "bincode",
  "gizmo-core",
@@ -1557,8 +1582,8 @@ version = "0.4.0"
 
 [[package]]
 name = "gizmo-physics-core"
-version = "0.10.0"
-source = "git+https://github.com/bdrtr/Gizmo?rev=550a7dfd3aa1673022d588642b77fd533018d09c#550a7dfd3aa1673022d588642b77fd533018d09c"
+version = "0.11.0"
+source = "git+https://github.com/bdrtr/Gizmo?rev=fd8825ddcc7efb89a7aa37afd0a434fb6e7a1d01#fd8825ddcc7efb89a7aa37afd0a434fb6e7a1d01"
 dependencies = [
  "arrayvec",
  "gizmo-core",
@@ -1570,20 +1595,21 @@ dependencies = [
 
 [[package]]
 name = "gizmo-physics-dynamics"
-version = "0.10.0"
-source = "git+https://github.com/bdrtr/Gizmo?rev=550a7dfd3aa1673022d588642b77fd533018d09c#550a7dfd3aa1673022d588642b77fd533018d09c"
+version = "0.11.0"
+source = "git+https://github.com/bdrtr/Gizmo?rev=fd8825ddcc7efb89a7aa37afd0a434fb6e7a1d01#fd8825ddcc7efb89a7aa37afd0a434fb6e7a1d01"
 dependencies = [
  "gizmo-core",
  "gizmo-math",
  "gizmo-physics-core",
  "gizmo-physics-rigid",
+ "serde",
  "tracing",
 ]
 
 [[package]]
 name = "gizmo-physics-rigid"
-version = "0.10.0"
-source = "git+https://github.com/bdrtr/Gizmo?rev=550a7dfd3aa1673022d588642b77fd533018d09c#550a7dfd3aa1673022d588642b77fd533018d09c"
+version = "0.11.0"
+source = "git+https://github.com/bdrtr/Gizmo?rev=fd8825ddcc7efb89a7aa37afd0a434fb6e7a1d01#fd8825ddcc7efb89a7aa37afd0a434fb6e7a1d01"
 dependencies = [
  "crossbeam-queue",
  "getrandom 0.4.3",
@@ -1602,22 +1628,24 @@ dependencies = [
 
 [[package]]
 name = "gizmo-physics-soft"
-version = "0.10.0"
-source = "git+https://github.com/bdrtr/Gizmo?rev=550a7dfd3aa1673022d588642b77fd533018d09c#550a7dfd3aa1673022d588642b77fd533018d09c"
+version = "0.11.0"
+source = "git+https://github.com/bdrtr/Gizmo?rev=fd8825ddcc7efb89a7aa37afd0a434fb6e7a1d01#fd8825ddcc7efb89a7aa37afd0a434fb6e7a1d01"
 dependencies = [
  "gizmo-core",
  "gizmo-math",
  "gizmo-physics-core",
  "gizmo-physics-rigid",
  "rayon",
+ "serde",
  "tracing",
 ]
 
 [[package]]
 name = "gizmo-renderer"
-version = "0.10.0"
-source = "git+https://github.com/bdrtr/Gizmo?rev=550a7dfd3aa1673022d588642b77fd533018d09c#550a7dfd3aa1673022d588642b77fd533018d09c"
+version = "0.11.0"
+source = "git+https://github.com/bdrtr/Gizmo?rev=fd8825ddcc7efb89a7aa37afd0a434fb6e7a1d01#fd8825ddcc7efb89a7aa37afd0a434fb6e7a1d01"
 dependencies = [
+ "ab_glyph",
  "bytemuck",
  "getrandom 0.3.4",
  "getrandom 0.4.3",
@@ -1625,6 +1653,9 @@ dependencies = [
  "gizmo-core",
  "gizmo-math",
  "gltf",
+ "half",
+ "harfrust",
+ "icu_segmenter",
  "image",
  "js-sys",
  "log",
@@ -1632,12 +1663,13 @@ dependencies = [
  "naga",
  "naga_oil",
  "notify",
- "pollster 0.4.0",
+ "pollster 1.0.1",
  "rand 0.10.2",
- "ron 0.12.2",
+ "ron",
  "serde",
  "tobj",
  "tracing",
+ "unicode-bidi",
  "uuid",
  "wasm-bindgen",
  "wasm-bindgen-futures",
@@ -1649,14 +1681,14 @@ dependencies = [
 
 [[package]]
 name = "gizmo-scene"
-version = "0.10.0"
-source = "git+https://github.com/bdrtr/Gizmo?rev=550a7dfd3aa1673022d588642b77fd533018d09c#550a7dfd3aa1673022d588642b77fd533018d09c"
+version = "0.11.0"
+source = "git+https://github.com/bdrtr/Gizmo?rev=fd8825ddcc7efb89a7aa37afd0a434fb6e7a1d01#fd8825ddcc7efb89a7aa37afd0a434fb6e7a1d01"
 dependencies = [
  "gizmo-core",
  "gizmo-math",
  "gizmo-physics-core",
  "gizmo-physics-rigid",
- "ron 0.12.2",
+ "ron",
  "serde",
  "tracing",
  "web-time",
@@ -1664,8 +1696,8 @@ dependencies = [
 
 [[package]]
 name = "gizmo-scripting"
-version = "0.10.0"
-source = "git+https://github.com/bdrtr/Gizmo?rev=550a7dfd3aa1673022d588642b77fd533018d09c#550a7dfd3aa1673022d588642b77fd533018d09c"
+version = "0.11.0"
+source = "git+https://github.com/bdrtr/Gizmo?rev=fd8825ddcc7efb89a7aa37afd0a434fb6e7a1d01#fd8825ddcc7efb89a7aa37afd0a434fb6e7a1d01"
 dependencies = [
  "gizmo-ai",
  "gizmo-animation",
@@ -1680,19 +1712,20 @@ dependencies = [
 
 [[package]]
 name = "gizmo-ui"
-version = "0.10.0"
-source = "git+https://github.com/bdrtr/Gizmo?rev=550a7dfd3aa1673022d588642b77fd533018d09c#550a7dfd3aa1673022d588642b77fd533018d09c"
+version = "0.11.0"
+source = "git+https://github.com/bdrtr/Gizmo?rev=fd8825ddcc7efb89a7aa37afd0a434fb6e7a1d01#fd8825ddcc7efb89a7aa37afd0a434fb6e7a1d01"
 dependencies = [
  "gizmo-app",
  "gizmo-core",
  "gizmo-math",
+ "serde",
  "taffy",
 ]
 
 [[package]]
 name = "gizmo-window"
-version = "0.10.0"
-source = "git+https://github.com/bdrtr/Gizmo?rev=550a7dfd3aa1673022d588642b77fd533018d09c#550a7dfd3aa1673022d588642b77fd533018d09c"
+version = "0.11.0"
+source = "git+https://github.com/bdrtr/Gizmo?rev=fd8825ddcc7efb89a7aa37afd0a434fb6e7a1d01#fd8825ddcc7efb89a7aa37afd0a434fb6e7a1d01"
 dependencies = [
  "tracing",
  "winit",
@@ -1755,7 +1788,7 @@ version = "1.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e3ce1918195723ce6ac74e80542c5a96a40c2b26162c1957a5cd70799b8cacf7"
 dependencies = [
- "base64 0.13.1",
+ "base64",
  "byteorder",
  "gltf-json",
  "image",
@@ -1915,6 +1948,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "icu_locale"
+version = "2.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d5a396343c7208121dc86e35623d3dfe19814a7613cfd14964994cdc9c9a2e26"
+dependencies = [
+ "icu_collections",
+ "icu_locale_core",
+ "icu_locale_data",
+ "icu_provider",
+ "potential_utf",
+ "tinystr",
+ "zerovec",
+]
+
+[[package]]
 name = "icu_locale_core"
 version = "2.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1922,10 +1970,17 @@ checksum = "92219b62b3e2b4d88ac5119f8904c10f8f61bf7e95b640d25ba3075e6cac2c29"
 dependencies = [
  "displaydoc",
  "litemap",
+ "serde",
  "tinystr",
  "writeable",
  "zerovec",
 ]
+
+[[package]]
+name = "icu_locale_data"
+version = "2.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d5fdcc9ac77c6d74ff5cf6e65ef3181d6af32003b16fce3a77fb451d2f695993"
 
 [[package]]
 name = "icu_normalizer"
@@ -1946,6 +2001,25 @@ name = "icu_normalizer_data"
 version = "2.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "da3be0ae77ea334f4da67c12f149704f19f81d1adf7c51cf482943e84a2bad38"
+
+[[package]]
+name = "icu_plurals"
+version = "2.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2a50023f1d49ad5c4333380328a0d4a19e4b9d6d842ec06639affd5ba47c8103"
+dependencies = [
+ "fixed_decimal",
+ "icu_locale",
+ "icu_plurals_data",
+ "icu_provider",
+ "zerovec",
+]
+
+[[package]]
+name = "icu_plurals_data"
+version = "2.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8485497155dc865f901decb93ecc20d3e467df67bfeceb91e3ba34e2b11e8e1d"
 
 [[package]]
 name = "icu_properties"
@@ -1975,12 +2049,36 @@ checksum = "139c4cf31c8b5f33d7e199446eff9c1e02decfc2f0eec2c8d71f65befa45b421"
 dependencies = [
  "displaydoc",
  "icu_locale_core",
+ "serde",
+ "stable_deref_trait",
  "writeable",
  "yoke",
  "zerofrom",
  "zerotrie",
  "zerovec",
 ]
+
+[[package]]
+name = "icu_segmenter"
+version = "2.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5c0794db0b1a86193ac9c48768d0e6c52c54448e0870ad87907d456ee0dac964"
+dependencies = [
+ "core_maths",
+ "icu_collections",
+ "icu_locale",
+ "icu_provider",
+ "icu_segmenter_data",
+ "potential_utf",
+ "utf8_iter",
+ "zerovec",
+]
+
+[[package]]
+name = "icu_segmenter_data"
+version = "2.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e4a2c462a4d927d512f5f882a033ddd62f33a05bb9f230d98f736ac3dc85938f"
 
 [[package]]
 name = "ident_case"
@@ -3320,6 +3418,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2f3a9f18d041e6d0e102a0a46750538147e5e8992d3b4873aaafee2520b00ce3"
 
 [[package]]
+name = "pollster"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bc6355899e1c9462875b6757c79f3caa011a1fdae12bbb1a2e72dd1f234f8336"
+
+[[package]]
 name = "polycool"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3349,6 +3453,8 @@ version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0103b1cef7ec0cf76490e969665504990193874ea05c85ff9bab8b911d0a0564"
 dependencies = [
+ "serde_core",
+ "writeable",
  "zerovec",
 ]
 
@@ -3782,18 +3888,6 @@ dependencies = [
  "num-rational",
  "symphonia",
  "thiserror 2.0.19",
-]
-
-[[package]]
-name = "ron"
-version = "0.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b91f7eff05f748767f183df4320a63d6936e9c6107d97c9e6bdd9784f4289c94"
-dependencies = [
- "base64 0.21.7",
- "bitflags 2.13.1",
- "serde",
- "serde_derive",
 ]
 
 [[package]]
@@ -4387,6 +4481,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c8323304221c2a851516f22236c5722a72eaa19749016521d6dff0824447d96d"
 dependencies = [
  "displaydoc",
+ "serde_core",
  "zerovec",
 ]
 
@@ -4505,9 +4600,9 @@ dependencies = [
 
 [[package]]
 name = "transform-gizmo"
-version = "0.10.0"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "24ce689c975cfc290813f5cf8dbd71296eb4d7e4930e4c21d15135921818aa30"
+checksum = "fcd9584531c33435ec2e9c2f194a27e60c65a36a2168f0519e1483e06934c8ec"
 dependencies = [
  "ahash",
  "ecolor",
@@ -4521,9 +4616,9 @@ dependencies = [
 
 [[package]]
 name = "transform-gizmo-egui"
-version = "0.10.0"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f9dc2b430ae8d66919ef3c5f93693172b50ef7e0aede58332e79f9c364ae766b"
+checksum = "54832e69fb355472e05a768d88616459cd7cc321512a2f2d988bca201bdebc67"
 dependencies = [
  "egui",
  "transform-gizmo",
@@ -4549,6 +4644,12 @@ name = "typeid"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bc7d623258602320d5c55d1bc22793b57daff0ec7efc270ea7d55ce1d5f5471c"
+
+[[package]]
+name = "unicode-bidi"
+version = "0.3.18"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5c1cb5db39152898a79168971543b1cb5020dff7fe43c8dc468b0885f5e29df5"
 
 [[package]]
 name = "unicode-general-category"
@@ -5705,6 +5806,7 @@ dependencies = [
  "displaydoc",
  "yoke",
  "zerofrom",
+ "zerovec",
 ]
 
 [[package]]
@@ -5713,6 +5815,7 @@ version = "0.11.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "90f911cbc359ab6af17377d242225f4d75119aec87ea711a880987b18cd7b239"
 dependencies = [
+ "serde",
  "yoke",
  "zerofrom",
  "zerovec-derive",

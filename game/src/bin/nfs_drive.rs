@@ -19,6 +19,7 @@ use gizmo::prelude::*;
 use nfsu2::geom::add_transform;
 use nfsu2::rig::{spawn_car, CarRig, ChaseCamera, Driver, Placement, Rescue, FIXED_DT};
 use nfsu2::scene;
+use nfsu2::ecs::{ById};
 
 const DEFAULT_CAR: &str =
     "/home/bedir/Games/need-for-speed-underground-2/drive_c/Need for Speed Underground 2/CARS/240SX/GEOMETRY.BIN";
@@ -68,7 +69,7 @@ fn main() {
         .expect("failed to run app");
 }
 
-fn setup_scene(world: &mut World, renderer: &gizmo::renderer::Renderer) -> DriveState {
+fn setup_scene(world: &mut World, renderer: &mut gizmo::renderer::Renderer) -> DriveState {
     let path = scene::car_path(DEFAULT_CAR);
 
     let mut assets = AssetManager::new();
@@ -147,7 +148,7 @@ fn update(world: &mut World, state: &mut DriveState, dt: f32, input: &Input) {
     }
     state.rig.drive(world, &controls);
     if let Some(engine) = state.engine.as_mut() {
-        if let Some(v) = world.borrow::<gizmo::physics::vehicle::VehicleController>().get(state.rig.chassis) {
+        if let Some(v) = world.query::<&gizmo::physics::vehicle::VehicleController>().by_id(state.rig.chassis) {
             engine.follow(v, dt);
         }
     }

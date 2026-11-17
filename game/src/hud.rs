@@ -9,6 +9,7 @@
 
 use gizmo::egui;
 use gizmo::physics::vehicle::VehicleController;
+use crate::ecs::{ById};
 
 /// Göstergenin bir karede çizdiği her şey.
 #[derive(Clone, Debug, PartialEq)]
@@ -64,10 +65,10 @@ impl Dash {
     /// Aynısı, şasinin nitrosu da okunarak.
     #[must_use]
     pub fn of_car(world: &gizmo::prelude::World, chassis: u32) -> Option<Self> {
-        let mut d = Self::of(world.borrow::<VehicleController>().get(chassis)?);
+        let mut d = Self::of(world.query::<&VehicleController>().by_id(chassis)?);
         d.nitro = world
-            .borrow::<crate::rig::powertrain::Powertrain>()
-            .get(chassis)
+            .query::<&crate::rig::powertrain::Powertrain>()
+            .by_id(chassis)
             .filter(|p| p.spec.nitro_tank_s > 0.0)
             .map(|p| (p.nitro.fill, p.nitro.firing));
         Some(d)

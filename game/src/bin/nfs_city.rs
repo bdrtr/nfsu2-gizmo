@@ -1458,7 +1458,8 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
 
     let dir = (mid - eye).normalize();
     let cam = world.spawn();
-    world.add_component(cam, Transform::new(eye));
+    // Where a camera looks is its transform's rotation (`Camera::rotation_from`).
+    world.add_component(cam, Transform::new(eye).with_rotation(Camera::rotation_from(dir.z.atan2(dir.x), dir.y.asin())));
     world.add_component(cam, GlobalTransform::default());
     // Near is derived from the eye distance rather than from the framing radius. Tying it to the
     // radius — which is what a car viewer does, correctly, because the car *is* the radius — put
@@ -1470,7 +1471,7 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
     let far = eye_dist + radius * 3.0;
     world.add_component(
         cam,
-        Camera::new(std::f32::consts::FRAC_PI_4, near, far, dir.z.atan2(dir.x), dir.y.asin(), true),
+        Camera::new(std::f32::consts::FRAC_PI_4, near, far, true),
     );
     println!("camera at {eye:?} looking at {mid:?}, near={near:.1} far={far:.1}");
 
@@ -1500,18 +1501,8 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
             let look = to + Vec3::Y * 1.5;
             let d = (look - eye).normalize_or(Vec3::Z);
             // `add_component` replaces, which is the only typed way to move a camera here.
-            world.add_component(cam, Transform::new(eye));
-            world.add_component(
-                cam,
-                Camera::new(
-                    std::f32::consts::FRAC_PI_4,
-                    0.5,
-                    far,
-                    d.z.atan2(d.x),
-                    d.y.asin(),
-                    true,
-                ),
-            );
+            world.add_component(cam, Transform::new(eye).with_rotation(Camera::rotation_from(d.z.atan2(d.x), d.y.asin())));
+            world.add_component(cam, Camera::new(std::f32::consts::FRAC_PI_4, 0.5, far, true));
             let frame = format!("{out}.{k:04}");
             shoot(&mut world, &mut renderer, &frame, w, h);
         }

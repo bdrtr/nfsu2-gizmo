@@ -22,6 +22,7 @@
 
 pub mod assets;
 pub mod car;
+pub mod ecs;
 pub mod geom;
 pub mod hud;
 pub mod race;

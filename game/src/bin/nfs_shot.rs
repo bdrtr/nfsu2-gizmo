@@ -199,9 +199,9 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
     let near = (eye_dist - radius * 2.0).max(radius * 0.05).max(0.05);
     let far = eye_dist + radius * 3.0;
     let cam = world.spawn();
-    world.add_component(cam, Transform::new(eye));
+    world.add_component(cam, Transform::new(eye).with_rotation(Camera::rotation_from(yaw, pitch)));
     world.add_component(cam, GlobalTransform::default());
-    world.add_component(cam, Camera::new(std::f32::consts::FRAC_PI_4, near, far, yaw, pitch, true));
+    world.add_component(cam, Camera::new(std::f32::consts::FRAC_PI_4, near, far, true));
 
     // ── Render one frame into an offscreen target, then read it back ──
     let format = renderer.config.format;

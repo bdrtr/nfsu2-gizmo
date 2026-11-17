@@ -190,3 +190,30 @@ bırakma* sütunlarının ikisi de **duran arabayı başarı sayar**: yolda durm
 içindedir ve hattı hiç bırakmaz. Arabaları durdurabilecek bir değişiklik bu iki sütunla
 yargılanamaz; **kavşak · ayrık düğüm · ilerlemesi duran araba** ile birlikte bakılmalı. Bu tabloda
 ilerlemesi duran araba **5 / 64**, duranların ortalaması yarışın **%21**'i.
+
+## 2026-11-17 — `550a7dfd` → `fd8825dd`
+
+Aynı sekiz rota, rota başına 8 araba, 90 simüle saniye, 240SX. Ölçü araba başına geçilen
+işaret noktası (`tools/sweep-table.py`); `old` yükseltmeden **önce** aynı oyun kodu ve eski pinle,
+`fd88` sonra alındı. Oyundaki geçici çözümler (teker sırası çevirmesi, `power_grip`, `NFS_SPINSHARE`
+yolu, nitro'nun `throttle > 1`'i) iki kolda da yerinde; bu tablo yalnız pinin etkisi.
+
+```
+rota     old  fd88
+  4001     371   374
+  4002      80    59
+  4021     167   209
+  4041     188   210
+  4061     322   332
+  4081     148   134
+  4102     114   120
+  4121      72   156
+  TOPLAM  1462  1594
+  old − fd88: alan -132 · rota rota [3, -21, 42, 22, 10, -14, 6, 84] · old 2/8 rotada önde, 0 berabere · en büyük tek rota +84 → sağlam
+```
+
+Ara adım `e4d56ebe` (direksiyon işareti düzeltilmiş) 1391'di ve farkı tek rota (4061, −83)
+taşıyordu. `e4d56ebe` → `fd8825dd` arasındaki `befbc9f6` bu şehirde sonucu değiştiriyor
+(4121: 91 → 156); her binary kendi içinde deterministik. Direksiyon işareti düzeltilmeden
+(`CarRig::drive`) aynı süpürme alanı ilk virajda duvara gömüyordu — bkz. `MOTOR-NOTLARI.md`.
+

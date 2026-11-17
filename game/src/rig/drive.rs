@@ -7,6 +7,7 @@
 //! [`Controls`] and never touches a keyboard.
 
 use gizmo::prelude::*;
+use crate::ecs::{ById, ByIdMut};
 
 /// The physics step, in seconds.
 ///
@@ -99,21 +100,21 @@ pub fn physics_step(world: &mut World, dt: f32) {
         gizmo::physics::physics_step_system(world, dt);
         return;
     }
-    let ids: Vec<u32> = world.borrow::<VehicleController>().entities().collect();
+    let ids: Vec<u32> = world.query::<(gizmo::core::entity::Entity, &VehicleController)>().iter().map(|(e, _)| e.id()).collect();
     let before: Vec<(u32, Vec3)> = {
-        let vel = world.borrow::<Velocity>();
-        let rbs = world.borrow::<RigidBody>();
+        let vel = world.query::<&Velocity>();
+        let rbs = world.query::<&RigidBody>();
         ids.iter()
             .filter_map(|&id| {
-                let damp = rbs.get(id)?.angular_damping;
-                Some((id, vel.get(id)?.angular * (-damp * dt).exp()))
+                let damp = rbs.by_id(id)?.angular_damping;
+                Some((id, vel.by_id(id)?.angular * (-damp * dt).exp()))
             })
             .collect()
     };
     gizmo::physics::physics_step_system(world, dt);
-    let mut vel = world.borrow_mut::<Velocity>();
+    let mut vel = world.query_mut::<&mut Velocity>();
     for (id, base) in before {
-        if let Some(mut v) = vel.get_mut(id) {
+        if let Some(mut v) = vel.by_id_mut(id) {
             v.angular = base + (v.angular - base) * share;
         }
     }
@@ -122,10 +123,10 @@ pub fn physics_step(world: &mut World, dt: f32) {
 /// Swap each axle's left and right wheel in every vehicle's list. Its own inverse.
 fn swap_sides(world: &mut World) {
     use gizmo::physics::vehicle::{Axle, VehicleController};
-    let ids: Vec<u32> = world.borrow::<VehicleController>().entities().collect();
-    let mut vehicles = world.borrow_mut::<VehicleController>();
+    let ids: Vec<u32> = world.query::<(gizmo::core::entity::Entity, &VehicleController)>().iter().map(|(e, _)| e.id()).collect();
+    let mut vehicles = world.query_mut::<&mut VehicleController>();
     for id in ids {
-        let Some(mut vc) = vehicles.get_mut(id) else { continue };
+        let Some(mut vc) = vehicles.by_id_mut(id) else { continue };
         for axle in [Axle::Front, Axle::Rear] {
             let find = |left: bool| vc.wheels.iter().position(|w| w.axle_type == axle && w.is_left == left);
             if let (Some(l), Some(r)) = (find(true), find(false)) {
