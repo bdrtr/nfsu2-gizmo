@@ -23,6 +23,9 @@ gizmo = { package = "gizmo-engine", git = "https://github.com/bdrtr/Gizmo", rev 
 # Saf NFSU2 asset parser'ı (motordan bağımsız) — artık kendi reposunda: PryHUB varlık aracı.
 # Yerelde paralel geliştirme için kök Cargo.toml'daki `[patch]` bunu ../PryHUB'a yönlendirir.
 gizmo-nfs = { git = "https://github.com/bdrtr/PryHUB.git", branch = "main" }
+# Yalnız teşhis: `nfs_sim`in `NFS_MXCSR=1`i bir rayon işçisinin kayan nokta durumunu okuyor. Motorun
+# kendi rayon havuzu; Cargo.lock'taki aynı sürüm.
+rayon = "1.12"
 # Küçük async blok-on executor — yalnız headless screenshot binary (nfs_shot) için.
 pollster = "0.3"
 

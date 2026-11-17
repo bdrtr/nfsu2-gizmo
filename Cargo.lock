@@ -2713,6 +2713,7 @@ dependencies = [
  "gizmo-engine",
  "gizmo-nfs",
  "pollster 0.3.0",
+ "rayon",
 ]
 
 [[package]]

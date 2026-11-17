@@ -7,7 +7,6 @@
 //! [`Controls`] and never touches a keyboard.
 
 use gizmo::prelude::*;
-use crate::ecs::{ById, ByIdMut};
 
 /// The physics step, in seconds.
 ///
@@ -16,125 +15,38 @@ use crate::ecs::{ById, ByIdMut};
 /// visibly vibrating on its springs. Four sub-steps per displayed frame is what stopped it.
 pub const FIXED_DT: f32 = 1.0 / 240.0;
 
-/// Which way round the next [`vehicle_step`] takes each axle's wheels.
-struct WheelOrder(bool);
-
-/// The engine's vehicle step, with each axle's left and right wheel taken in alternate order on
-/// alternate steps — the game-side answer to `MOTOR-NOTLARI.md` #19 until the engine has its own.
+/// The engine's vehicle step, between the game's own powertrain rules ([`super::powertrain`]):
+/// shift time, the fuel cut, engine braking and the record's drag, none of which the engine's
+/// controller has.
 ///
-/// **What it fixes.** The controller applies each wheel's force to the body's velocity *at once*,
-/// and the next wheel reads its contact speed off the updated velocity (Gauss-Seidel); so the
-/// result depends on the order, and no fixed order of four corners is its own mirror — a car
-/// turned harder one way than the other, by up to 5 % in grip. NFSU2 does not have the problem:
-/// `RigidBody::AddForceAtPoint` (`0x59bb00`) only adds into the force and torque accumulators,
-/// which the integrator (`0x59c8xx`) spends once and clears, so four wheels in any order give one
-/// answer.
-///
-/// **How.** Swapping left and right on every other step makes the bias flip sign at 120 Hz, and
-/// what is left is second order. The swap is undone before the function returns, so nothing that
-/// reads `wheels[i]` between steps — the visuals, the bench, the handbrake — ever sees it, which
-/// was the objection to reordering on record. The engine pairs wheels by `axle_type` and `is_left`,
-/// never by index, so it does not see it either.
-///
-/// `NFS_WHEELORDER=fixed` turns it off — the engine's own fixed order — so what it is worth can be
-/// measured against what it replaced.
-///
-/// Around it, the game's own powertrain rules ([`super::powertrain`]): shift time, the fuel cut,
-/// engine braking and the record's drag, none of which the engine's controller has.
+/// Until the pin moved past `256aa377` this also took each axle's left and right wheel in
+/// alternate order on alternate steps: the controller applied each wheel's force at once
+/// (Gauss-Seidel) and no fixed order of four corners is its own mirror, so a car turned harder one
+/// way than the other (`MOTOR-NOTLARI.md` #19). The engine now accumulates and applies once, as
+/// NFSU2 does (`0x59bb00`); with the alternation gone `nfs_bench`'s mirror runs are still exact to
+/// the last digit, so it went.
 pub fn vehicle_step(world: &mut World, dt: f32) {
     super::powertrain::before_step(world, dt);
     controller_step(world, dt);
     super::powertrain::after_step(world, dt);
 }
 
-/// The controller itself, with the wheel order alternated — see [`vehicle_step`].
 fn controller_step(world: &mut World, dt: f32) {
-    static FIXED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    if *FIXED.get_or_init(|| std::env::var("NFS_WHEELORDER").is_ok_and(|v| v == "fixed")) {
-        gizmo::physics::vehicle_controller_system(world, dt);
-        return;
-    }
-    if world.get_resource::<WheelOrder>().is_none() {
-        world.insert_resource(WheelOrder(true));
-    }
-    let flip = world.get_resource_mut::<WheelOrder>().is_some_and(|mut o| {
-        o.0 = !o.0;
-        o.0
-    });
-    if flip {
-        swap_sides(world);
-    }
     gizmo::physics::vehicle_controller_system(world, dt);
-    if flip {
-        swap_sides(world);
-    }
 }
 
-/// One rigid-body step, with what **contacts** do to a driven car's spin optionally cut to NFSU2's
-/// share — **off by default** (`NFS_SPINSHARE=0.4` turns it on).
+/// One rigid-body step.
 ///
-/// `SPEED2.EXE` applies a collision impulse to a car through its own `ApplyImpulse` (`0x5A0B00`),
-/// and only **0.4** of it goes into turning the car ([`super::bump::SPIN_SHARE`]) — whatever the car
-/// hit, a wall or another car. The engine's solver gives the whole of it, so a car that clipped a
-/// wall at an angle came away spinning: 1.5–3.8 rad/s on the bench (`NFS_BENCH=wall`), and a kerb
-/// struck at speed could roll it.
-///
-/// The engine has no knob for that, so it is done around the step: the controller has already put
-/// its own forces into the velocity, the step adds damping (`ω · e^(−c·dt)`) and the contacts, and
-/// whatever the step changed beyond the damping is the contacts' — of which `share` is kept.
-/// Kinematic rails have no controller and are not touched.
-///
-/// **Why off.** On the bench it halves the spin a wall hit gives (30° at 15 m/s: 1.53 → 0.61
-/// rad/s), but the pilot sweep loses to it solidly: 1 605 → 1 500 waypoints over eight routes. The
-/// share also scales what the *ground* does to a chassis that bottoms out or tips onto a kerb, which
-/// the game's per-pair impulse does not, and nothing here can tell the two apart. So it stays a knob
-/// to drive with rather than a default.
+/// `SPEED2.EXE` gives a car only **0.4** of a collision impulse's turning effect (`0x5A0B00`,
+/// [`super::bump::SPIN_SHARE`]). Until the pin moved past `51fa4aef` this was done around the step,
+/// as a cut of whatever the step changed beyond the damping — which also cut what the *ground* did
+/// to a chassis on a kerb, and the pilot sweep lost to it (1 605 → 1 500). The engine now sizes the
+/// contact impulse with the body's own share (`RigidBody::contact_spin_share`, set in the rig to
+/// [`super::contact_spin_share`]), so this is the engine's step and nothing else.
 pub fn physics_step(world: &mut World, dt: f32) {
-    use gizmo::physics::vehicle::VehicleController;
-    // `NFS_SPINSHARE=<x>`: the share kept (default 1 = the engine's own; NFSU2's is 0.4).
-    static SHARE: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
-    let share = *SHARE.get_or_init(|| {
-        std::env::var("NFS_SPINSHARE").ok().and_then(|v| v.parse().ok()).unwrap_or(1.0)
-    });
-    if share >= 1.0 {
-        gizmo::physics::physics_step_system(world, dt);
-        return;
-    }
-    let ids: Vec<u32> = world.query::<(gizmo::core::entity::Entity, &VehicleController)>().iter().map(|(e, _)| e.id()).collect();
-    let before: Vec<(u32, Vec3)> = {
-        let vel = world.query::<&Velocity>();
-        let rbs = world.query::<&RigidBody>();
-        ids.iter()
-            .filter_map(|&id| {
-                let damp = rbs.by_id(id)?.angular_damping;
-                Some((id, vel.by_id(id)?.angular * (-damp * dt).exp()))
-            })
-            .collect()
-    };
     gizmo::physics::physics_step_system(world, dt);
-    let mut vel = world.query_mut::<&mut Velocity>();
-    for (id, base) in before {
-        if let Some(mut v) = vel.by_id_mut(id) {
-            v.angular = base + (v.angular - base) * share;
-        }
-    }
 }
 
-/// Swap each axle's left and right wheel in every vehicle's list. Its own inverse.
-fn swap_sides(world: &mut World) {
-    use gizmo::physics::vehicle::{Axle, VehicleController};
-    let ids: Vec<u32> = world.query::<(gizmo::core::entity::Entity, &VehicleController)>().iter().map(|(e, _)| e.id()).collect();
-    let mut vehicles = world.query_mut::<&mut VehicleController>();
-    for id in ids {
-        let Some(mut vc) = vehicles.by_id_mut(id) else { continue };
-        for axle in [Axle::Front, Axle::Rear] {
-            let find = |left: bool| vc.wheels.iter().position(|w| w.axle_type == axle && w.is_left == left);
-            if let (Some(l), Some(r)) = (find(true), find(false)) {
-                vc.wheels.swap(l, r);
-            }
-        }
-    }
-}
 
 /// The most sub-steps one frame may run before giving up and letting time slip.
 ///

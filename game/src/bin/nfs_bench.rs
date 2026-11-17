@@ -757,9 +757,9 @@ fn mirror(renderer: &Renderer, assets: &mut AssetManager, car: &str) {
     // A mirror image should differ only by rounding. It did not until 2026-11-03 (`MOTOR-NOTLARI.md`
     // #19): the controller applies each wheel's force to the chassis velocity before computing the
     // next wheel's, so the result depended on the wheel order — up to ~12 % in loads and ~5 % in
-    // lateral grip. `rig::vehicle_step` now alternates each axle's pair every step and every row
-    // here reads "ayna" to two decimals. `NFS_WHEELORDER=fixed` brings the old asymmetry back; an
-    // "AYNA DEĞİL" without it is something new — a mount on the wrong side would be far larger.
+    // lateral grip. The engine accumulates and applies once since `256aa377`, and every row here
+    // reads "ayna" to the last digit with no help from the game; an "AYNA DEĞİL" is something new —
+    // a mount on the wrong side would be far larger.
     const MIRROR_TOL: f32 = 0.03;
     println!("== ayna: aynı manevra sola (+) ve sağa (−) · sağdaki soldakinin aynası olmalı");
     for (kmh, steer) in [(40.0f32, 1.0f32), (70.0, 0.25), (70.0, 0.5), (100.0, 0.5)] {

@@ -2182,6 +2182,29 @@ async fn run() {
                 }
             }
         }
+        // `NFS_MXCSR=1`: the floating-point control state (FTZ 0x8000, DAZ 0x0040) of this thread
+        // and of a rayon worker, once, just before the first physics step — small loops moved from
+        // the pool to the calling thread in the engine (`befbc9f6`), and a difference between the
+        // two would make that move change results.
+        #[cfg(target_arch = "x86_64")]
+        if now == 0.0 && std::env::var("NFS_MXCSR").is_ok() {
+            #[allow(deprecated)]
+            let main_csr = unsafe { std::arch::x86_64::_mm_getcsr() };
+            #[allow(deprecated)]
+            let worker_csr = rayon::join(|| unsafe { std::arch::x86_64::_mm_getcsr() }, || 0).0;
+            let pool: Vec<u32> = {
+                use rayon::prelude::*;
+                #[allow(deprecated)]
+                (0..64).into_par_iter().map(|_| unsafe { std::arch::x86_64::_mm_getcsr() }).collect()
+            };
+            let mut distinct = pool.clone();
+            distinct.sort_unstable();
+            distinct.dedup();
+            println!(
+                "MXCSR ana iş parçacığı {main_csr:#06x} · rayon::join {worker_csr:#06x} · par_iter'de görülenler {:?}",
+                distinct.iter().map(|c| format!("{c:#06x}")).collect::<Vec<_>>()
+            );
+        }
         nfsu2::rig::physics_step(&mut world, FIXED_DT);
 
         // Where the world last held each car up — the same question `keep_in_world` asks in the

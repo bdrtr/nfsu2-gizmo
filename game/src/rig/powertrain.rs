@@ -428,10 +428,12 @@ fn power_grip_wheels(p: &mut Powertrain, vc: &mut VehicleController) {
     }
 }
 
-/// Nitro: yanıyorsa motorun gazı, krankın torku `T(devir) + şekil · tork · kademe` olacak kadar
-/// büyütülüyor — motorun torku `eğri · |gaz|` ve oyunun ek torku da gazla çarpılıyor, yani ikisinin
-/// oranı gazın çarpanı. Yanmıyorsa depo sürülen yolla doluyor.
+/// Nitro: yanıyorsa krankın torkuna `şekil · tork · kademe · gaz` ekleniyor, motorun kendi
+/// `extra_crank_torque`'u üstünden (`MOTOR-NOTLARI.md` #23). Önceden gaz 1'in üstüne itiliyordu —
+/// motorun torku `eğri · |gaz|` olduğu için aynı tork, ama gazı okuyan her şey (motor freni,
+/// vites kararı) yanlış bir gaz görüyordu. Yanmıyorsa ek tork sıfır ve depo sürülen yolla doluyor.
 fn nitro(p: &mut Powertrain, vc: &mut VehicleController, dt: f32) {
+    vc.extra_crank_torque = 0.0;
     let tank = p.spec.nitro_tank_s;
     if tank <= 0.0 {
         return;
@@ -452,9 +454,7 @@ fn nitro(p: &mut Powertrain, vc: &mut VehicleController, dt: f32) {
         return;
     }
     let extra = nitro_shape(vc.engine_rpm, p.spec.idle_rpm, p.spec.red_line_rpm) * p.spec.nitro_nm * stage;
-    vc.throttle_input = 1.0;
-    let curve = vc.engine_torque();
-    vc.throttle_input = p.applied * (1.0 + extra / curve.max(1.0));
+    vc.extra_crank_torque = extra * p.applied;
 }
 
 /// Motorun adımından sonra: motor freni tahrik tekerleklerine, sürücünün gazı geri.
@@ -469,6 +469,7 @@ pub fn after_step(world: &mut World, dt: f32) {
         let Some(mut vc) = vehicles.by_id_mut(id) else { continue };
         engine_braking(&p, &mut vc, dt);
         vc.throttle_input = p.driver;
+        vc.extra_crank_torque = 0.0;
     }
 }
 

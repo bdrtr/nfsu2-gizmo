@@ -268,6 +268,27 @@ pub enum Rescue {
     Righted,
 }
 
+/// How many times traction counts into a tyre's friction circle — the engine's
+/// `Wheel::traction_circle_weight` (#24). NFSU2's is 1.5 (`0x59D600`): power oversteer, a driven
+/// tyre at the limit losing side grip to throttle. Kept at the plain circle until it is driven: it
+/// is a change of feel for the player, and the eight-route sweep (−128 for 1.5) cannot tell it from
+/// the noise of a change of summation order. `NFS_TCW=1.5` to drive with it.
+#[must_use]
+pub fn traction_circle_weight() -> f32 {
+    std::env::var("NFS_TCW").ok().and_then(|v| v.parse().ok()).unwrap_or(1.0)
+}
+
+/// The share of a contact impulse's turning effect the chassis takes — the engine's
+/// `RigidBody::contact_spin_share` (#22b): NFSU2's **0.4** (`0x5A0B00`). On the bench
+/// (`NFS_BENCH=wall`) it halves what a wall hit at an angle spins the car (30° at 15 m/s: 1.53 →
+/// 0.64 rad/s; 60° at 25 m/s: 3.82 → 2.03). The eight-route sweep moved −57 against the
+/// engine's 1.0, inside what a change of summation order alone moves it (`MOTOR-NOTLARI.md`).
+/// `NFS_CSS=<x>` overrides.
+#[must_use]
+pub fn contact_spin_share() -> f32 {
+    std::env::var("NFS_CSS").ok().and_then(|v| v.parse().ok()).unwrap_or(bump::SPIN_SHARE)
+}
+
 /// What the car's **body** is made of when it hits something — a wall, a kerb, another car.
 ///
 /// It used to be the engine's default: restitution 0.3 with `Max` combining, friction 0.6. `Max`
@@ -518,6 +539,7 @@ fn build_car(
     // still integrating it while printing the real one.
     let mass = tune.as_ref().map_or(1200.0, |t| t.mass_kg);
     let mut rb = RigidBody::new(mass, true);
+    rb.contact_spin_share = contact_spin_share();
     // **No linear damping: it was the car's top speed.** 0.1 s⁻¹ came over with the first import,
     // ten times the engine's own default and with no reason written beside it, and it is a force of
     // `m · 0.1 · v` — 3 200 N at 95 km/h, which is everything the box delivers in fourth. Measured
@@ -579,6 +601,7 @@ fn build_car(
             wheel_mass: 25.0,
             pacejka_long: tyre_longitudinal(grip),
             pacejka_lat: tyre_lateral(grip),
+            traction_circle_weight: traction_circle_weight(),
             ..Default::default()
         });
     }
@@ -587,20 +610,13 @@ fn build_car(
             vehicle.tuning = t.tuning.clone();
             // Not part of `tuning`: the controller keeps it beside it, and it was never handed over.
             vehicle.drivetrain = t.drivetrain.engine();
-            // The controller reflects the whole flywheel, `I · ratio²`, onto **every** driven wheel
-            // rather than sharing it out, so the engine's inertia is counted once per driven wheel:
-            // twice on a two-wheel-driven car, four times on an all-wheel one. Measured on a
-            // SKYLINE, all-wheel drive took 15 s of full throttle from 142 km/h to 123. Scaled here
-            // to the two-wheel total, so all-wheel drive costs what the other two cost and the feel
-            // already driven on them stands; the overcount itself is `MOTOR-NOTLARI.md` #18.
-            let driven = vehicle.wheels.iter().filter(|w| vehicle.drivetrain.drives(&w.axle_type)).count();
             // The record's own engine inertia (`gizmo_nfs::Engine::inertia_kgm2`, 0.20–0.70) where
-            // the engine had one number for every car; a 240SX's is the engine's 0.25 exactly.
+            // the engine had one number for every car; a 240SX's is the engine's 0.25 exactly. The
+            // controller shares it out among the driven wheels since `299a8c74` (#18); until then
+            // it reflected the whole of it onto each, and all-wheel drive was scaled down here to
+            // the two-wheel total — a second division now, so it went with the pin.
             if t.flywheel_kgm2 > 0.0 {
                 vehicle.flywheel_inertia = t.flywheel_kgm2;
-            }
-            if driven > 2 {
-                vehicle.flywheel_inertia *= 2.0 / driven as f32;
             }
         }
         None => {
