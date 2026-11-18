@@ -46,7 +46,7 @@ worth keeping in mind:
 
 ```toml
 gizmo = { package = "gizmo-engine", git = "https://github.com/bdrtr/Gizmo",
-          rev = "209e7c1b8f13ce759455ac47d2e950bf83bad6f5", ... }
+          rev = "7e4828e488b4ebbdf25982cda451d5e338925830", ... }
 ```
 
 The game is being developed against a fixed engine version while Gizmo evolves independently.

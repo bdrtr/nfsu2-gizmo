@@ -1294,7 +1294,7 @@ fn setup(world: &mut World, renderer: &mut gizmo::renderer::Renderer) -> CruiseS
         "mesh arena: {} vertex slabs, {} vertices ({:.0} MB) · {} index slabs, {} indices",
         arena.vertex_slabs,
         arena.vertices,
-        arena.vertices as f64 * std::mem::size_of::<gizmo::renderer::gpu_types::Vertex>() as f64 / 1e6,
+        arena.vertex_bytes as f64 / 1e6,
         arena.index_slabs,
         arena.indices
     );
