@@ -34,6 +34,7 @@ tools/fng.py <FrontB.lzc|*.bun> [paket.fng]     # FEng paketleri: liste, nesne a
 tools/nfsu2-anim.py banks|parts|scenes|scene|evt|cameras <dosya>   # animasyon, NIS, kamera — §17
 tools/nfsu2-eagl.py <dosya> [ad] [--frames a,b,c]                # EAGL kanal çözücüsü — §17.9
 tools/nfsu2-acid.py <dosya> [ad -v|--emitters|--check]          # Acid parçacık tanımları — §19
+tools/nfsu2-probe.py <log.csv> [saniye]                          # oyunu başlatıp iddiaları canlı sınar — §24
 ```
 
 ---
@@ -67,12 +68,14 @@ okuma gerektiğinde notla anılıyor.
 | Tekrar, giriş, dosya kuyruğu, bellek havuzları | §18 | `0x8650B8`, `0x5809C0`, `0x57E800` |
 | GPS, mini harita, HUD | §20 | `0x81CBC0`, `0x4CA840`, `0x600090` |
 | Bir bölümün açık maddesi kapandı mı? | §23 | eski listedeki `→ §23.x.n` işareti |
+| Bir iddia canlıda sınandı mı? | §24 | `tools/nfsu2-probe.py` |
 
 **Önceki okumaları değiştiren bulgular** (port ya da PryHUB için önemli olanlar):
 
 - **Turbo eğrisi torka ekleniyor** (`0x5A6E30`, parça olmasa da) — "fizik okumuyor" notu yanlıştı; turbolu stok güçler ancak
   böyle tutuyor (§22.2; ROADMAP ve PryHUB `Engine::turbo_nm` notu yanlış).
-- **PC'de gece/gündüz yok**: kapı `0x870D14` hiç yazılmıyor; sis hep `Normal Fog`, ton hep `Sunrise Screen Tint` (§15.4).
+- ~~PC'de gece/gündüz yok~~ — **canlı ölçüm çürüttü** (§24): kapı `0x870D14` açılışta 1 (nesne kurucusu `this+0x64` ile yazıyor);
+  gökyüzü/sis/ton geçişi çalışıyor (§15.4).
 - Çarpışma anahtarı **bölge geneli** `0x3412F` indeksi; bariyer açıklığı orada (§3.0.2, §13.2.9).
 - Akış **PVS'yle** (mesafeyle değil) yapılıyor (§13.1).
 - `0x4031C0` boş fonksiyon (`ret 0x4`): "yön okları" ve kamera `AUDIO_TRIGGER` etkisiz (§20).
@@ -84,7 +87,8 @@ okuma gerektiğinde notla anılıyor.
 
 **Doğrulama yöntemi.** Çatal raporlarının bütün sabitleri ana iş parçacığında exe'den (python) ve objdump'tan yeniden okundu;
 çelişen sayılar (ör. JOY_EVENT 223 kayıt, ekran tablosu 180 kayıt) doğrudan sayıldı; "en şaşırtıcı" iddialar (turbo, gece/gündüz
-kapısı, boş fonksiyon, ELF bankaları, MemoryFile önekleri, kübik anahtarlar) ayrıca kodla ya da veriyle sınandı.
+kapısı, boş fonksiyon, ELF bankaları, MemoryFile önekleri, kübik anahtarlar) ayrıca kodla ya da veriyle sınandı. Canlı ölçüm
+(§24) gece/gündüz kapısı okumasını **çürüttü** — statik sınama da aynı kör noktaya (nesne alanı `this+kayma` yazımı) düşmüştü.
 
 ---
 
@@ -385,7 +389,7 @@ POV 2 ve 3 her kurulumda yumuşatma durumunu sıfırlıyor (`0x44DE90` sonu: ser
 | Ses | `0x456000–0x488000`, SND9/AEMS `0x708000–0x73C000` | okundu — §11 (motor çapraz geçişi ABK'nin içindeki x86 kodunda, açık); `tools/nfsu2-sound.py` |
 | GPS, mini harita, dünya haritası, HUD | yol bulucu `0x81CBC0`, mini harita `0x4CA840`, HUD `0x4F8BF0`/`0x600090` | okundu — §20 (A\*, uzunluk maliyeti) |
 | Parçacıklar (Acid) ve lastik izleri | yayım `0x491E50`, güncelleme `0x492E10`, iz üretimi `0x59DBB0` | okundu — §19, `tools/nfsu2-acid.py` |
-| Render hattı, gölge, gökyüzü | `0x5B6000–0x5D3000`, kare `0x5D2850`/`0x5CAAD0`, efektler `.rsrc` | okundu — §12, §15 (sis = atmosfer hacimleri; PC'de gece/gündüz yok; Acid = `0x80035000`); `tools/fx/` |
+| Render hattı, gölge, gökyüzü | `0x5B6000–0x5D3000`, kare `0x5D2850`/`0x5CAAD0`, efektler `.rsrc` | okundu — §12, §15 (sis = atmosfer hacimleri; gece/gündüz geçişi çalışıyor, canlıda ölçüldü §24; Acid = `0x80035000`); `tools/fx/` |
 | Pist akışı (TrackStreamer) | `0x88EB00`, durum makinesi `0x5E6A70`, küme `0x5E5110` | okundu — §13 (PVS ile, mesafeyle değil); chunk'ları PryHUB'da yok |
 | Ön yüz paketleri (FEng) ve ekran akışı | `0x51BD30`, dağıtıcı `0x541FC0`, güncelleme `0x558C00`, FE yöneticisi `0x8384C4` | okundu — §14, §14.9, `tools/fng.py` + `tools/feng-names.txt` |
 | Animasyon, NIS ara sahneleri, kamera animasyonları | EAGL `0x6D80B0`, NIS `0x43B240`, kamera `0x451B70` | okundu — §17, `tools/nfsu2-anim.py` (iskeletli kanal sıkıştırması açık) |
@@ -2951,7 +2955,8 @@ yansıma, krom gibi), varsa yansıma sıfır. Boyalar böylece **görüş açıs
 - **Ön yüz düzenleri `0x3B700`** (garaj/vitrin, `FrontB.lzc`): 10 düzen, çoğu `(149°,100°) (303°,36°) (76°,22°)`,
   yoğunluk 0.3–0.6; varsayılan `0x7F3E10` aynı açılar, beyaz, 0.2. Oyun içi arabalar sabit **`0x7F3F00`** düzenini kullanıyor (200°/90° 0,5; 42°/33° 0,35; 219°/10° 0,1) — §15.3.
 - **Dünya ışıklandırması yok**: dünya gölgelendiricileri yalnız `2·doku·köşe_rengi` — gece/gündüz ve gölgeler
-  köşe rengine **pişmiş**. Sis ve gökyüzü dışında dünyada çalışma anı ışığı yok. [okundu]
+  köşe rengine **pişmiş**. Sis ve gökyüzü dışında dünyada çalışma anı ışığı yok; gece/gündüz geçişi yalnız sis, ekran tonu ve
+  gökyüzü dokularıyla yapılıyor (§15.4). [okundu]
 
 ---
 
@@ -2966,8 +2971,9 @@ yansıma, krom gibi), varsa yansıma sıfır. Boyalar böylece **görüş açıs
 - **Gökyüzü geçişi** `IDI_SKYMORPH_FX`: `renk = 2·köşe·lerp(SkyMorphTexture, doku, SkyMorphAlpha)`.
   `0x60FAA0` yarışta bir durum makinesi: `SKY_SUNRISE_A`, `SKY_NIGHT_A`, `SKY_SUNSET_A`, `SKY_NIGHT_A` (+`_CAP`)
   çiftlerini sırayla seçip **20 s** (`0x802954`) içinde karıştırıyor; tetik zaman `mod 300 = 60`. Kapı
-  `0x870D14 == 1` ve `0x802958 = 1`. **PC'de kapı hiç açılmıyor**: `0x870D14` `.bss`'te, tek yazanı (`0x5BE829`) değeri
-  tavana kıstırıyor, kayıt defteri yükleyicisi (`0x5BEA20`) onu okumuyor — gökyüzü geçişi ve gece paletleri ölü (§15.4). [okundu]
+  `0x870D14 == 1` ve `0x802958 = 1`. **Kapı açık**: `0x870D14` = seçenek nesnesi `0x870CB0` `+0x64`, kurucusu `0x5B7600` (statik
+  başlatıcı `0x77E550`) onu **1** yapıyor; kayıt defteri okumuyor, `0x5BE829` yalnız tavana kıstırıyor. Gökyüzü geçişi PC'de çalışıyor
+  (§15.4, §24 — canlıda ölçüldü; önceki "kapı hiç açılmıyor" okuması yanlıştı). [okundu + ölçüldü]
 - **Ufuk sisi** `0x5C7470` (`g_HorizonFogEnable`, yarışta): tam ekran 10×10 köşeli ızgara (100 köşe, 162
   üçgen), renkler `0x86ECA0` tablosundan (`0x5DBB00`), satır alfası ekranın alt %40'ında (`0x7A1E4C`) sıfır;
   `SRCALPHA/ONE` eklemeli, Z testli. [okundu]
@@ -4238,13 +4244,25 @@ Yarışta (`0x8654A4 == 6`) çizimden önce `0x48E3B0(araba+0x1F88)`: arabanın 
 
 ### 15.4 Gece/gündüz ve gökyüzü [okundu, ölçüldü]
 
-- Kapı `0x870D14`: `0x5BF1B0` `== 1` döndürüyor; değişken `.bss`'te, tek yazan `0x5BE821` (`min(değer, tavan 0x87652C)`),
-  adres hiçbir veri tablosunda yok → **hep 0**. `0x60FAA0` her kare 0x80 döndürüp çıkıyor; `0x8A1C88 = 0`, `0x8A1C90 = 0`
-  kalıyor (sıfırlayan `0x60F83F..0x60F86C`).
-- Sonuç: `w = 1 − 0 = 1` → **sis hep `Normal Fog`'dan, ekran tonu hep `Sunrise Screen Tint`'ten** (ton da aynı
-  `w·Sunrise + (1−w)·Night`; `0x5D79AE..0x5D7A47`). `Night Normal Fog`/`Night Screen Tint` paletleri PC'de **hiç
-  katkı vermiyor** (yalnız güncelleniyorlar). Yağmur sisi bundan bağımsız.
-- Dünya köşe renkleri pişmiş (§12.4), yani oyun her zaman aynı (gece) görünüyor; "gece" adlı paletler kullanılmıyor.
+- Kapı `0x870D14` (`0x5BF1B0` `== 1` döndürüyor) **açılışta 1**: seçenek nesnesi `0x870CB0`'ın `+0x64` alanı; kurucusu
+  `0x5B7600` (statik başlatıcı `0x77E550`: `mov ecx,0x870CB0; jmp 0x5B7600`) `[eax+0x64] = 1` yazıyor. Kayıt defteri yükleyicisi
+  bu alanı okumuyor, `0x5BE821` yalnız tavanla (`0x87652C`) kıstırıyor. Yani `0x60FAA0` her kare çalışıyor ve `0x8A1C88`/`0x8A1C90`'ı
+  sürüyor [okundu + ölçüldü, §24].
+- Geçiş durum makinesi `0x8A1C8C` (`0x60FAA0`, her kare; dağıtım tablosu `0x60FD2C`, durum − 1 ile): oyun zamanı `0x7FB718`
+  `mod 300 = 60` olduğunda ve durum 0 iken **2**'ye geçiyor. 2 (`0x60FC44`): sıradaki gökyüzü doku çiftini seç (`0x8A1C94 += 2 mod 8`,
+  `0x8A07A8` tablosu → `0x8A1CA0`/`0x8A1CA4`), durum 4. 4 (`0x60FC86`): `v = ½ + ½·min(t/20, 1)` (`0x8A1C88`, t = `0x8A1C9C` += kare
+  süresi `0x865154`); 20 s dolunca `v = 0`, `0x8A1C90 ^= 1` (`inc; cmp 2`), durum 0. Durum 1 (`0x60FBCB`, `v = ½·t/20` sonra 2)
+  tetikten gelmiyor; yalnız başlatıcının (`0x60F84E`) verdiği durumla girilir.
+- Ağırlık `w = 0x8A1C90 ? v : 1 − v` (`0x60FA80`; gökyüzü tüketicisi `0x6143A9` de aynısı, `1 − w` ile ikinci doku). Bayrak 0 iken
+  sis/ton `Normal Fog`/`Sunrise Screen Tint`'ten (w = 1) `Night`'a (w → 0) kayıyor, bir sonraki tetikte (300 s sonra) bayrak 1 iken geri
+  dönüyor — **5 dakikalık oyun-zamanı döngüsünde dönüşümlü gün doğumu ↔ gece**. Ton da aynı `w·Sunrise + (1−w)·Night`
+  (`0x5D79AE..0x5D7A47`). Yağmur sisi bundan bağımsız.
+- **Canlı ölçüm (2026-11-19, §24):** kapı ilk örnekten (oyun akışı `NONE`) itibaren 1. İlk `RACING`'den ~58 s sonra (`mod 300 = 60`)
+  `0x8A1C88` 0,52 → 0,96 rampalandı (9 örnek, 0,025/s = ½/20 s; durum 4), 150 s'de `v = 0`, `0x8A1C90 = 1` — w 1'den 0'a, yani
+  gece. Menüye dönülünce (`0x60F83F..0x60F86C`) ikisi de 0'a sıfırlandı.
+- Dünya köşe renkleri pişmiş (§12.4); geçişi gökyüzü dokuları (`SKY_*`, `IDI_SKYMORPH_FX`), sis ve ekran tonu taşıyor.
+- > **Düzeltme:** bu bölümün ve §12.5'in ilk hâli "kapı hiç yazılmıyor, PC'de gece/gündüz yok" diyordu. Yazan araması yalnız
+  > düz adresle yapılmıştı; alan bir nesneye `this+0x64` ile yazılıyor. Bu kusurun başka iddialarda da olup olmadığı §24.2'de.
 - Ton çıktısı (`ebp + görünüm×0x58`): `+0x70/+0x74/+0x78` = p0..p2 renk, `+0x7C` = 128, `+0x80` = p3, `+0xBC/+0xC0/+0xC4` = p4..p6;
   sağlayıcı kamera efekti yuva tablosunda (`0x876B24 = 0x5D77F0`; statik ön ayarlı eşi `0x876A00 = 0x5D7A60`, tablo `0x800E54..`; kuran `0x5DBDD0`).
 - **`TRACKS\LOC4DYNTEX.BIN`** (TPK `LocationDynamic`, `Location4\LocationDynamicTextures.tpk`): 58 doku, JDLZ'li;
@@ -7770,3 +7788,57 @@ Anlık değerler:
 | `0x486519` | `push   0x78c20c` | `sdata/sdat.viv` yolu |
 | `0x4381CE` | `cmp    ecx,0x37100` | menteşe tablosu yükleyicisi |
 | `0x4343DA` | `fcomp  QWORD PTR ds:0x7862e0` | parça pozu: öteleme sıfır mı |
+
+---
+
+## 24. Canlı doğrulama (2026-11-19)
+
+Atlasın iddiaları çalışan oyunun belleğinden sınandı: `tools/nfsu2-probe.py` oyunu kendi alt süreci olarak başlatıyor
+(`ptrace_scope = 1` yalnız ataya okuma izni veriyor; `nfsu2-memlog.py`'nin başlatıcısı), sabit adresleri iki saniyede bir okuyor ve
+sonunda her iddia için TUTTU / TUTMADI / KARIŞIK yazıyor. İlk oturum: 25 dakika, kariyer serbest dolaşımı ve bir outrun, 240SX
+(WT 0,9, TR 1, NO 1, EN 1, SU 0,7, BR 1, EC 0,9), 181 örnek.
+
+### 24.1 Sonuçlar
+
+| İddia | Bölüm | Sonuç | Ölçülen |
+|---|---|---|---|
+| Oyun akışı durumu `0x8654A4` (`GAMEFLOW_STATE_*`) | §2, §23.1 | **tuttu** | NONE → IN_FRONTEND → LOADING_TRACK → RACING |
+| Sim tiki `0x86518C` 4000/s | §2, §18.1 | **tuttu** | yarışta medyan 3997/s (yükleme anlarındaki sıçramalar hariç) |
+| Gerçek tik `0x8651AC` 4000/s | §18.1 | **tuttu** | menüde 3994/s, yarışta 3997/s medyan |
+| **Yükseltmeli motor eğrisi = stok + `gain[0]·w_EN` + turbo + `gain[3]·w_EC`** | §22.2 | **tuttu** | 9 noktada fark 0,00 N·m (yalnız stok eğriyle 34 N·m); 143 örnek |
+| ECU devir bloğu: rölanti/kesici `+ rpm_gain[L]`, `L = ⌊3w + ½⌋` | §22.2 | **tuttu** | 800/7500 = beklenen (stok 800/7000, EC 0,9 → L 1) |
+| Yarış parametre bloğu `0x89E7A0` | §21.1 | **tuttu** | olay 4000, kip 0 serbest dolaşım / **7 outrun**, trafik 3, AI 3, zorluk 1 |
+| Kariyer nakit `0x861E74`, aşama `0x862838` | §10, §23.3 | **tuttu** | $6222 → 6297 (nakit noktaları), aşama 2 = kayıt dosyası |
+| Akış durum makinesi 0..6, uçuşta ≤ 2 okuma | §13.1 | **tuttu** | etkin bölüm 37–49, kabul edilen bölge sürüşle değişiyor (307, 308, 309 …) |
+| Sis çıktısı `0x89E850` | §15.2, §15.1 | **tuttu** | başlangıç 10–100 m, yoğunluk 0,28–0,35; bölge değişince değer yola göre yumuşak yakınsıyor (100,001 → 100,045 …) |
+| **Gece/gündüz kapısı `0x870D14` = 0** | §12.5, §15.4 | **TUTMADI** | **1**, ilk örnekten itibaren; yarışın ~58. s'sinde (`mod 300 = 60`) `0x8A1C88` 0,52 → 0,96 rampalandı (½/20 s), ardından `0x8A1C90` = 1 → sis/ton gece paletine geçti |
+| Turbo terimi (stok turbo torka ekleniyor) | §22.2 | sınanmadı | 240SX turbosuz; turbolu bir arabayla tekrarlanmalı (yalnız oyuncu arabasının Engine nesnesi var) |
+
+### 24.2 Gece/gündüz hatası ve yöntem dersi
+
+Kapı `0x870D14`, seçenek nesnesi `0x870CB0`'ın `+0x64` alanı. Statik başlatıcı `0x77E550` (`mov ecx,0x870CB0; jmp 0x5B7600`)
+kurucuyu çağırıyor; kurucu `[eax+0x64] = 1` yazıyor. İlk okuma "yazanı" yalnız düz adresle (`ds:0x870D14`, veri tablosunda dword)
+aramıştı ve `this+kayma` yazımlarını göremezdi. Düzeltmeler §0, §6, §12.5 ve §15.4'e işlendi.
+
+Aynı kusur atlastaki bütün **"hiç yazılmıyor / ölü"** iddialarını şüpheli kılıyor. Statik nesnelerin (437 statik başlatıcı
+`mov ecx,BASE; call|jmp ctor`) kurucularındaki `this+kayma` yazımları tarandı: aşağıdakilerin hiçbirine bir kurucu yazmıyor, ama
+`0x890100..0x890110` iki statik nesnenin (`0x88FF98`, `0x88FFA0`) hemen arkasında ve üye fonksiyonlarından yazılabilir. Hepsi
+artık sondada izleniyor (`NEVER_WRITTEN`); bir sonraki canlı oturum hükmü verecek:
+
+| Adres | İddia | Bölüm |
+|---|---|---|
+| `0x8650C8` | joylog bayrağı, yazan yok → joylog ölü | §18.2.6 |
+| `0x838440` / `0x838441` | milyon nakit / her şey açık bayrakları, yazan yok | §10.12.7, §10.7 |
+| `0x8A1D70` | sis geliştirici sabitleri bayrağı | §15.2 |
+| `0x8A1D48` | yağmuru zorlayan bayrak | §15.7 |
+| `0x836474` | HUD'suz kip | §20.5 |
+| `0x890100..0x890110` | ikinci yarış türü bayrakları hep 0 | §21.4 |
+
+### 24.3 Sıradaki canlı oturum
+
+Turbolu bir arabayla (SKYLINE, RX7, LANCEREVO8, IMPREZAWRX, ECLIPSE, 3000GT, GOLF; hızlı yarış yeter) birkaç dakika sürmek turbo
+terimini ve yukarıdaki "hiç yazılmıyor" listesini sınar. Komut:
+
+```
+NFSU2_PREFIX=… PROTONPATH=… UMU_RUN=… tools/nfsu2-probe.py <log.csv> [saniye]
+```
