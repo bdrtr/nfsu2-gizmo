@@ -25,7 +25,7 @@
 //! where you are on it and whether you are still on it — and the race is **run**: the rivals are
 //! rails ([`nfsu2::rig::rail`]), there is a countdown, a running order, laps or the distance to go,
 //! and a result · `NFS_DEMO=1` with it, your car rides a rail too — the race runs itself, start to
-//! result · `NFS_RIVALDRIVER=pilot` drive the rivals with the simulated pilot instead · `NFS_AT="x,y,z"` where to start — downtown sits near `y ≈ 27` and the airport near
+//! result · `NFS_RIVALDRIVER=pilot` drive the rivals with the simulated pilot instead · `NFS_AT="x,y,z"` where to start (F prints it, with `NFS_YAW=<radians>`, the way the car faces) — downtown sits near `y ≈ 27` and the airport near
 //! `y ≈ -11`, so the height matters as much as the place · `NFS_BUDGET=<n>` caps objects,
 //! nearest-first · `NFS_DEBUG=1` start with the F3 overlay on · `NFS_DIAG=1` prints the physics' own view and the frame's
 //! split (physics/update/render/encode) once a second · `NFS_HOLD=1` keys ignored, brakes on, for timing one spot ·
@@ -578,6 +578,7 @@ fn main() {
             let (bt, bi) = scene::city_glare();
             renderer.bloom_threshold = bt;
             renderer.bloom_intensity = bi;
+            renderer.tonemap_curve = scene::city_tonemap();
             renderer.ssr = None;
             renderer.ssgi = None;
             renderer.volumetric = None;
@@ -826,7 +827,14 @@ fn setup(world: &mut World, renderer: &mut gizmo::renderer::Renderer) -> CruiseS
     // A race has a start line, and it is the only thing in the data that names one: the point of
     // least `progress`. It takes precedence over the downtown default, and gives the car a heading
     // as well — a grid position pointing at a wall is worse than no grid position.
+    // `NFS_YAW=<radians>` with `NFS_AT`: which way the car faces there — what F prints beside the
+    // place, so a spot found by driving can be looked at again the same way.
+    let named_yaw = std::env::var("NFS_YAW").ok().and_then(|v| v.parse::<f32>().ok()).filter(|_| named_at);
     let (at, start_heading) = match (named_at, course_start) {
+        (true, _) if named_yaw.is_some() => {
+            let yaw = named_yaw.unwrap_or_default();
+            (at, Some(Vec3::new(-yaw.sin(), 0.0, -yaw.cos())))
+        }
         (false, Some((p, dir))) => {
             println!("starting at {p:?}");
             (p, Some(dir))
@@ -920,8 +928,8 @@ fn setup(world: &mut World, renderer: &mut gizmo::renderer::Renderer) -> CruiseS
         all.extend(scenery_lods.into_iter().filter_map(|mut l| (!l.is_empty()).then(|| l.swap_remove(0))));
         (all, Vec::new())
     };
-    let visuals = city::build_region(&renderer.device, objects, &packs, Some(&shared), at, None);
-    let scenery_meshes = city::build_lods(&renderer.device, &scenery_lods, &packs, Some(&shared));
+    let visuals = city::build_region(&renderer.mesh_arena, objects, &packs, Some(&shared), at, None);
+    let scenery_meshes = city::build_lods(&renderer.mesh_arena, &scenery_lods, &packs, Some(&shared));
     drop(scenery_lods);
     drop(scenery);
     println!(
@@ -935,7 +943,7 @@ fn setup(world: &mut World, renderer: &mut gizmo::renderer::Renderer) -> CruiseS
     // The sky and the painted panorama, through the same builder — they are ordinary geometry, and
     // only their *material* is unusual. `at` for the budget centre is irrelevant here: `None` keeps
     // all of them, and there are 40 sky shells and a handful of panels across the eight bundles.
-    let sky = city::build_region(&renderer.device, backdrop, &packs, Some(&shared), at, None);
+    let sky = city::build_region(&renderer.mesh_arena, backdrop, &packs, Some(&shared), at, None);
     stats.backdrop = sky.meshes.len();
     // Whether the sky is the game's or a white stand-in is not a thing to judge by eye — an
     // untextured shell and an overcast sky texture are the same pale grey on screen.
@@ -993,8 +1001,17 @@ fn setup(world: &mut World, renderer: &mut gizmo::renderer::Renderer) -> CruiseS
             if any && mid <= CUT_MID_BAND {
                 cut.insert(key);
             }
-            if let Some(bg) = tex.upload(&format!("city_{:08X}", key.0), &img.rgba, img.width, img.height) {
-                bound.insert(key, bg);
+            // Into the engine's texture pool (`gizmo::renderer::texture_pool`): pictures of one size
+            // share an array and its one bind group, so the city's pieces of every texture draw in
+            // one batch per array instead of one per texture. `NFS_POOL=0`: a bind group each.
+            let name = format!("city_{:08X}", key.0);
+            let made = if std::env::var("NFS_POOL").as_deref() == Ok("0") {
+                tex.upload(&name, &img.rgba, img.width, img.height).map(|bg| Material::new(bg))
+            } else {
+                renderer.texture_pool.colour(&img.rgba, img.width, img.height, &name).ok().map(|t| Material::from_pool(&t))
+            };
+            if let Some(material) = made {
+                bound.insert(key, material);
             }
         }
         println!("kesim dokusu: {} / {} yüklenen", cut.len(), bound.len());
@@ -1015,7 +1032,7 @@ fn setup(world: &mut World, renderer: &mut gizmo::renderer::Renderer) -> CruiseS
             // The city's lighting is baked into its vertex colours; `BakedLit` multiplies them in
             // rather than relighting a static world that was never drawn to be relit.
             let material = match m.texture.and_then(|k| bound.get(&k)) {
-                Some(bg) => Material::new(bg.clone()).with_baked_lit(Vec4::new(1.0, 1.0, 1.0, 1.0)),
+                Some(base) => base.clone().with_baked_lit(Vec4::new(1.0, 1.0, 1.0, 1.0)),
                 None => Material::new(white.clone()).with_baked_lit(Vec4::new(0.35, 0.35, 0.38, 1.0)),
             };
             // The two arms the engine gained and nothing was pulling — `scene::city_lift`.
@@ -1031,7 +1048,7 @@ fn setup(world: &mut World, renderer: &mut gizmo::renderer::Renderer) -> CruiseS
         }
         for m in &scenery_meshes {
             let material = match m.texture.and_then(|k| bound.get(&k)) {
-                Some(bg) => Material::new(bg.clone()).with_baked_lit(Vec4::new(1.0, 1.0, 1.0, 1.0)),
+                Some(base) => base.clone().with_baked_lit(Vec4::new(1.0, 1.0, 1.0, 1.0)),
                 None => Material::new(white.clone()).with_baked_lit(Vec4::new(0.35, 0.35, 0.38, 1.0)),
             };
             let material = material.with_ambient(lift.0).with_emissive(lift.1);
@@ -1056,9 +1073,9 @@ fn setup(world: &mut World, renderer: &mut gizmo::renderer::Renderer) -> CruiseS
             world.add_component(body, collider.clone());
             phys.add_body(gizmo::physics::BodyHandle::from_id(body.id()), rb, t, Velocity::default(), collider);
             let mut drawn = Vec::new();
-            for (mesh, texture) in city::build_local(&renderer.device, &p.mesh, &packs, Some(&shared), &p.name) {
+            for (mesh, texture) in city::build_local(&renderer.mesh_arena, &p.mesh, &packs, Some(&shared), &p.name) {
                 let material = match texture.and_then(|k| bound.get(&k)) {
-                    Some(bg) => Material::new(bg.clone()).with_baked_lit(Vec4::new(1.0, 1.0, 1.0, 1.0)),
+                    Some(base) => base.clone().with_baked_lit(Vec4::new(1.0, 1.0, 1.0, 1.0)),
                     None => Material::new(white.clone()).with_baked_lit(Vec4::new(0.35, 0.35, 0.38, 1.0)),
                 };
                 let material = material.with_ambient(lift.0).with_emissive(lift.1);
@@ -1109,7 +1126,7 @@ fn setup(world: &mut World, renderer: &mut gizmo::renderer::Renderer) -> CruiseS
         if std::env::var("NFS_BACKDROP").as_deref() != Ok("0") {
             for m in &sky.meshes {
                 let material = match m.texture.and_then(|k| bound.get(&k)) {
-                    Some(bg) => Material::new(bg.clone()),
+                    Some(base) => base.clone(),
                     None => Material::new(white.clone()),
                 };
                 let material = material.with_backdrop_placed(Vec4::ONE).with_double_sided(true);
@@ -1264,7 +1281,7 @@ fn setup(world: &mut World, renderer: &mut gizmo::renderer::Renderer) -> CruiseS
     // near 0.5 / far 20 000 — the pair `nfs_fly` measured for this city. The ratio is what costs
     // depth precision, and a city needs the far plane, so the near plane is what has to give.
     let mut camera =
-        ChaseCamera::spawn(world, rig.start.position + Vec3::new(0.0, 4.0, 10.0), 0.5, 20_000.0);
+        ChaseCamera::spawn(world, rig.start.position + Vec3::new(0.0, 4.0, 10.0), std::env::var("NFS_NEAR").ok().and_then(|v| v.parse().ok()).unwrap_or(0.5), 20_000.0);
     camera.set_views(&rig.cameras);
 
     let debug = std::env::var("NFS_DEBUG").is_ok_and(|v| v != "0");
@@ -1272,6 +1289,15 @@ fn setup(world: &mut World, renderer: &mut gizmo::renderer::Renderer) -> CruiseS
         set_drawn(world, id, debug);
     }
     println!("cruising at {:?} — {} meshes drawn", rig.start.position, stats.meshes);
+    let arena = renderer.mesh_arena.stats();
+    println!(
+        "mesh arena: {} vertex slabs, {} vertices ({:.0} MB) · {} index slabs, {} indices",
+        arena.vertex_slabs,
+        arena.vertices,
+        arena.vertices as f64 * std::mem::size_of::<gizmo::renderer::gpu_types::Vertex>() as f64 / 1e6,
+        arena.index_slabs,
+        arena.indices
+    );
     println!("bounds: {} cells with ground", bounds.cells());
     CruiseState {
         props: prop_bodies,
@@ -1584,7 +1610,15 @@ fn update(world: &mut World, state: &mut CruiseState, dt: f32, input: &Input) {
         }
     }
     if input.is_key_just_pressed(KeyCode::KeyF as u32) {
-        println!("NFS_AT=\"{:.0},{:.0},{:.0}\"", pose.position.x, pose.position.y, pose.position.z);
+        // The heading as `Placement`'s yaw: zero faces −Z.
+        let nose = pose.rotation * Vec3::NEG_Z;
+        println!(
+            "NFS_AT=\"{:.0},{:.0},{:.0}\" NFS_YAW={:.2}",
+            pose.position.x,
+            pose.position.y,
+            pose.position.z,
+            (-nose.x).atan2(-nose.z)
+        );
     }
     diagnose(world, state, pose);
 
@@ -1624,7 +1658,12 @@ fn diagnose(world: &World, state: &mut CruiseState, pose: nfsu2::rig::Pose) {
     }
     state.diag_tick = tick;
     let vehicles = world.query::<&gizmo::physics::vehicle::VehicleController>();
-    let Some(v) = vehicles.by_id(state.rig.chassis) else { return };
+    let Some(v) = vehicles.by_id(state.rig.chassis) else {
+        // On a rail (`NFS_DEMO=1`) there is no vehicle to report: the frame times still are.
+        let (med, p95) = frame_ms(&state.frames).unwrap_or((f32::NAN, f32::NAN));
+        println!("diag  rail  t {:.0} s  frame {med:.1}/{p95:.1} ms ({:.0} fps)", state.t, 1000.0 / med);
+        return;
+    };
     let grounded: Vec<bool> = v.wheels.iter().map(|w| w.is_grounded).collect();
     // `NFS_DIAG_WHEELS=1`: each wheel's torques, spin, load and grip — what a car that will not move
     // is made of.
@@ -1724,6 +1763,23 @@ fn diagnose(world: &World, state: &mut CruiseState, pose: nfsu2::rig::Pose) {
             ms("encode"),
             ms("render") - ms("encode"),
         );
+        // The draw's own parts, CPU (`view.*`, `render.*`) and GPU (`gpu.*`, a few frames late),
+        // as the engine lays them into the profiler — what "encode" and "rest" above are made of.
+        let mut names: Vec<&'static str> = Vec::new();
+        for frame in p.history() {
+            for s in &frame.scopes {
+                if (s.name.starts_with("view.") || s.name.starts_with("gpu.")) && !names.contains(&s.name) {
+                    names.push(s.name);
+                }
+            }
+        }
+        names.sort_unstable();
+        let parts: Vec<String> = names.iter().map(|n| format!("{} {:.1}", n, ms(n))).collect();
+        let stats = world
+            .get_resource::<gizmo::renderer::components::RenderStats>()
+            .map(|r| format!("  draws {} · tris {}k · instances {} · shadow inst {}", r.draw_calls, r.triangles / 1000, r.instances, r.shadow_instances))
+            .unwrap_or_default();
+        println!("laps  {}{stats}", parts.join(" · "));
     }
     println!(
         "diag  pos ({:+.1},{:+.2},{:+.1})  vel ({:+.2},{:+.2},{:+.2})  speed {:+.1} km/h  cell {:?}           grounded {grounded:?}  frame {med:.1}/{p95:.1} ms ({:.0} fps)",

@@ -1136,13 +1136,13 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
     let budget = std::env::var("NFS_BUDGET").ok().and_then(|s| s.parse::<usize>().ok());
     // Frame on the region's own centre so a budget takes a neighbourhood rather than an edge.
     let around = centre_of(&meshes);
-    let city = build_region(&renderer.device, meshes, &packs, Some(&shared), around, budget);
+    let city = build_region(&renderer.mesh_arena, meshes, &packs, Some(&shared), around, budget);
     // Built here, not at the spawn below, because its textures have to be in the upload loop:
     // the backdrop's keys are not the city's — most of them live in the shared tier — and a key
     // nobody uploaded binds to nothing and draws white. That was the whole of "the backdrop is
     // pale": 153 meshes declared a texture and 85 of them found one.
     let sky_visuals = (!backdrop.is_empty())
-        .then(|| build_region(&renderer.device, backdrop, &packs, Some(&shared), around, None));
+        .then(|| build_region(&renderer.mesh_arena, backdrop, &packs, Some(&shared), around, None));
 
     println!(
         "{declared} declared, {sky} backdrop, {lod} world-LOD, {} kept ({} duplicates), {} packs, {} merged meshes, {} unresolved runs",
@@ -1163,6 +1163,8 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
     let (bloom_t, bloom_i) = scene::city_glare();
     renderer.bloom_threshold = bloom_t;
     renderer.bloom_intensity = bloom_i;
+    // Neutral, with the decoded vertex colours `world::build` makes — see `scene::city_tonemap`.
+    renderer.tonemap_curve = scene::city_tonemap();
     println!("bloom: threshold {bloom_t:.2}, intensity {bloom_i:.2}");
 
     // The two arms the engine gained and nothing was pulling — see `scene::city_lift`.

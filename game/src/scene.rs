@@ -64,6 +64,19 @@ pub fn city_lift() -> (Vec3, Vec3) {
 /// their separation from the dark they sit against. 0.24 was rejected by eye — the frame reads as
 /// overcast rather than as night — and 0.12 is where the road surface and the wall's relief become
 /// legible without the sky-to-ground contrast collapsing.
+///
+/// That sweep was taken under ACES with raw vertex colours. Re-measured on 2026-11-18 under what the
+/// city draws with now (PBR Neutral, decoded vertex colours — `city_tonemap`), same street:
+///
+/// | ambient × | p05 | p25 | median | p95 |
+/// |---|---|---|---|---|
+/// | **1** | **14** | **24** | **30** | **76** |
+/// | ½ | 12 | 20 | 29 | 66 |
+/// | ¼ | 11 | 18 | 28 | 62 |
+/// | 0 | 9 | 17 | 27 | 58 |
+///
+/// The lift now works only where it was meant to, at the dark end (p05 9 → 14), and the frame the
+/// user chose was taken with it, so it stays.
 pub const CITY_AMBIENT: Vec3 = Vec3::new(0.10, 0.11, 0.14);
 
 /// What crosses the glare threshold in this city, and how hard it glows.
@@ -94,6 +107,31 @@ pub fn city_glare() -> (f32, f32) {
         }
     }
     out
+}
+
+/// The tone curve the city is drawn with: **PBR Neutral**, not the renderer's default ACES.
+///
+/// Chosen by eye on 2026-11-18 from five frames of one street (ACES/Neutral/none × raw/decoded
+/// vertex colours), as the answer to "everything is too bright — it does not read as night". ACES
+/// lifts the middle of this city's range: its light is a byte per vertex, display-referred, and
+/// ACES both darkens the dark end 4.67× (MOTOR-NOTLARI #3) and pushes the mids up, so the frame
+/// came out grey and washed (median 65/255). Neutral leaves values below its knee alone — a night
+/// map stays as dark as its bytes say — and only rolls off the top, where neon and lit windows sit.
+///
+/// It goes together with the vertex colours being decoded (`world::build`): the two were judged as
+/// a pair, and either one alone is a different picture. `NFS_TONEMAP=aces|none|neutral|agx|
+/// reinhard|reinhard_lum` names another curve, for looking.
+#[must_use]
+pub fn city_tonemap() -> gizmo::renderer::gpu_types::TonemapCurve {
+    use gizmo::renderer::gpu_types::TonemapCurve;
+    match std::env::var("NFS_TONEMAP").as_deref() {
+        Ok("aces") => TonemapCurve::Aces,
+        Ok("none") => TonemapCurve::None,
+        Ok("agx") => TonemapCurve::AgX,
+        Ok("reinhard") => TonemapCurve::Reinhard,
+        Ok("reinhard_lum") => TonemapCurve::ReinhardLuminance,
+        _ => TonemapCurve::PbrNeutral,
+    }
 }
 
 /// The glare threshold the city is drawn with. See [`city_glare`] for where it comes from.

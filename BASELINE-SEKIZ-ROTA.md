@@ -237,3 +237,26 @@ rota      old   base  p7a6f
   old − p7a6f: alan -105 · rota rota [69, -12, 1, 21, -62, -5, 26, 67] · old 3/8 rotada önde, 0 berabere · en büyük tek rota +69 → sağlam
 ```
 
+### 2026-11-18 — `0e34a83c` (şehrin üçgen ağı zemin oldu)
+
+Aynı kilit, aynı komut. `base` = `7a6f6b46` (bir önceki tablonun `p7a6f`'i, yeniden koşuldu ve
+birebir tuttu), `pre` = `9ddec666`, `mesh` = `7c7b96b9`, `new` = `0e34a83c`. Fark tümüyle üçgen
+ağı commit'inden; tezgâhın sekiz koşusu iki pinde bayt bayt aynı. Ayrıntı ve okuma:
+`MOTOR-NOTLARI.md`, 2026-11-18 yükseltmesi. **Bundan sonraki süpürmelerin tabanı bu sütun (`new`).**
+
+```
+  rota    base   pre  mesh   new
+  4001     440   440   439   439
+  4002      68    68    66    66
+  4021     168   168   168   168
+  4041     209   209   207   207
+  4061     260   260   351   351
+  4081     143   143   139   139
+  4102     140   140   183   183
+  4121     139   139   205   205
+  TOPLAM  1567  1567  1758  1758
+
+  base − pre: alan +0 · rota rota [0, 0, 0, 0, 0, 0, 0, 0] · base 0/8 rotada önde, 8 berabere · en büyük tek rota +0 → sağlam
+  base − mesh: alan -191 · rota rota [-1, -2, 0, -2, 91, -4, 43, 66] · base 4/8 rotada önde, 1 berabere · en büyük tek rota +91 → sağlam
+  base − new: alan -191 · rota rota [-1, -2, 0, -2, 91, -4, 43, 66] · base 4/8 rotada önde, 1 berabere · en büyük tek rota +91 → sağlam
+```

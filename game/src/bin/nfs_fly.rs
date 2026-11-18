@@ -51,6 +51,8 @@ fn main() {
             let (bt, bi) = scene::city_glare();
             renderer.bloom_threshold = bt;
             renderer.bloom_intensity = bi;
+            // Neutral, with the decoded vertex colours `world::build` makes — see `scene::city_tonemap`.
+            renderer.tonemap_curve = scene::city_tonemap();
             renderer.ssr = None;
             renderer.ssgi = None;
             renderer.volumetric = None;
@@ -71,7 +73,7 @@ fn setup(world: &mut World, renderer: &mut gizmo::renderer::Renderer) -> FlyStat
     let start = nfsu2::world::start_at(Vec3::new(640.0, 40.0, -2816.0));
 
     let budget = std::env::var("NFS_BUDGET").ok().and_then(|s| s.parse::<usize>().ok());
-    let city = build_region(&renderer.device, meshes, &packs, Some(&shared), start, budget);
+    let city = build_region(&renderer.mesh_arena, meshes, &packs, Some(&shared), start, budget);
 
     let white = {
         let mut a = AssetManager::new();

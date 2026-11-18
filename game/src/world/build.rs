@@ -4,7 +4,7 @@ use super::cell::{cell_centre, cell_of};
 use super::{dedup, world_point};
 use gizmo::prelude::*;
 use gizmo::renderer::gpu_types::Vertex;
-use gizmo::wgpu;
+use gizmo::renderer::mesh_arena::MeshArena;
 use gizmo_nfs::types::AssetHash;
 use gizmo_nfs::world::{TrackPack, WorldMesh};
 use std::collections::BTreeMap;
@@ -118,6 +118,7 @@ fn emit(
                 .collect()
         };
 
+        let raw_vcol = std::env::var("NFS_RAW_VCOL").is_ok();
         for (offset, count, texture) in runs {
             let Some(slice) = object.indices.get(offset..offset + count) else { continue };
             let verts = buckets.entry((cell, texture)).or_default();
@@ -133,28 +134,37 @@ fn emit(
                 // to be lit by whatever the scene happens to have, which is not what it was drawn
                 // for. `unlit.wgsl` multiplies it in; the PBR path discards it.
                 let c = object.colours.get(i).copied().unwrap_or([255, 255, 255, 255]);
-                // The byte is used as-is, **not** decoded through the sRGB curve, and that is a
-                // decision rather than an omission.
+                // The colour bytes are read through the sRGB curve; the fourth (alpha) is not.
                 //
-                // It used to be decoded, on the reasoning that "the bytes are sRGB and the shader
-                // works in linear". Measured, that is what made Bayview unreadable: the road's own
-                // baked bytes are 24–35, the curve turns those into 0.009–0.017 of linear light,
-                // `baked_lit.wgsl` multiplies that straight into an already-dark night texture, and
-                // the road lands at 2–14/255 with the whole frame at a median of **1/255**.
+                // This went back and forth, and the history is the reason it is right now. They
+                // were decoded first, on "the bytes are sRGB and the shader works in linear", and
+                // Bayview became unreadable: the road's baked bytes are 24–35, the curve turns
+                // those into 0.009–0.017, `baked_lit.wgsl` multiplies that into a dark night
+                // texture, and under ACES — whose toe darkens the dark end another 4.67× — the
+                // frame's median was **1/255**. So the bytes went through raw, as the display-space
+                // modulator a 2004 fixed-function pipeline applied. That made the frame readable,
+                // and too bright: raw bytes under ACES read as grey haze, not night (median 65).
                 //
-                // The curve was never the right instrument for this attribute. These are not
-                // radiometric samples: they are the modulator a 2004 fixed-function pipeline applied
-                // to the texture in display space, where 255 means "unchanged". Read that way the
-                // byte is already the multiplier the artist chose, so it goes through untouched —
-                // white stays white, and a road at 30 dims the tarmac to 12% instead of to 1%.
-                let modulate = |b: u8| f32::from(b) / 255.0;
+                // What was wrong both times was ACES, not the decode. Under the curve the city now
+                // uses (`scene::city_tonemap`, PBR Neutral: values below its knee pass unchanged)
+                // the decoded bytes give a night frame with lit windows and neon intact (median
+                // 30, p95 76 on the street at the free-roam start) — the look the user picked on
+                // 2026-11-18 from five frames, ACES/Neutral/none × raw/decoded. The two settings
+                // were judged together and belong together. `NFS_RAW_VCOL=1` reads the bytes as-is.
+                //
+                // Alpha is a coverage fraction, not a colour: it stays linear either way, or a
+                // decal at half coverage would draw at a fifth.
+                let modulate = |b: u8| {
+                    let v = f32::from(b) / 255.0;
+                    if raw_vcol { v } else if v <= 0.04045 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
+                };
                 // The fourth byte is the city's own transparency, and it reaches the shader as of
                 // engine `ba969c0` — before that `Vertex::color` was a `vec3` and alpha was dropped
                 // on the floor, which drew Bayview's skid marks and decals as opaque slabs over the
-                // road. It goes through the same untouched-modulator reading as the other three.
+                // road. It is read linear, as a fraction — see the alpha note above.
                 verts.push(Vertex {
                     position: [gp.x, gp.y, gp.z],
-                    color: [modulate(c[0]), modulate(c[1]), modulate(c[2]), modulate(c[3])],
+                    color: [modulate(c[0]), modulate(c[1]), modulate(c[2]), f32::from(c[3]) / 255.0],
                     normal: [gn.x, gn.y, gn.z],
                     tex_coords: object.uvs.get(i).copied().unwrap_or([0.0, 0.0]),
                     ..Default::default()
@@ -168,7 +178,7 @@ fn emit(
 /// `budget` is applied here for callers that want only visuals; one that also builds colliders
 /// should call [`nearest`] itself and pass `None`, so both are built from the same objects.
 pub fn build_region(
-    device: &wgpu::Device,
+    arena: &MeshArena,
     meshes: Vec<WorldMesh>,
     packs: &[TrackPack<'_>],
     shared: Option<&super::SharedTextures>,
@@ -207,10 +217,16 @@ pub fn build_region(
                 Some(t) => format!("city_{}_{}_{:08X}", cell.0, cell.1, t.0),
                 None => format!("city_{}_{}_untextured", cell.0, cell.1),
             };
+            // Into the renderer's shared buffers (`MeshArena`), and indexed: the buckets are triangle
+            // lists with every corner written out, 8.9 M vertices of 104 bytes for the whole city
+            // (928 MB). Deduplicated they are 4.3 M plus an index list (446 + 36 MB), and the GPU
+            // reads half the vertices: on the AMD 780M the forward pass at the highway spot went
+            // 8.9 → 5.0 ms and the frame 20.8 → 16.1 ms (four paired runs, 2026-11-18). The same in
+            // `build_lods` and `build_local`.
             CityMesh {
                 cell,
                 texture,
-                mesh: Mesh::from_vertices(device, &verts, label),
+                mesh: arena.indexed(&verts, Vec3::ZERO, label),
                 origin: cell_centre(cell),
             }
         })
@@ -267,7 +283,7 @@ pub struct LodCityMesh {
 /// into per-(cell, texture) meshes with one level per [`LOD_BANDS`] entry. A copy with fewer than
 /// three levels repeats its coarsest, so it is still drawn far away.
 pub fn build_lods(
-    device: &wgpu::Device,
+    arena: &MeshArena,
     copies: &[Vec<WorldMesh>],
     packs: &[TrackPack<'_>],
     shared: Option<&super::SharedTextures>,
@@ -297,7 +313,7 @@ pub fn build_lods(
             let label = format!("scenery_{}_{}_{band}", cell.0, cell.1);
             out.entry((cell, texture))
                 .or_default()
-                .push((Mesh::from_vertices(device, &verts, label), bands[band]));
+                .push((arena.indexed(&verts, Vec3::ZERO, label), bands[band]));
         }
     }
     out.into_iter()
@@ -308,7 +324,7 @@ pub fn build_lods(
 /// One object's meshes in its own frame — one per texture — for something that moves on its own,
 /// like a prop's body: vertices relative to the object's origin, not a cell's.
 pub fn build_local(
-    device: &wgpu::Device,
+    arena: &MeshArena,
     object: &WorldMesh,
     packs: &[TrackPack<'_>],
     shared: Option<&super::SharedTextures>,
@@ -320,6 +336,6 @@ pub fn build_local(
     buckets
         .into_iter()
         .filter(|(_, v)| !v.is_empty())
-        .map(|((_, texture), verts)| (Mesh::from_vertices(device, &verts, label.to_string()), texture))
+        .map(|((_, texture), verts)| (arena.indexed(&verts, Vec3::ZERO, label.to_string()), texture))
         .collect()
 }
