@@ -8249,6 +8249,9 @@ ve hız < 10 m/s iken arka frenleri bırakıyor: oyunun yerinde patinajı.
 eşikleriyle) Dyno kaydırıcılarının etkisini taşıyor (`0x5A7530`): her kaydırıcı için düşük–yüksek
 uç çarpanları (downforce, kütle, lastik tutuşu, fren dengesi, AWD tork payı…) ve kalkış devri
 çarpanı (+0x10: FWD 1,0, AWD 1,2, RWD 1,1). Stok bir araba (kaydırıcılar ortada) için etkisiz.
+> **Düzeltme (2026-11-18, SPEED2-ATLAS §22.4):** `0x5A7530` Dyno kaydırıcısı değil, **etkinlik kipi ayarı**: yalnız drift,
+> Street X ve drag kurulumlarında çağrılıyor ve 22'şer değerlik kip tablolarını **kategori seviyeleriyle** lerp'liyor;
+> kaydırıcıların yolu §22.6 (`0x59B200`, aralık `0x5ACA50` + `0x34A1A`).
 Aynı blok `Melov8r`'ın (`0x5B0030`) da kaynağı. Burada "uzaktaki yapay zekâ/trafik fiziği" yazıyor; bu okunmuş
 değil, aşağıda "İki hareket sınıfı"na bak.
 
@@ -8500,6 +8503,10 @@ aranamıyor.
   okumuyor**: krank torku (`0x594300`) eğri ve motor freninden ibaret. Yani sürüşe girmiyor
   (gösterge ya da ses olmalı, okuyanı bulunmadı). PryHUB `Engine::turbo_nm`, altın test turbolu
   yediyi kilitliyor.
+  > **Düzeltme (2026-11-18, SPEED2-ATLAS §22.2):** yanlış — fizik kopyası kurulurken (`0x5B4DC0` → `0x5AC4F0`) TU
+  > uygulayıcısı `0x5A6E30` turboyu seviyeyle hedefe çekip **her noktada `tork[i] += turbo[i]`** yapıyor, parça olmasa da.
+  > Krank torku bu toplamı görüyor; turbolu arabaların stok tepe gücü ancak böyle tutuyor (SKYLINE 212 → 277 hp). Turbo yükseltmesi
+  > + kaydırıcı 0x18 de aynı tabloyu değiştiriyor. PryHUB `Engine::turbo_nm`'ün "no physics code reads it" notu da yanlış.
 - **Motorun ×1,05'i (`+0x74`)** araç kurulurken (`0x5B5CC0`, `0x5B6000`) araba nesnesinin `+0xD8`
   işaretli baytından kopyalanıyor; aynı nesne o baytı başka yerde bir işaretçi dizisinin sırası
   olarak kullanıyor (`0x5F0844`, `0x5F9D14`). Anlamı açık; etkisi %5.
@@ -8569,6 +8576,8 @@ hiçbir zorluğa denk gelmiyor gibi. Sütunun oyuncuya ne olarak göründüğü 
 
 **Rakibin becerisi (2026-11-06).** Rakip başına rastgele: `0x4FED00` `[0,1)` kurasını bloğun `+0x9F4 + zorluk·0x28`
 dağılımıyla karşılaştırıyor, sonuç `DriverInfo+0x901`'e yazılıyor (`0x6373E0`), `0x610510` onu okuyor.
+> **Not (2026-11-18, SPEED2-ATLAS §23.1.32):** bu kura **hızlı yarış** yolu (`0x53EE90`). Kariyerde beceri olay kaydının rakip
+> alt kaydından zorluğa göre geliyor (`+0x08 + 0x89E7F4`) ve `0x6373E0` doğrudan `+0x901`'e yazıyor.
 
 | zorluk | beceri (0–9) | ortalama |
 |---|---|---|

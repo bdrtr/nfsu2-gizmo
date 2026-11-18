@@ -25,6 +25,9 @@ import subprocess
 import sys
 
 CHUNK_LOADER_CTOR = 0x43C0B0  # bChunkLoader(id, load, unload): this=ecx, hashed into 0x828050[64]
+# A second, plain loader list: 36 load functions at 0x7FA858 and their 36 unloaders right after it,
+# tried in order by 0x570D70 (unload 0x577B10). The chunk id is compared inside each load function.
+STATIC_LOADERS, STATIC_UNLOADERS, STATIC_COUNT = 0x7FA858, 0x7FA8E8, 36
 
 
 def pe_sections(b):
@@ -86,7 +89,7 @@ def disasm(path):
     return ins
 
 
-IMM = re.compile(r'0x([0-9a-f]{6,8})\b')
+IMM = re.compile(r'0x([0-9a-f]{5,8})\b')  # 5 digits: chunk ids such as `cmp eax,0x34102`
 
 
 def strings_ok(s):
@@ -114,6 +117,15 @@ class Atlas:
                 v = struct.unpack_from('<I', self.exe.b, ro + o)[0]
                 if self.exe.in_text(v) and v in istart:
                     self.vt_slots[va + o] = v
+                    starts.add(v)
+        # Callbacks handed over as immediates (`push 0x5df8a0` into bChunkLoader, file-queue
+        # callbacks) are functions too, when the code before them ends a function or pads.
+        prev = {a: t for (a, _), (_, t) in zip(self.ins[1:], self.ins)}
+        for a, t in self.ins:
+            m = re.match(r'(?:push|mov\s+\S+,)\s+0x([0-9a-f]+)$', t)
+            if m:
+                v = int(m.group(1), 16)
+                if v in istart and prev.get(v, '').startswith(('ret', 'nop', 'int3', 'jmp')):
                     starts.add(v)
         self.starts = sorted(s for s in starts if self.exe.in_text(s))
         self.fstr = collections.defaultdict(list)  # func -> [(insn addr, string)]
@@ -151,11 +163,22 @@ class Atlas:
         reg = {c for c, _, _ in rows}
         for cid, load, unload in sorted(rows, key=lambda r: r[0] & 0x7fffffff):
             print(f'{cid:#010x}\tload {load:#x}\tunload {unload:#x}')
-        print('\n# every chunk-id-shaped immediate, and the functions using it')
         def chunky(v):
             lo = v & 0x7fffffff
             return (0x30000 <= lo <= 0x3ffff and lo & 0xff00 != 0xff00) or 0x134000 <= lo <= 0x13ffff \
-                or (v >> 24) in (0xb0, 0xb3)
+                or (v >> 24) in (0xb0, 0xb3) or (v >> 12) == 0xE34  # EAGL anim bankası/iskelet
+        by_func = collections.defaultdict(set)
+        for v, fs in self.imm_refs.items():
+            if chunky(v) and v != 0x30000:
+                for f in fs:
+                    by_func[f].add(v)
+        print(f'\n# static loader list {STATIC_LOADERS:#x} (tried in order): #  load  unload  chunk ids the loader compares')
+        for i in range(STATIC_COUNT):
+            load = self.exe.dword(STATIC_LOADERS + 4 * i)
+            unload = self.exe.dword(STATIC_UNLOADERS + 4 * i)
+            ids = ' '.join(f'{v:#x}' for v in sorted(by_func.get(load, ()), key=lambda v: v & 0x7fffffff))
+            print(f'{i}\tload {load:#x}\tunload {unload:#x}\t{ids or "(id not an immediate)"}')
+        print('\n# every chunk-id-shaped immediate, and the functions using it')
         for v in sorted(self.imm_refs, key=lambda v: v & 0x7fffffff):
             if chunky(v) and v not in (0x30000,):
                 fs = ' '.join(f'{f:#x}' for f in sorted(self.imm_refs[v]))
