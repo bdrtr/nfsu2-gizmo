@@ -72,8 +72,8 @@ impl GearboxLevel {
     }
 }
 
-/// Which engine package is fitted: the record keeps four torque tables and the shop sells three
-/// levels.
+/// How far the engine side is built: every engine, turbo and ECU package up to one of the shop's
+/// three levels ([`gizmo_nfs::EngineUpgrade::level`]).
 ///
 /// Separate from [`GearboxLevel`] because the game sells them separately — a car can have a
 /// built engine and a stock gearbox — and because they read out of *different* slots of the
@@ -88,8 +88,8 @@ pub enum EngineLevel {
 }
 
 impl EngineLevel {
-    /// Index into [`CarHandling::torque_gain_nm`], which is what
-    /// [`gizmo_nfs::CarHandling::torque_at`] takes.
+    /// The shop level of the engine side, which is what
+    /// [`gizmo_nfs::EngineUpgrade::level`] takes.
     #[must_use]
     pub fn slot(self) -> usize {
         match self {
@@ -307,20 +307,25 @@ pub fn tune_from_record(
     // 240SX is 3280 rpm, and that car peaks at 4675. Every car in this game made its torque 1,400
     // rpm early and in a shape none of them have, and two cars with the same peak drove identically.
     //
-    // `torque_at` applies the engine upgrade: the record keeps four tables and the level picks one.
-    let rpm_axis = handling.torque_rpm();
-    let curve_nm = handling.torque_at(upgrades.engine.slot());
+    // The engine side as the game builds it (SPEED2-ATLAS §22.2): the level fits every engine, turbo
+    // and ECU package up to it; the curve carries the boost even at stock (the turbo cars' power is
+    // only right with it), and from level 1 the ECU moves idle, red line and limiter — so the curve,
+    // its rpm axis and the limits below all come from the same upgraded engine.
+    let up = gizmo_nfs::EngineUpgrade::level(upgrades.engine.slot());
+    let engine = handling.engine_with(up);
+    let rpm_axis = handling.torque_rpm_with(up);
+    let curve_nm = handling.torque_with(up);
     let torque_curve: Vec<(f32, f32)> =
         rpm_axis.iter().copied().zip(curve_nm.iter().copied()).collect();
     // Still set, because it is what the engine falls back to and what a HUD would print.
     let peak_nm = curve_nm.iter().copied().fold(0.0_f32, f32::max);
 
     let mut tuning = VehicleTuning {
-        idle_rpm: handling.engine.idle_rpm,
-        max_rpm: handling.engine.limiter_rpm,
+        idle_rpm: engine.idle_rpm,
+        max_rpm: engine.limiter_rpm,
         gear_ratios,
         final_drive_ratio: gb.final_drive,
-        upshift_rpm: handling.engine.red_line_rpm,
+        upshift_rpm: engine.red_line_rpm,
         wheelbase,
         track_width: track,
         max_engine_torque: peak_nm,
@@ -331,7 +336,7 @@ pub fn tune_from_record(
     // and downshifts per gear, below the rpm the upshift into that gear dropped to (`0x5AA960`);
     // `rig::powertrain` writes both every step for the gear the car is in. These two are what stand
     // where the powertrain is turned off.
-    tuning.downshift_rpm = handling.engine.red_line_rpm * 0.5;
+    tuning.downshift_rpm = engine.red_line_rpm * 0.5;
 
     let chassis = &handling.chassis;
     // The game's bar is `rate · (x − x of the other wheel)` per axle, which is the engine's formula;
@@ -362,9 +367,9 @@ pub fn tune_from_record(
         flywheel_kgm2: handling.engine.inertia_kgm2,
         steer_mult: handling.steer_ratio,
         powertrain: crate::rig::powertrain::Spec {
-            idle_rpm: handling.engine.idle_rpm,
-            red_line_rpm: handling.engine.red_line_rpm,
-            limiter_rpm: handling.engine.limiter_rpm,
+            idle_rpm: engine.idle_rpm,
+            red_line_rpm: engine.red_line_rpm,
+            limiter_rpm: engine.limiter_rpm,
             brake_nm: handling.engine.brake_nm,
             shift_rate: gb.shift_rate,
             drag_n: chassis.drag * KILO,
