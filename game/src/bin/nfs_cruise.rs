@@ -30,7 +30,7 @@
 //! nearest-first · `NFS_DEBUG=1` start with the F3 overlay on · `NFS_DIAG=1` prints the physics' own view and the frame's
 //! split (physics/update/render/encode) once a second · `NFS_HOLD=1` keys ignored, brakes on, for timing one spot ·
 //! `NFS_PTRACE=1` lets `eu-stack -p` sample the process · `NFS_LOD=on` detail levels as `LodGroup`s
-//! (default: every copy at `_1A`, merged with the city) · `NFS_TAA=on` · `NFS_SSAO=off` · `NFS_CITY_SHADOWS=on` · plus everything
+//! (default: every copy at `_1A`, merged with the city) · `NFS_TAA=off` · `NFS_SSAO=off` · `NFS_CITY_SHADOWS=on` · plus everything
 //! [`nfsu2::rig`] reads (`NFS_PAINT`, `NFS_KIT`, `NFS_ENGINE`, `NFS_SHOTCAM`, …).
 
 use gizmo::egui;
@@ -592,11 +592,10 @@ fn main() {
             }
             renderer.ssgi = None;
             renderer.volumetric = None;
-            // TAA off unless `NFS_TAA=on`: on the user's screen it made the city's lights blink as
-            // the car drove (bisected: bloom alone clean, bloom + TAA blinking; the Bevy port,
-            // which has none of the three, never blinked). MOTOR-NOTLARI #27. `NFS_SSAO=off`
-            // takes the ambient occlusion out too.
-            if std::env::var("NFS_TAA").as_deref() != Ok("on") {
+            // TAA on; `NFS_TAA=off` takes it out. It was off until pin `37625d72`: it made the
+            // city's lights blink as the car drove, fixed in the engine (MOTOR-NOTLARI #27).
+            // `NFS_SSAO=off` takes the ambient occlusion out.
+            if std::env::var("NFS_TAA").as_deref() == Ok("off") {
                 renderer.taa = None;
             }
             if std::env::var("NFS_SSAO").as_deref() == Ok("off") {
