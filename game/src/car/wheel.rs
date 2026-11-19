@@ -21,6 +21,9 @@ pub struct WheelFit {
     pub half_wheelbase: f32,
     /// Half the track width (left↔right corner offset across the car).
     pub half_track: f32,
+    /// Half the wheel's own width across the car (tyre and rim, from the modelled wheel's bounds).
+    /// The record's mount is the wheel's **outer** face, not its middle — see `scene::wheel_mounts`.
+    pub half_width: f32,
 }
 
 /// Fit the four wheel corners from one wheel part's bounds (`wmin`/`wmax`, Gizmo frame) and
@@ -33,6 +36,7 @@ pub fn fit_wheel(wmin: Vec3, wmax: Vec3, center: Vec3, width: f32, length: f32) 
         radius: ((wmax.y - wmin.y).max(wmax.z - wmin.z) * 0.5).clamp(0.18, 0.55),
         half_wheelbase: (wcenter.z - center.z).abs().max(length * 0.30),
         half_track: (wcenter.x - center.x).abs().max(width * 0.40),
+        half_width: (wmax.x - wmin.x) * 0.5,
     }
 }
 

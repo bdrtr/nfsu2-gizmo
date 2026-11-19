@@ -250,7 +250,7 @@ where
     let mut wheel = None;
     let mut brakes = [None, None];
     let mut wheel_fit =
-        WheelFit { radius: 0.31, half_wheelbase: length * 0.36, half_track: width * 0.42 };
+        WheelFit { radius: 0.31, half_wheelbase: length * 0.36, half_track: width * 0.42, half_width: 0.1 };
     if let Some(wp) = stock.iter().copied().find(|p| group_of(&p.name) == Grp::Wheel) {
         let (wl, wh) = bbox(std::slice::from_ref(&wp));
         wheel_fit = fit_wheel(wl, wh, center, width, length);

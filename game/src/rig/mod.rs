@@ -110,8 +110,11 @@ impl Placement {
 pub struct RigWheel {
     /// The visual entity. It has no physics of its own — the suspension is the controller's.
     pub id: u32,
-    /// Mount point in chassis space, the same one the suspension raycasts from.
+    /// Where the wheel is drawn in chassis space at rest ([`scene::wheel_mounts`]).
     pub local: Vec3,
+    /// How far in from the suspension's mount the wheel is drawn — the record's point is the
+    /// wheel's outer face ([`scene::wheel_mounts`]). Added to the strut's centre every frame.
+    pub inset: Vec3,
     /// Front axle, so it turns with the steering.
     pub front: bool,
     /// The brake disc hung inside this wheel, if the car models one: placed with the wheel's
@@ -503,6 +506,7 @@ fn build_car(
     // pair on the wrong sides: the record's order is front-left, front-right, **rear-right**,
     // rear-left, and the sign table read `(-1,-1), (1,-1), (-1,1), (1,1)`.
     let mounts = scene::wheel_mounts(gb.info.as_ref(), fit, center, size.y);
+    let record = scene::wheel_record_mounts(gb.info.as_ref(), fit, center, size.y);
     let mut wheels = Vec::new();
     if let Some((mesh, wmat)) = wheel {
         for (i, &local) in mounts.iter().enumerate() {
@@ -512,7 +516,8 @@ fn build_car(
             let brake = brakes[usize::from(i >= 2)].as_ref().map(|(bm, bmat)| {
                 scene::spawn_mesh(world, bm.clone(), bmat.clone(), Transform::new(Vec3::ZERO))
             });
-            wheels.push(RigWheel { id, local, front: i < 2, settle: 0.0, brake });
+            let inset = local - record.get(i).copied().unwrap_or(local);
+            wheels.push(RigWheel { id, local, inset, front: i < 2, settle: 0.0, brake });
         }
     }
 
@@ -583,7 +588,7 @@ fn build_car(
     // The suspension hangs its wheel *below* the attachment, so the bolt goes one rest-length above
     // the mount and the wheel settles where the record puts it.
     let rest = (radius * 0.25).max(0.05);
-    for (i, &mount) in mounts.iter().enumerate() {
+    for (i, &mount) in record.iter().enumerate() {
         let (front, left) = (i < 2, mount.x < 0.0);
         // The car's own spring, bump and grip when its record is reachable, the engine's feel when
         // it is not. See `AxleTune` for what each number is in the game.
@@ -1680,7 +1685,7 @@ impl CarRig {
                 Some(&a) if w.front => Quat::from_axis_angle(Vec3::Y, a),
                 _ => Quat::IDENTITY,
             };
-            let local = centres.get(i).copied().flatten().unwrap_or(w.local + Vec3::Y * w.settle);
+            let local = centres.get(i).copied().flatten().map(|c| c + w.inset).unwrap_or(w.local + Vec3::Y * w.settle);
             let at = pose.position + pose.rotation * local;
             place(w.id, at, pose.rotation * steer * spin * mirror);
             // The caliper does not roll: the brake takes everything the wheel does except `spin`.

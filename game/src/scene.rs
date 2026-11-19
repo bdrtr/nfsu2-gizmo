@@ -250,6 +250,24 @@ pub fn spawn_mesh(world: &mut World, mesh: Mesh, material: Material, t: Transfor
 /// part's own bounds when the game bundle is not reachable.
 #[must_use]
 pub fn wheel_mounts(cti: Option<&CarTypeInfo>, fit: WheelFit, center: Vec3, body_height: f32) -> Vec<Vec3> {
+    // **The record's lateral is the wheel's outer face, not its middle.** A stock 240SX's record puts
+    // its wheels at ±0.821 m (front) and ±0.801 m (rear); its body is ±0.815 m wide at the axles,
+    // and its wheel is 0.20 m across — so the game's wheels stand flush with the wings. Centred on the
+    // mount, half of every tyre stood 0.1 m out of the body. A wheel *drawn* there goes in by half
+    // its width, and the brakes, placed at the same mounts, with it. The suspension stays on the
+    // record's own point (`wheel_record_mounts`): this is where the eye sees the wheel, not where
+    // the car stands on it.
+    let inset = if cti.is_some() { fit.half_width } else { 0.0 };
+    wheel_record_mounts(cti, fit, center, body_height)
+        .into_iter()
+        .map(|m| m - Vec3::X * m.x.signum() * inset)
+        .collect()
+}
+
+/// The four wheel points as the record states them — the suspension's mounts. [`wheel_mounts`] is
+/// where the wheels are drawn.
+#[must_use]
+pub fn wheel_record_mounts(cti: Option<&CarTypeInfo>, fit: WheelFit, center: Vec3, body_height: f32) -> Vec<Vec3> {
     match cti {
         Some(c) => c.wheels.iter().map(|w| crate::car::wheel_mount(w, center)).collect(),
         None => {
