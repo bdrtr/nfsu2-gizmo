@@ -142,3 +142,55 @@ pub fn env_color(var: &str, default: [f32; 3]) -> [f32; 3] {
         })
         .unwrap_or(default)
 }
+
+/// `NFS_TEXTURES=<dir>`: pictures that **replace the game's own**, by texture key — an upscaled set,
+/// made by dumping the originals (`NFS_TEXTURE_DUMP`) and running them through an upscaler. Nothing
+/// in the install is touched; without the variable every texture is the file's.
+///
+/// One file per texture, `KKKKKKKK_WxH.rgba`: the key in hex, the size, then `W × H` RGBA8 texels,
+/// row-major. Raw rather than PNG so that reading one needs no decoder this crate does not already
+/// have; a picture whose length is not its name's `W × H × 4` is ignored, not trusted.
+///
+/// `NFS_TEXTURE_DUMP=<dir>` writes every texture that passes through here into `dir` in the same
+/// form, *before* any replacement — the input to the upscaler, keyed exactly as the lookup is.
+pub fn swap_texture(key: u32, original: gizmo_nfs::NfsTexture) -> gizmo_nfs::NfsTexture {
+    use std::sync::OnceLock;
+    static DUMP: OnceLock<Option<std::path::PathBuf>> = OnceLock::new();
+    static INDEX: OnceLock<std::collections::HashMap<u32, (std::path::PathBuf, u32, u32)>> = OnceLock::new();
+
+    if let Some(dir) = DUMP.get_or_init(|| std::env::var_os("NFS_TEXTURE_DUMP").map(std::path::PathBuf::from)) {
+        let _ = std::fs::create_dir_all(dir);
+        let path = dir.join(format!("{key:08X}_{}x{}.rgba", original.width, original.height));
+        if !path.exists() {
+            let _ = std::fs::write(path, &original.rgba);
+        }
+    }
+
+    let index = INDEX.get_or_init(|| {
+        let mut map = std::collections::HashMap::new();
+        let Some(dir) = std::env::var_os("NFS_TEXTURES") else { return map };
+        let Ok(entries) = std::fs::read_dir(&dir) else { return map };
+        for e in entries.flatten() {
+            let name = e.file_name().to_string_lossy().into_owned();
+            let Some(stem) = name.strip_suffix(".rgba") else { continue };
+            let Some((k, size)) = stem.split_once('_') else { continue };
+            let Some((w, h)) = size.split_once('x') else { continue };
+            if let (Ok(k), Ok(w), Ok(h)) = (u32::from_str_radix(k, 16), w.parse(), h.parse()) {
+                map.insert(k, (e.path(), w, h));
+            }
+        }
+        println!("NFS_TEXTURES: {} replacement textures in {}", map.len(), std::path::Path::new(&dir).display());
+        map
+    });
+    let Some((path, w, h)) = index.get(&key) else { return original };
+    match std::fs::read(path) {
+        Ok(rgba) if rgba.len() == (*w as usize) * (*h as usize) * 4 => {
+            let mut t = original;
+            t.width = *w;
+            t.height = *h;
+            t.rgba = rgba;
+            t
+        }
+        _ => original,
+    }
+}

@@ -221,7 +221,7 @@ where
         let Some(mesh) = build_mesh_items(device, &items, center, |_| 0.0, "nfs_textured") else {
             continue;
         };
-        let Some(texture) = tpk.and_then(|t| t.texture(hash)).cloned() else { continue };
+        let Some(texture) = texture_of(tpk, hash) else { continue };
         let (roughness, metallic) = group_pbr(group_of(&items[0].0.name));
         textured.push(TexturedPart {
             mesh,
@@ -259,7 +259,7 @@ where
         // The wheel's texture is its first material run that resolves to a TPK image — the tire
         // + rim atlas, whose UVs cover both. The whole wheel is one mesh; a small untextured hub
         // run just samples the same atlas, which reads fine.
-        let wheel_tex = wp.materials.iter().find_map(|m| tpk.and_then(|t| t.texture(m.hash)).cloned());
+        let wheel_tex = wp.materials.iter().find_map(|m| texture_of(tpk, m.hash));
         // The parser already normalised the wheel's triangle strips to a clean list, so the wheel
         // builds as one mesh (its runs all share the one tire/rim atlas) — less its PLAINNOTHING
         // filler. That run is a flat square the size of the tyre's bounding box, its corners
@@ -308,7 +308,7 @@ where
             };
             let label = if front { "nfs_brake_front" } else { "nfs_brake_rear" };
             if let Some(mesh) = build_mesh_items(device, &runs, (wl + wh) * 0.5, |_| 0.0, label) {
-                let tex = b.materials.iter().find_map(|m| tpk.and_then(|t| t.texture(m.hash)).cloned());
+                let tex = b.materials.iter().find_map(|m| texture_of(tpk, m.hash));
                 let surface = match tex {
                     Some(t) => WheelSurface::Textured(t),
                     None => WheelSurface::Flat(make_material(brake_look())),
@@ -321,4 +321,10 @@ where
     // No cabin filler is emitted: BASE supplies the real interior geometry (routed per-shader)
     // and the windscreen glass covers the openings, so the old hollow-shell box is obsolete.
     CarVisuals { groups, textured, center, width, height, length, wheel, wheel_fit, brakes }
+}
+
+/// A car texture from its pack, through [`crate::assets::swap_texture`] — so `NFS_TEXTURES` can put an
+/// upscaled picture in its place and `NFS_TEXTURE_DUMP` can write the original out.
+fn texture_of(tpk: Option<&gizmo_nfs::Tpk>, hash: gizmo_nfs::AssetHash) -> Option<gizmo_nfs::NfsTexture> {
+    tpk.and_then(|t| t.texture(hash)).cloned().map(|t| crate::assets::swap_texture(hash.0, t))
 }

@@ -1005,6 +1005,9 @@ fn setup(world: &mut World, renderer: &mut gizmo::renderer::Renderer) -> CruiseS
             // was resolved in, so a key that resolved shared uploads from shared.
             let own = packs.iter().find_map(|p| p.get(key).and_then(|r| p.decode(r).ok()));
             let Some(img) = own.or_else(|| shared.get(key).cloned()) else { continue };
+            // `NFS_TEXTURES` / `NFS_TEXTURE_DUMP` (`assets::swap_texture`): an upscaled replacement,
+            // or the original written out for the upscaler.
+            let img = nfsu2::assets::swap_texture(key.0, img);
             // **Which textures are cut-outs.** Bayview's foliage is flat cards with the tree cut
             // out of a quad; drawn opaque those cards are dark slabs standing in the air, which
             // is what a player sees and reports as objects floating in the sky.

@@ -1198,6 +1198,9 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
         }
         let own = packs.iter().find_map(|p| p.get(key).and_then(|r| p.decode(r).ok()));
         let Some(image) = own.or_else(|| shared.get(key).cloned()) else { continue };
+        // `NFS_TEXTURES` / `NFS_TEXTURE_DUMP` (`assets::swap_texture`): an upscaled replacement, or
+        // the original written out for the upscaler.
+        let image = nfsu2::assets::swap_texture(key.0, image);
         // A pixel under half opacity is the cut part of a cut-out; a texture with none is opaque
         // whatever its channel says. Counted rather than assumed, and printed, because "how much
         // of this city is foliage" is a fact about the city nobody here had.
