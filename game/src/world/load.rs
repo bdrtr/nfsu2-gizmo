@@ -40,6 +40,8 @@ pub struct Bundles {
     /// The breakable props ([`super::props`]) — barrels, cans, signs — as bodies to spawn. Their
     /// scenery copies are not in [`Self::scenery`]. Empty unless `NFS_PROPS=on` (see the loader).
     pub props: Vec<super::props::Prop>,
+    /// The street lamps every region places ([`super::lights`]), for lighting what the bake cannot.
+    pub lights: Vec<super::lights::Lamp>,
     /// Every region's texture packs.
     pub packs: Vec<TrackPack<'static>>,
     /// `TRACKS/LOC4DYNTEX.BIN` and `GLOBAL/` — the keys no region carries itself. Empty rather than
@@ -111,6 +113,7 @@ pub fn load_event(path: &str, event: Option<u32>) -> Bundles {
     let mut scenery: Vec<Vec<WorldMesh>> = Vec::new();
     let mut collision = Vec::new();
     let mut props: Vec<super::props::Prop> = Vec::new();
+    let mut lights = Vec::new();
     // Off by default: 513 dynamic bodies cost the frame ~8 ms (median 29.1 → 20.8 ms without them,
     // measured on the user's screen), and starting them asleep made it worse (a 50 ms floor). Until
     // the engine carries that many cheaply, `NFS_PROPS=on` is the way to try them.
@@ -135,6 +138,7 @@ pub fn load_event(path: &str, event: Option<u32>) -> Bundles {
             scenery.extend(instance_lods(bytes, &mut own, &groups).into_iter().filter(|l| !l.is_empty()));
         }
         meshes.extend(own);
+        lights.extend(super::lights::lamps(bytes));
         packs.extend(gizmo_nfs::world::packs(bytes).expect("read a region's texture packs"));
     }
     scenery.retain(|l| super::is_drawn(&l[0].header.name));
@@ -182,7 +186,7 @@ pub fn load_event(path: &str, event: Option<u32>) -> Bundles {
     let root = Path::new(path).ancestors().find(|a| a.join("GLOBAL").is_dir());
     let shared = root.map(SharedTextures::load).unwrap_or_default();
 
-    Bundles { files, meshes, scenery, scenery_lods, collision, props, packs, shared }
+    Bundles { files, meshes, scenery, scenery_lods, collision, props, lights, packs, shared }
 }
 
 /// Where in the city to start, from `NFS_AT="x,y,z"`, else `default`.

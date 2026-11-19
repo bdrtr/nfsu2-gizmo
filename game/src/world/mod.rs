@@ -27,6 +27,7 @@
 mod build;
 mod cell;
 mod collide;
+pub mod lights;
 mod load;
 pub mod props;
 mod network;

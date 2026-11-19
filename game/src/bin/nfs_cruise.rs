@@ -30,7 +30,7 @@
 //! nearest-first · `NFS_DEBUG=1` start with the F3 overlay on · `NFS_DIAG=1` prints the physics' own view and the frame's
 //! split (physics/update/render/encode) once a second · `NFS_HOLD=1` keys ignored, brakes on, for timing one spot ·
 //! `NFS_PTRACE=1` lets `eu-stack -p` sample the process · `NFS_LOD=on` detail levels as `LodGroup`s
-//! (default: every copy at `_1A`, merged with the city) · `NFS_TAA=off` · `NFS_SSAO=off` · `NFS_CITY_SHADOWS=on` · plus everything
+//! (default: every copy at `_1A`, merged with the city) · `NFS_TAA=off` · `NFS_SSAO=off` · `NFS_CITY_SHADOWS=on` · `NFS_LAMPS=off` · plus everything
 //! [`nfsu2::rig`] reads (`NFS_PAINT`, `NFS_KIT`, `NFS_ENGINE`, `NFS_SHOTCAM`, …).
 
 use gizmo::egui;
@@ -656,7 +656,7 @@ fn setup(world: &mut World, renderer: &mut gizmo::renderer::Renderer) -> CruiseS
         println!("region: {} — the bundle {what}", b.display());
     }
     let source = region.map_or_else(|| tracks.clone(), |b| b.display().to_string());
-    let city::Bundles { files, meshes, scenery, scenery_lods, collision, props, packs, shared } = city::load(&source);
+    let city::Bundles { files, meshes, scenery, scenery_lods, collision, props, lights, packs, shared } = city::load(&source);
     println!(
         "{} bundle(s), {} objects, {} packs, {} shared textures",
         files.len(),
@@ -1167,6 +1167,11 @@ fn setup(world: &mut World, renderer: &mut gizmo::renderer::Renderer) -> CruiseS
         2.2,
         at + Vec3::new(-200.0, 200.0, -100.0),
     );
+    // The street lamps, for what the bake cannot light: the car under them, and the rain on the road
+    // reflecting them (`world::lights`). `NFS_LAMPS=off` leaves them out.
+    if std::env::var("NFS_LAMPS").as_deref() != Ok("off") {
+        println!("lamps: {}", city::lights::spawn(world, &lights));
+    }
 
     let rig = spawn_car(
         world,
