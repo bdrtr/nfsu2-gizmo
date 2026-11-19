@@ -668,7 +668,7 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
- "windows 0.62.2",
+ "windows",
 ]
 
 [[package]]
@@ -1362,7 +1362,7 @@ dependencies = [
  "vec_map",
  "wasm-bindgen",
  "web-sys",
- "windows 0.54.0",
+ "windows",
 ]
 
 [[package]]
@@ -1374,7 +1374,7 @@ checksum = "e629b9b98ef3dd8afe6ca2bd0f89306cec16d43d907889945bc5d6687f2f13c7"
 [[package]]
 name = "gizmo-ai"
 version = "0.11.0"
-source = "git+https://github.com/bdrtr/Gizmo?rev=7e4828e488b4ebbdf25982cda451d5e338925830#7e4828e488b4ebbdf25982cda451d5e338925830"
+source = "git+https://github.com/bdrtr/Gizmo?rev=457a11d369807b1ab8aab553a7e91ae775529b88#457a11d369807b1ab8aab553a7e91ae775529b88"
 dependencies = [
  "gizmo-core",
  "gizmo-math",
@@ -1389,7 +1389,7 @@ dependencies = [
 [[package]]
 name = "gizmo-analysis"
 version = "0.11.0"
-source = "git+https://github.com/bdrtr/Gizmo?rev=7e4828e488b4ebbdf25982cda451d5e338925830#7e4828e488b4ebbdf25982cda451d5e338925830"
+source = "git+https://github.com/bdrtr/Gizmo?rev=457a11d369807b1ab8aab553a7e91ae775529b88#457a11d369807b1ab8aab553a7e91ae775529b88"
 dependencies = [
  "egui",
  "gizmo-core",
@@ -1398,7 +1398,7 @@ dependencies = [
 [[package]]
 name = "gizmo-animation"
 version = "0.11.0"
-source = "git+https://github.com/bdrtr/Gizmo?rev=7e4828e488b4ebbdf25982cda451d5e338925830#7e4828e488b4ebbdf25982cda451d5e338925830"
+source = "git+https://github.com/bdrtr/Gizmo?rev=457a11d369807b1ab8aab553a7e91ae775529b88#457a11d369807b1ab8aab553a7e91ae775529b88"
 dependencies = [
  "gizmo-core",
  "gizmo-math",
@@ -1410,7 +1410,7 @@ dependencies = [
 [[package]]
 name = "gizmo-app"
 version = "0.11.0"
-source = "git+https://github.com/bdrtr/Gizmo?rev=7e4828e488b4ebbdf25982cda451d5e338925830#7e4828e488b4ebbdf25982cda451d5e338925830"
+source = "git+https://github.com/bdrtr/Gizmo?rev=457a11d369807b1ab8aab553a7e91ae775529b88#457a11d369807b1ab8aab553a7e91ae775529b88"
 dependencies = [
  "backtrace",
  "console_error_panic_hook",
@@ -1457,7 +1457,7 @@ dependencies = [
 [[package]]
 name = "gizmo-audio"
 version = "0.11.0"
-source = "git+https://github.com/bdrtr/Gizmo?rev=7e4828e488b4ebbdf25982cda451d5e338925830#7e4828e488b4ebbdf25982cda451d5e338925830"
+source = "git+https://github.com/bdrtr/Gizmo?rev=457a11d369807b1ab8aab553a7e91ae775529b88#457a11d369807b1ab8aab553a7e91ae775529b88"
 dependencies = [
  "gizmo-core",
  "log",
@@ -1468,7 +1468,7 @@ dependencies = [
 [[package]]
 name = "gizmo-core"
 version = "0.11.0"
-source = "git+https://github.com/bdrtr/Gizmo?rev=7e4828e488b4ebbdf25982cda451d5e338925830#7e4828e488b4ebbdf25982cda451d5e338925830"
+source = "git+https://github.com/bdrtr/Gizmo?rev=457a11d369807b1ab8aab553a7e91ae775529b88#457a11d369807b1ab8aab553a7e91ae775529b88"
 dependencies = [
  "crossbeam-queue",
  "jiff",
@@ -1486,7 +1486,7 @@ dependencies = [
 [[package]]
 name = "gizmo-editor"
 version = "0.11.0"
-source = "git+https://github.com/bdrtr/Gizmo?rev=7e4828e488b4ebbdf25982cda451d5e338925830#7e4828e488b4ebbdf25982cda451d5e338925830"
+source = "git+https://github.com/bdrtr/Gizmo?rev=457a11d369807b1ab8aab553a7e91ae775529b88#457a11d369807b1ab8aab553a7e91ae775529b88"
 dependencies = [
  "dirs",
  "egui",
@@ -1511,7 +1511,7 @@ dependencies = [
 [[package]]
 name = "gizmo-engine"
 version = "0.11.0"
-source = "git+https://github.com/bdrtr/Gizmo?rev=7e4828e488b4ebbdf25982cda451d5e338925830#7e4828e488b4ebbdf25982cda451d5e338925830"
+source = "git+https://github.com/bdrtr/Gizmo?rev=457a11d369807b1ab8aab553a7e91ae775529b88#457a11d369807b1ab8aab553a7e91ae775529b88"
 dependencies = [
  "bytemuck",
  "egui",
@@ -1543,7 +1543,7 @@ dependencies = [
 [[package]]
 name = "gizmo-math"
 version = "0.11.0"
-source = "git+https://github.com/bdrtr/Gizmo?rev=7e4828e488b4ebbdf25982cda451d5e338925830#7e4828e488b4ebbdf25982cda451d5e338925830"
+source = "git+https://github.com/bdrtr/Gizmo?rev=457a11d369807b1ab8aab553a7e91ae775529b88#457a11d369807b1ab8aab553a7e91ae775529b88"
 dependencies = [
  "getrandom 0.2.17",
  "glam",
@@ -1553,7 +1553,7 @@ dependencies = [
 [[package]]
 name = "gizmo-net"
 version = "0.11.0"
-source = "git+https://github.com/bdrtr/Gizmo?rev=7e4828e488b4ebbdf25982cda451d5e338925830#7e4828e488b4ebbdf25982cda451d5e338925830"
+source = "git+https://github.com/bdrtr/Gizmo?rev=457a11d369807b1ab8aab553a7e91ae775529b88#457a11d369807b1ab8aab553a7e91ae775529b88"
 dependencies = [
  "bincode",
  "gizmo-core",
@@ -1571,7 +1571,7 @@ version = "0.4.0"
 [[package]]
 name = "gizmo-physics-core"
 version = "0.11.0"
-source = "git+https://github.com/bdrtr/Gizmo?rev=7e4828e488b4ebbdf25982cda451d5e338925830#7e4828e488b4ebbdf25982cda451d5e338925830"
+source = "git+https://github.com/bdrtr/Gizmo?rev=457a11d369807b1ab8aab553a7e91ae775529b88#457a11d369807b1ab8aab553a7e91ae775529b88"
 dependencies = [
  "arrayvec",
  "gizmo-core",
@@ -1584,7 +1584,7 @@ dependencies = [
 [[package]]
 name = "gizmo-physics-dynamics"
 version = "0.11.0"
-source = "git+https://github.com/bdrtr/Gizmo?rev=7e4828e488b4ebbdf25982cda451d5e338925830#7e4828e488b4ebbdf25982cda451d5e338925830"
+source = "git+https://github.com/bdrtr/Gizmo?rev=457a11d369807b1ab8aab553a7e91ae775529b88#457a11d369807b1ab8aab553a7e91ae775529b88"
 dependencies = [
  "gizmo-core",
  "gizmo-math",
@@ -1597,7 +1597,7 @@ dependencies = [
 [[package]]
 name = "gizmo-physics-rigid"
 version = "0.11.0"
-source = "git+https://github.com/bdrtr/Gizmo?rev=7e4828e488b4ebbdf25982cda451d5e338925830#7e4828e488b4ebbdf25982cda451d5e338925830"
+source = "git+https://github.com/bdrtr/Gizmo?rev=457a11d369807b1ab8aab553a7e91ae775529b88#457a11d369807b1ab8aab553a7e91ae775529b88"
 dependencies = [
  "crossbeam-queue",
  "getrandom 0.4.3",
@@ -1617,7 +1617,7 @@ dependencies = [
 [[package]]
 name = "gizmo-physics-soft"
 version = "0.11.0"
-source = "git+https://github.com/bdrtr/Gizmo?rev=7e4828e488b4ebbdf25982cda451d5e338925830#7e4828e488b4ebbdf25982cda451d5e338925830"
+source = "git+https://github.com/bdrtr/Gizmo?rev=457a11d369807b1ab8aab553a7e91ae775529b88#457a11d369807b1ab8aab553a7e91ae775529b88"
 dependencies = [
  "gizmo-core",
  "gizmo-math",
@@ -1631,7 +1631,7 @@ dependencies = [
 [[package]]
 name = "gizmo-renderer"
 version = "0.11.0"
-source = "git+https://github.com/bdrtr/Gizmo?rev=7e4828e488b4ebbdf25982cda451d5e338925830#7e4828e488b4ebbdf25982cda451d5e338925830"
+source = "git+https://github.com/bdrtr/Gizmo?rev=457a11d369807b1ab8aab553a7e91ae775529b88#457a11d369807b1ab8aab553a7e91ae775529b88"
 dependencies = [
  "ab_glyph",
  "bytemuck",
@@ -1670,7 +1670,7 @@ dependencies = [
 [[package]]
 name = "gizmo-scene"
 version = "0.11.0"
-source = "git+https://github.com/bdrtr/Gizmo?rev=7e4828e488b4ebbdf25982cda451d5e338925830#7e4828e488b4ebbdf25982cda451d5e338925830"
+source = "git+https://github.com/bdrtr/Gizmo?rev=457a11d369807b1ab8aab553a7e91ae775529b88#457a11d369807b1ab8aab553a7e91ae775529b88"
 dependencies = [
  "gizmo-core",
  "gizmo-math",
@@ -1685,7 +1685,7 @@ dependencies = [
 [[package]]
 name = "gizmo-scripting"
 version = "0.11.0"
-source = "git+https://github.com/bdrtr/Gizmo?rev=7e4828e488b4ebbdf25982cda451d5e338925830#7e4828e488b4ebbdf25982cda451d5e338925830"
+source = "git+https://github.com/bdrtr/Gizmo?rev=457a11d369807b1ab8aab553a7e91ae775529b88#457a11d369807b1ab8aab553a7e91ae775529b88"
 dependencies = [
  "gizmo-ai",
  "gizmo-animation",
@@ -1701,7 +1701,7 @@ dependencies = [
 [[package]]
 name = "gizmo-ui"
 version = "0.11.0"
-source = "git+https://github.com/bdrtr/Gizmo?rev=7e4828e488b4ebbdf25982cda451d5e338925830#7e4828e488b4ebbdf25982cda451d5e338925830"
+source = "git+https://github.com/bdrtr/Gizmo?rev=457a11d369807b1ab8aab553a7e91ae775529b88#457a11d369807b1ab8aab553a7e91ae775529b88"
 dependencies = [
  "gizmo-app",
  "gizmo-core",
@@ -1713,7 +1713,7 @@ dependencies = [
 [[package]]
 name = "gizmo-window"
 version = "0.11.0"
-source = "git+https://github.com/bdrtr/Gizmo?rev=7e4828e488b4ebbdf25982cda451d5e338925830#7e4828e488b4ebbdf25982cda451d5e338925830"
+source = "git+https://github.com/bdrtr/Gizmo?rev=457a11d369807b1ab8aab553a7e91ae775529b88#457a11d369807b1ab8aab553a7e91ae775529b88"
 dependencies = [
  "tracing",
  "winit",
@@ -1829,7 +1829,7 @@ dependencies = [
  "log",
  "presser",
  "thiserror 2.0.19",
- "windows 0.62.2",
+ "windows",
 ]
 
 [[package]]
@@ -5179,9 +5179,9 @@ dependencies = [
  "web-sys",
  "wgpu-naga-bridge",
  "wgpu-types",
- "windows 0.62.2",
- "windows-core 0.62.2",
- "windows-result 0.4.1",
+ "windows",
+ "windows-core",
+ "windows-result",
 ]
 
 [[package]]
@@ -5240,22 +5240,12 @@ dependencies = [
 
 [[package]]
 name = "windows"
-version = "0.54.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9252e5725dbed82865af151df558e754e4a3c2c30818359eb17465f1346a1b49"
-dependencies = [
- "windows-core 0.54.0",
- "windows-targets 0.52.6",
-]
-
-[[package]]
-name = "windows"
 version = "0.62.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "527fadee13e0c05939a6a05d5bd6eec6cd2e3dbd648b9f8e447c6518133d8580"
 dependencies = [
  "windows-collections",
- "windows-core 0.62.2",
+ "windows-core",
  "windows-future",
  "windows-numerics",
 ]
@@ -5266,17 +5256,7 @@ version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "23b2d95af1a8a14a3c7367e1ed4fc9c20e0a26e79551b1454d72583c97cc6610"
 dependencies = [
- "windows-core 0.62.2",
-]
-
-[[package]]
-name = "windows-core"
-version = "0.54.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "12661b9c89351d684a50a8a643ce5f608e20243b9fb84687800163429f161d65"
-dependencies = [
- "windows-result 0.1.2",
- "windows-targets 0.52.6",
+ "windows-core",
 ]
 
 [[package]]
@@ -5288,7 +5268,7 @@ dependencies = [
  "windows-implement",
  "windows-interface",
  "windows-link",
- "windows-result 0.4.1",
+ "windows-result",
  "windows-strings",
 ]
 
@@ -5298,7 +5278,7 @@ version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e1d6f90251fe18a279739e78025bd6ddc52a7e22f921070ccdc67dde84c605cb"
 dependencies = [
- "windows-core 0.62.2",
+ "windows-core",
  "windows-link",
  "windows-threading",
 ]
@@ -5337,17 +5317,8 @@ version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6e2e40844ac143cdb44aead537bbf727de9b044e107a0f1220392177d15b0f26"
 dependencies = [
- "windows-core 0.62.2",
+ "windows-core",
  "windows-link",
-]
-
-[[package]]
-name = "windows-result"
-version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5e383302e8ec8515204254685643de10811af0ed97ea37210dc26fb0032647f8"
-dependencies = [
- "windows-targets 0.52.6",
 ]
 
 [[package]]
