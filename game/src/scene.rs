@@ -149,6 +149,62 @@ pub fn city_exposure() -> f32 {
 /// the signs and the lamps still stand out, being where the tone curve's top is.
 pub const CITY_EXPOSURE: f32 = 0.5;
 
+/// The night's eye: the engine's auto exposure (`Renderer::auto_exposure`), metered by the frame's
+/// log-average luminance, keyed so that the race start reads as the user chose it ([`CITY_EXPOSURE`]) —
+/// the camera's exposure is then its compensation — and held to [`CITY_EYE_RANGE`] of that, so that a lit
+/// square darkens and a dark road opens up without the night turning into day. Returns whether the
+/// renderer has one (the browser does not).
+pub fn enable_night_eye(renderer: &mut gizmo::renderer::Renderer) -> bool {
+    let Some(eye) = renderer.auto_exposure.as_mut() else { return false };
+    eye.enabled = true;
+    eye.settings.key = CITY_EYE_KEY;
+    eye.settings.min_exposure = CITY_EYE_RANGE.0;
+    eye.settings.max_exposure = CITY_EYE_RANGE.1;
+    true
+}
+
+/// The log-average luminance the night's eye exposes to ([`enable_night_eye`]): what the race start
+/// measures, with the lamps and the headlights on — 0.051–0.065 dry and 0.050–0.056 wet over its first
+/// eight seconds (2026-11-20) — so that the eye is about 1 there and the start is the frame the user chose.
+pub const CITY_EYE_KEY: f32 = 0.055;
+/// How far the night's eye may move the exposure, as a factor on [`CITY_EXPOSURE`]: down 1.5 stops for a
+/// bright square, up 0.6 for a dark road — enough to see by, not enough for a night to turn into dusk.
+pub const CITY_EYE_RANGE: (f32, f32) = (0.35, 1.5);
+
+/// The night's local exposure (`Renderer::local_exposure`): each pixel exposed for its own
+/// neighbourhood, so that what headlights put on a car's bumper five metres ahead does not burn white
+/// while the street around it stays dark. Highlights' contrast at [`CITY_LOCAL_CONTRAST`] above
+/// [`CITY_LOCAL_PIVOT`], unless `NFS_LOCAL="contrast[,pivot]"` says otherwise (`off` leaves it off).
+/// Returns whether it is on.
+pub fn enable_local_exposure(renderer: &mut gizmo::renderer::Renderer) -> bool {
+    let (mut contrast, mut pivot) = (CITY_LOCAL_CONTRAST, CITY_LOCAL_PIVOT);
+    match std::env::var("NFS_LOCAL").as_deref() {
+        Ok("off") => return false,
+        Ok(v) => {
+            let n: Vec<f32> = v.split(',').filter_map(|p| p.trim().parse().ok()).collect();
+            contrast = n.first().copied().unwrap_or(contrast);
+            pivot = n.get(1).copied().unwrap_or(pivot);
+        }
+        Err(_) => {}
+    }
+    let Some(local) = renderer.local_exposure.as_mut() else { return false };
+    local.enabled = true;
+    local.settings.highlight_contrast = contrast;
+    local.settings.pivot = pivot;
+    true
+}
+
+/// How much of the highlights' contrast local exposure keeps ([`enable_local_exposure`]), and above what
+/// exposed luminance ([`CITY_LOCAL_PIVOT`]). Chosen on 2026-11-20 from the race start's bumper — the car
+/// ahead lit by the player's headlights five metres off — and a city frame: with none the bumper was a
+/// beige blank (the frame's 99th percentile 223); at 0.5 / 0.5 and 0.35 / 0.3 it barely moved (219, 207),
+/// being bright rather than burnt — 0.8–1 exposed, not far over those pivots; at 0.2 / 0.15 its shape and
+/// the tail lights' colour come back (157) and the city's lit windows keep their place (178 → 131), the
+/// frame's median unmoved at 20.
+pub const CITY_LOCAL_CONTRAST: f32 = 0.2;
+/// The exposed luminance above which local exposure compresses: see [`CITY_LOCAL_CONTRAST`].
+pub const CITY_LOCAL_PIVOT: f32 = 0.15;
+
 /// Give the camera `camera` an exposure: the engine's one exposure knob is the camera's
 /// (`Camera::exposure`), applied to the whole frame before the tone curve.
 pub fn set_exposure(world: &mut World, camera: u32, exposure: f32) {

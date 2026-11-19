@@ -1323,8 +1323,14 @@ fn setup(world: &mut World, renderer: &mut gizmo::renderer::Renderer) -> CruiseS
     let mut camera =
         ChaseCamera::spawn(world, rig.start.position + Vec3::new(0.0, 4.0, 10.0), std::env::var("NFS_NEAR").ok().and_then(|v| v.parse().ok()).unwrap_or(0.5), 20_000.0);
     camera.set_views(&rig.cameras);
-    // The night's exposure (`scene::city_exposure`): the engine reads it from the camera.
+    // The night's exposure (`scene::city_exposure`): the engine reads it from the camera. With the eye
+    // on (`scene::enable_night_eye`) it is the eye's compensation; `NFS_EYE=off` holds it fixed.
     scene::set_exposure(world, camera.id, scene::city_exposure());
+    if std::env::var("NFS_EYE").as_deref() != Ok("off") {
+        scene::enable_night_eye(renderer);
+    }
+    // Each pixel exposed for its own neighbourhood (`scene::enable_local_exposure`).
+    scene::enable_local_exposure(renderer);
 
     let debug = std::env::var("NFS_DEBUG").is_ok_and(|v| v != "0");
     if let Some(id) = race_line {
