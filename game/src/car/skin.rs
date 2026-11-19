@@ -110,9 +110,91 @@ pub(crate) fn resolve_whole(p: &NfsMeshPart, grp: Grp, tpk: &Tpk) -> Option<Asse
     p.material_refs.iter().copied().find(|h| tpk.texture(*h).is_some())
 }
 
+/// The generic light textures a run names, and the car texture the game binds in their place
+/// (`SPEED2.EXE` `0x631E20` builds a car's texture list from `HEADLIGHT`/`BRAKELIGHT` +
+/// `_LEFT/_RIGHT/_CENTRE/_GLASS_*` + `_ON/_OFF`). A solid's light runs do not name the car's own
+/// texture — a 240SX's headlight asks for `HEADLIGHT_LEFT`, which no pack holds — so without this
+/// every lamp drew as its part's flat colour: 220 of a stock 240SX's triangles, the tail lights a
+/// plain red slab.
+///
+/// The `_GLASS` runs are the lens the eye sees (the tail light *is* its glass runs) and are given
+/// the lamp too: the glass picture is the same layout at half the size (`_GLASS_OFF` 64×32 over
+/// `_OFF` 128×64), a transparent sheen the game draws over the lamp — and this crate's car
+/// material is opaque, so the sheen is the layer left out. Lights are drawn off; `_ON` is not in
+/// the car's pack.
+const LIGHTS: [(&str, &str); 12] = [
+    ("HEADLIGHT", "HEADLIGHT_OFF"),
+    ("HEADLIGHT_LEFT", "HEADLIGHT_OFF"),
+    ("HEADLIGHT_RIGHT", "HEADLIGHT_OFF"),
+    ("HEADLIGHT_GLASS", "HEADLIGHT_OFF"),
+    ("HEADLIGHT_GLASS_LEFT", "HEADLIGHT_OFF"),
+    ("HEADLIGHT_GLASS_RIGHT", "HEADLIGHT_OFF"),
+    ("BRAKELIGHT", "BRAKELIGHT_OFF"),
+    ("BRAKELIGHT_LEFT", "BRAKELIGHT_OFF"),
+    ("BRAKELIGHT_RIGHT", "BRAKELIGHT_OFF"),
+    ("BRAKELIGHT_GLASS", "BRAKELIGHT_OFF"),
+    ("BRAKELIGHT_GLASS_LEFT", "BRAKELIGHT_OFF"),
+    ("BRAKELIGHT_GLASS_RIGHT", "BRAKELIGHT_OFF"),
+];
+
+/// The car and the part set a part's name belongs to: `240SX_KIT00_HEADLIGHT_LEFT_` →
+/// (`240SX`, `KIT00`), `240SX_STYLE05_BRAKELIGHT_A` → (`240SX`, `STYLE05`). The set is the first
+/// `KIT##`, `KITW##` or `STYLE##` token; the car is everything before it, so a car name with an
+/// underscore in it (`4DR_SEDAN`) stays whole.
+fn car_and_set(part: &str) -> Option<(String, &str)> {
+    let tokens: Vec<&str> = part.split('_').collect();
+    let at = tokens.iter().position(|t| {
+        let digits = |s: &str| s.len() == 2 && s.bytes().all(|b| b.is_ascii_digit());
+        t.strip_prefix("KITW").is_some_and(digits)
+            || t.strip_prefix("KIT").is_some_and(digits)
+            || t.strip_prefix("STYLE").is_some_and(digits)
+    })?;
+    (at > 0).then(|| (tokens[..at].join("_"), tokens[at]))
+}
+
+/// The car texture a light run's generic name stands for, if the car's pack holds it: the part's own
+/// set first, then `KIT00`'s. The centre brake light is the car's, not a set's
+/// (`{CAR}_CENTRE_BRAKELIGHT_OFF`).
+pub(crate) fn light_texture(tpk: &Tpk, part: &str, run: AssetHash) -> Option<AssetHash> {
+    use gizmo_nfs::hash::string_hash;
+    let (car, set) = car_and_set(part)?;
+    let found = |name: String| {
+        let key = AssetHash(string_hash(&name));
+        tpk.texture(key).is_some().then_some(key)
+    };
+    if run.0 == string_hash("BRAKELIGHT_CENTRE") {
+        return found(format!("{car}_CENTRE_BRAKELIGHT_OFF"));
+    }
+    let (_, lamp) = LIGHTS.iter().find(|(generic, _)| string_hash(generic) == run.0)?;
+    found(format!("{car}_{set}_{lamp}")).or_else(|| found(format!("{car}_KIT00_{lamp}")))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_car_and_its_set_come_out_of_a_part_name() {
+        assert_eq!(car_and_set("240SX_KIT00_HEADLIGHT_LEFT_"), Some(("240SX".to_string(), "KIT00")));
+        assert_eq!(car_and_set("240SX_STYLE05_BRAKELIGHT_A"), Some(("240SX".to_string(), "STYLE05")));
+        assert_eq!(car_and_set("4DR_SEDAN_KIT00_TRUNK_A"), Some(("4DR_SEDAN".to_string(), "KIT00")));
+        assert_eq!(car_and_set("240SX_KITW01_BODY_A"), Some(("240SX".to_string(), "KITW01")));
+        assert_eq!(car_and_set("240SX_BASE_A"), None);
+    }
+
+    #[test]
+    fn the_lamp_names_hash_to_what_the_240sx_pack_holds() {
+        // Measured against the install's 240SX pack (2026-11-19): these are its keys.
+        use gizmo_nfs::hash::string_hash;
+        assert_eq!(string_hash("240SX_KIT00_HEADLIGHT_OFF"), 0x02d1_480a);
+        assert_eq!(string_hash("240SX_KIT00_BRAKELIGHT_OFF"), 0x56ce_1f7d);
+        assert_eq!(string_hash("240SX_CENTRE_BRAKELIGHT_OFF"), 0x081c_e3b6);
+        assert_eq!(string_hash("240SX_STYLE05_HEADLIGHT_OFF"), 0x1f78_f818);
+        // And the generic names the stock solids' runs carry.
+        assert_eq!(string_hash("HEADLIGHT_LEFT"), 0xa7e6_ea53);
+        assert_eq!(string_hash("BRAKELIGHT_GLASS_LEFT"), 0x000b_cbbf);
+        assert_eq!(string_hash("BRAKELIGHT_CENTRE"), 0x3617_dcfc);
+    }
 
     /// The same as [`tex`], but with the hash of `real_name` — a name the 23-character field cut.
     fn tex_named(stored: &str, real_name: &str, texels: usize, opaque: usize) -> NfsTexture {

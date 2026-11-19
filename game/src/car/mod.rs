@@ -187,8 +187,10 @@ where
                 }
                 continue;
             }
-            // Everything else (head/brake-light lenses, tyres, badging) carries its own texture.
-            match tpk.and_then(|t| t.texture(m.hash)).map(|_| m.hash) {
+            // Everything else (head/brake-light lenses, tyres, badging) carries its own texture —
+            // or, for a lamp, a generic name the car's own lamp texture stands in for.
+            let own = tpk.and_then(|t| t.texture(m.hash)).map(|_| m.hash);
+            match own.or_else(|| tpk.and_then(|t| skin::light_texture(t, &p.name, m.hash))) {
                 Some(h) => by_texture.entry(h).or_default().push((p, slice)),
                 None => by_group.entry(grp).or_default().push((p, slice)),
             }
