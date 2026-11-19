@@ -2,9 +2,10 @@
 //!
 //! `gizmo_nfs::world::lights` reads what each streaming section places: 2,234 lamps in `STREAML4RA`,
 //! each a point that reaches 30 m. The city does not need them — its light, theirs included, is baked
-//! into its vertex colours, and the engine's baked-lit path draws a dry surface by that alone. What
-//! does need them is everything the bake cannot hold: the car's paint passing under a lamp, and the
-//! rain on the road, which reflects every lamp along the street (the engine's `water_glints`).
+//! into its vertex colours — so they are `in_bake`, and the engine's baked-lit path draws a dry surface
+//! by its bake alone. What does need them is everything the bake cannot hold: the car's paint passing
+//! under a lamp, and the rain on the road, which reflects every lamp along the street (the engine's
+//! `baked_surface_lights`).
 //!
 //! The engine ranks them against the camera each frame and keeps the nearest 256 that reach the view,
 //! so all of them are spawned.
@@ -54,12 +55,13 @@ pub fn lamps(bundle: &[u8]) -> Vec<Lamp> {
         .collect()
 }
 
-/// A [`PointLight`] each, at [`LAMP_INTENSITY`]. Returns how many.
+/// A [`PointLight`] each, at [`LAMP_INTENSITY`], `in_bake`. Returns how many.
 pub fn spawn(world: &mut World, lamps: &[Lamp]) -> usize {
     for l in lamps {
         let e = world.spawn();
         world.add_component(e, Transform::new(l.position));
-        world.add_component(e, PointLight::new(l.colour, LAMP_INTENSITY, l.reach));
+        // In the bake: the city's vertex colours hold its light.
+        world.add_component(e, PointLight::new(l.colour, LAMP_INTENSITY, l.reach).in_bake());
     }
     lamps.len()
 }

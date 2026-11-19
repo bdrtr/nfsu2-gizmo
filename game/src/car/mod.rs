@@ -56,6 +56,9 @@ pub struct CarVisuals {
     pub height: f32,
     /// Body length (Z).
     pub length: f32,
+    /// The headlights, centre-relative like the meshes: one point a side, left (−X) first, at the
+    /// middle of that side's `HEADLIGHT` parts. Empty for a car that has none.
+    pub headlights: Vec<Vec3>,
     /// The wheel mesh (recentered on its own hub) and how to surface it (flat rubber or the
     /// tire/rim texture), if the car models a wheel. The caller instances it at four corners.
     pub wheel: Option<(Mesh, WheelSurface)>,
@@ -130,6 +133,8 @@ where
     let (lo, hi) = bbox(if paint_parts.is_empty() { &body_like } else { &paint_parts });
     let center = (lo + hi) * 0.5;
     let (width, height, length) = (hi.x - lo.x, hi.y - lo.y, hi.z - lo.z);
+    let lamps: Vec<&NfsMeshPart> = body_like.iter().copied().filter(|p| group_of(&p.name) == Grp::Headlight).collect();
+    let headlights = headlight_points(&lamps, center);
 
     // Split every body part into its material runs (`0x00134B02`) and route each run to a
     // texture — when its hash resolves to a decoded TPK image (headlights, brake lights,
@@ -320,11 +325,66 @@ where
 
     // No cabin filler is emitted: BASE supplies the real interior geometry (routed per-shader)
     // and the windscreen glass covers the openings, so the old hollow-shell box is obsolete.
-    CarVisuals { groups, textured, center, width, height, length, wheel, wheel_fit, brakes }
+    CarVisuals { groups, textured, center, width, height, length, headlights, wheel, wheel_fit, brakes }
+}
+
+/// Where a car's headlights are, centre-relative: the middle of the `HEADLIGHT` parts on each side of
+/// the car — a part on the left (−X) by its own middle, then the right — left first. A side with no part
+/// has no light.
+#[must_use]
+pub fn headlight_points(parts: &[&NfsMeshPart], center: Vec3) -> Vec<Vec3> {
+    let middle = |p: &&NfsMeshPart| {
+        let (lo, hi) = bbox(std::slice::from_ref(p));
+        (lo + hi) * 0.5 - center
+    };
+    let side = |left: bool| -> Option<Vec3> {
+        let these: Vec<&NfsMeshPart> = parts.iter().copied().filter(|p| (middle(p).x < 0.0) == left).collect();
+        (!these.is_empty()).then(|| {
+            let (lo, hi) = bbox(&these);
+            (lo + hi) * 0.5 - center
+        })
+    };
+    [side(true), side(false)].into_iter().flatten().collect()
 }
 
 /// A car texture from its pack, through [`crate::assets::swap_texture`] — so `NFS_TEXTURES` can put an
 /// upscaled picture in its place and `NFS_TEXTURE_DUMP` can write the original out.
 fn texture_of(tpk: Option<&gizmo_nfs::Tpk>, hash: gizmo_nfs::AssetHash) -> Option<gizmo_nfs::NfsTexture> {
     tpk.and_then(|t| t.texture(hash)).cloned().map(|t| crate::assets::swap_texture(hash.0, t))
+}
+
+#[cfg(test)]
+mod headlight_tests {
+    use super::*;
+
+    /// A small box of a part named `name`, around `at` in the file's frame (X length, Y width, Z up).
+    fn part(name: &str, at: [f32; 3]) -> NfsMeshPart {
+        let mut p = NfsMeshPart::default();
+        p.name = name.to_string();
+        p.transform = gizmo_nfs::types::IDENTITY;
+        for dx in [-0.1, 0.1] {
+            for dy in [-0.2, 0.2] {
+                for dz in [-0.05, 0.05] {
+                    p.positions.push([at[0] + dx, at[1] + dy, at[2] + dz]);
+                }
+            }
+        }
+        p
+    }
+
+    /// **A car's headlights stand where its `HEADLIGHT` parts are**: one point a side, left (−X in
+    /// Gizmo's frame, +Y in the file's) first, at the middle of that side's parts, relative to the car's
+    /// centre. Two parts on the left make one point between them; a car with none has none.
+    #[test]
+    fn the_headlights_stand_at_their_parts_one_a_side() {
+        let left_a = part("CAR_KIT00_HEADLIGHT_LEFT_A", [2.0, 0.6, 0.6]);
+        let left_b = part("CAR_KIT00_HEADLIGHT_LEFT_B", [2.0, 0.4, 0.6]);
+        let right = part("CAR_KIT00_HEADLIGHT_RIGHT_A", [2.0, -0.5, 0.6]);
+        let centre = Vec3::new(0.0, 0.5, 0.0);
+        let points = headlight_points(&[&right, &left_a, &left_b], centre);
+        assert_eq!(points.len(), 2);
+        assert!((points[0] - Vec3::new(-0.5, 0.1, -2.0)).length() < 1e-5, "left, between its two parts: {}", points[0]);
+        assert!((points[1] - Vec3::new(0.5, 0.1, -2.0)).length() < 1e-5, "right: {}", points[1]);
+        assert!(headlight_points(&[], centre).is_empty());
+    }
 }

@@ -134,6 +134,30 @@ pub fn city_tonemap() -> gizmo::renderer::gpu_types::TonemapCurve {
     }
 }
 
+/// How much of the night's light reaches the screen: the camera's exposure, before the tone curve
+/// ([`set_exposure`]). [`CITY_EXPOSURE`] unless `NFS_EXPOSURE=<number>` says otherwise.
+#[must_use]
+pub fn city_exposure() -> f32 {
+    std::env::var("NFS_EXPOSURE").ok().and_then(|v| v.trim().parse::<f32>().ok()).filter(|e| *e > 0.0).unwrap_or(CITY_EXPOSURE)
+}
+
+/// The night's exposure: see [`city_exposure`].
+///
+/// Chosen by the user on 2026-11-20 from four frames of the race start, with the lamps and the headlights
+/// on, as the answer to "it is night, the surroundings should be darker": exposure 1, 0.7 and 0.5, and 0.5
+/// with half the [`CITY_AMBIENT`]. At 1 the frame's median was 33/255, at 0.5 it is 12 — the lit windows,
+/// the signs and the lamps still stand out, being where the tone curve's top is.
+pub const CITY_EXPOSURE: f32 = 0.5;
+
+/// Give the camera `camera` an exposure: the engine's one exposure knob is the camera's
+/// (`Camera::exposure`), applied to the whole frame before the tone curve.
+pub fn set_exposure(world: &mut World, camera: u32, exposure: f32) {
+    let Some(e) = world.get_entity(camera) else { return };
+    if let Some(mut c) = world.query_mut::<&mut gizmo::renderer::components::Camera>().get_mut(e) {
+        c.exposure = exposure;
+    }
+}
+
 /// The glare threshold the city is drawn with. See [`city_glare`] for where it comes from.
 pub const CITY_BLOOM_THRESHOLD: f32 = 0.18;
 /// How hard what crosses [`CITY_BLOOM_THRESHOLD`] glows.
@@ -174,6 +198,7 @@ where
     for gv in std::mem::take(&mut car.groups) {
         ids.push(spawn_mesh(world, gv.mesh, gv.material, Transform::new(Vec3::ZERO)));
     }
+    let lamps = std::mem::take(&mut car.headlights);
     for tp in std::mem::take(&mut car.textured) {
         // A body-detail (doorline) overlay is composited over the paint; a full-colour detail
         // (light lens, badging) uploads as-is. The key carries which, so the two never collide
@@ -187,7 +212,128 @@ where
         let material = textured(bg, tp.tint, tp.roughness, tp.metallic);
         ids.push(spawn_mesh(world, tp.mesh, material, Transform::new(Vec3::ZERO)));
     }
+    if let Some(&body) = ids.first() {
+        let intensity = world.get_resource::<Headlights>().map(|h| h.intensity);
+        if let Some(intensity) = intensity {
+            spawn_headlights(world, body, &lamps, intensity);
+        }
+    }
     ids
+}
+
+/// The headlights' beam, a spot light's cookie (`SpotLight::cookie`): registered by
+/// [`enable_headlights`].
+pub const HEADLIGHT_COOKIE: &str = "nfs_headlight";
+
+/// That a binary turned the cars' headlights on ([`enable_headlights`]): [`spawn_body`] gives every car
+/// its two only then, at `intensity`.
+pub struct Headlights {
+    /// How bright each is at the top of its beam.
+    pub intensity: f32,
+}
+
+/// How bright a headlight is at the top of its beam ([`headlight_cookie`]). A lamp 0.6 m up puts on the
+/// road about 1.6 at 2 m, 1.1 at 5, 0.8 at 10, 0.6 at 17 and 0.13 at 25 — a street lamp puts 2.3 under
+/// itself (`world::lights::LAMP_INTENSITY`). Half what it was first set to: the user, on the frames
+/// that chose [`CITY_EXPOSURE`], found the headlights too bright.
+pub const HEADLIGHT_INTENSITY: f32 = 4_900.0;
+/// How far a headlight reaches, metres.
+pub const HEADLIGHT_REACH: f32 = 45.0;
+/// The cone's half-angle, radians: wide enough for the beam's spread to the sides (the cookie's), and
+/// down to the road a couple of metres ahead.
+pub const HEADLIGHT_CONE: f32 = 0.65;
+/// Where the beam is brightest, below level, radians: a lamp 0.6 m up meets the road there 17 m ahead.
+pub const HEADLIGHT_PEAK: f32 = 0.035;
+/// How fast the beam fades below its peak: the intensity goes as `(peak / angle)^this`. A lamp at
+/// height `h` lights the road `d` ahead by `I · h / d³` at an angle `h / d` below level, so 3 would light
+/// the near road evenly; less keeps it brighter close to the car, as a low beam does.
+pub const HEADLIGHT_FALL: f32 = 2.5;
+
+/// The headlights' beam as a cookie, `size`² RGBA (sRGB, row 0 at the top) over a cone of
+/// [`HEADLIGHT_CONE`]: a low beam's. Above level nothing but a faint glow; from level the beam grows
+/// to its peak ([`HEADLIGHT_PEAK`]) and fades below it ([`HEADLIGHT_FALL`]); to the sides a bell about
+/// a quarter-turn wide.
+///
+/// A plain cone was what lit the road and nothing else wrongly: the spot's inverse square put hundreds
+/// of times more light on the road at the bumper than 15 m on, and the road around the car went white.
+/// And the peak sits below level, not at it: a beam whose top lit the road 40 m off evenly, as the
+/// grazing angle there asks, put three thousand times that on the back of a car five metres ahead —
+/// a surface square to the beam takes `I / d²`, the road `I · h / d³`. Here it is the bumper's lower
+/// edge that catches the peak, and the body above the lamps the glow.
+#[must_use]
+pub fn headlight_cookie(size: u32) -> Vec<u8> {
+    let tan_outer = HEADLIGHT_CONE.tan();
+    let srgb = |c: f32| {
+        let c = c.clamp(0.0, 1.0);
+        let e = if c <= 0.003_130_8 { c * 12.92 } else { 1.055 * c.powf(1.0 / 2.4) - 0.055 };
+        (e * 255.0).round() as u8
+    };
+    const GLOW: f32 = 0.002;
+    let mut rgba = Vec::with_capacity((size * size * 4) as usize);
+    for j in 0..size {
+        for i in 0..size {
+            let across = ((i as f32 + 0.5) / size as f32 - 0.5) * 2.0 * tan_outer;
+            let up = (0.5 - (j as f32 + 0.5) / size as f32) * 2.0 * tan_outer;
+            let below = -up.atan();
+            let vertical = if below <= 0.0 {
+                GLOW
+            } else if below <= HEADLIGHT_PEAK {
+                GLOW + (1.0 - GLOW) * below / HEADLIGHT_PEAK
+            } else {
+                (HEADLIGHT_PEAK / below).powf(HEADLIGHT_FALL)
+            };
+            let side = across.atan() / 0.45;
+            let v = srgb(vertical * (-side * side).exp());
+            rgba.extend([v, v, v, 255]);
+        }
+    }
+    rgba
+}
+
+/// Turn the cars' headlights on at `intensity` ([`HEADLIGHT_INTENSITY`] by default): register their beam
+/// ([`headlight_cookie`]) and mark the world, so that every car [`spawn_body`] spawns after this has its
+/// two. Returns whether the beam registered.
+pub fn enable_headlights(world: &mut World, renderer: &mut gizmo::renderer::Renderer, intensity: f32) -> bool {
+    let size = 256;
+    match renderer.insert_light_cookie(HEADLIGHT_COOKIE, &headlight_cookie(size), size, size) {
+        Ok(_) => {
+            world.insert_resource(Headlights { intensity });
+            true
+        }
+        Err(e) => {
+            eprintln!("headlights: the beam did not register ({e:?}); no headlights");
+            false
+        }
+    }
+}
+
+/// A spot light at each of `lamps` (centre-relative, `CarVisuals::headlights`), shining level down the
+/// car's forward axis through the beam ([`HEADLIGHT_COOKIE`]), as children of the body entity `body`:
+/// they move with it, which the rig places every frame. They are not `in_bake` — no bake holds a car's
+/// lights — so the baked city is lit by them.
+pub fn spawn_headlights(world: &mut World, body: u32, lamps: &[Vec3], intensity: f32) {
+    let Some(parent) = world.get_entity(body) else { return };
+    let mut children = Vec::new();
+    for &at in lamps {
+        let e = world.spawn();
+        world.add_component(e, Transform::new(at));
+        world.add_component(
+            e,
+            gizmo::renderer::components::SpotLight::new(
+                Vec3::new(1.0, 0.93, 0.82),
+                intensity,
+                HEADLIGHT_REACH,
+                HEADLIGHT_CONE - 0.05,
+                HEADLIGHT_CONE,
+            )
+            .with_cookie(HEADLIGHT_COOKIE),
+        );
+        world.add_component(e, gizmo::core::component::Parent(parent));
+        children.push(e);
+    }
+    if !children.is_empty() {
+        world.add_component(parent, gizmo::core::component::Children(children));
+    }
 }
 
 /// Spawn a mesh with distance-chosen detail levels: `levels` is `(mesh, max_distance)`, finest
@@ -334,7 +480,8 @@ pub fn add_lights(world: &mut World, key: Transform, key_intensity: f32, fill_po
     world.add_component(sun, DirectionalLight::new(Vec3::new(1.0, 0.97, 0.9), key_intensity, LightRole::Sun));
     let fill = world.spawn();
     add_transform(world, fill, Transform::new(fill_pos));
-    world.add_component(fill, DirectionalLight::new(Vec3::new(0.6, 0.7, 0.9), 0.6, LightRole::Sun));
+    // In the bake: it lights the car, not the baked city (which holds its own light).
+    world.add_component(fill, DirectionalLight::new(Vec3::new(0.6, 0.7, 0.9), 0.6, LightRole::Sun).in_bake());
 }
 
 /// The car model to load: the first CLI argument, else `$NFSU2_CAR`, else `default`.
@@ -358,4 +505,32 @@ pub fn car_path(default: &str) -> String {
 #[must_use]
 pub fn road(collider: Collider) -> Collider {
     collider.with_material(gizmo::physics::components::PhysicsMaterial::ASPHALT)
+}
+
+#[cfg(test)]
+mod headlight_beam_tests {
+    use super::*;
+
+    /// **The beam is a low beam's**: down the middle column, faint above level, brightest at its peak
+    /// below level and fading steadily under it; dimmer to the sides than in the middle.
+    #[test]
+    fn the_beam_is_brightest_just_below_level_and_fades_down_and_out() {
+        let size = 256u32;
+        let beam = headlight_cookie(size);
+        assert_eq!(beam.len(), (size * size * 4) as usize);
+        let at = |i: u32, j: u32| beam[((j * size + i) * 4) as usize];
+        // The row an angle `below` level falls in.
+        let row = |below: f32| (((0.5 + below.tan() / (2.0 * HEADLIGHT_CONE.tan())) * size as f32) as u32).min(size - 1);
+        let middle = size / 2;
+        assert!(at(middle, row(HEADLIGHT_PEAK)) >= 240, "full at the peak: {}", at(middle, row(HEADLIGHT_PEAK)));
+        assert!(at(middle, row(-0.1)) < 10, "a glow above level: {}", at(middle, row(-0.1)));
+        let mut last = 255u8;
+        for k in 1..=10 {
+            let v = at(middle, row(HEADLIGHT_PEAK * (1.0 + k as f32 * 0.6)));
+            assert!(v <= last && v > 0, "fading under the peak, never to nothing: {v} after {last}");
+            last = v;
+        }
+        assert!(last < 120, "well down by eight times the peak's angle: {last}");
+        assert!(u32::from(at(middle / 4, row(HEADLIGHT_PEAK))) * 4 < u32::from(at(middle, row(HEADLIGHT_PEAK))) * 3, "dimmer to the side");
+    }
 }

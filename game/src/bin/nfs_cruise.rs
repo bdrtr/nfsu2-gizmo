@@ -30,7 +30,7 @@
 //! nearest-first · `NFS_DEBUG=1` start with the F3 overlay on · `NFS_DIAG=1` prints the physics' own view and the frame's
 //! split (physics/update/render/encode) once a second · `NFS_HOLD=1` keys ignored, brakes on, for timing one spot ·
 //! `NFS_PTRACE=1` lets `eu-stack -p` sample the process · `NFS_LOD=on` detail levels as `LodGroup`s
-//! (default: every copy at `_1A`, merged with the city) · `NFS_TAA=off` · `NFS_SSAO=off` · `NFS_CITY_SHADOWS=on` · `NFS_LAMPS=off` · plus everything
+//! (default: every copy at `_1A`, merged with the city) · `NFS_TAA=off` · `NFS_SSAO=off` · `NFS_CITY_SHADOWS=on` · `NFS_LAMPS=off` · `NFS_HEADLIGHTS=off` · plus everything
 //! [`nfsu2::rig`] reads (`NFS_PAINT`, `NFS_KIT`, `NFS_ENGINE`, `NFS_SHOTCAM`, …).
 
 use gizmo::egui;
@@ -1172,6 +1172,18 @@ fn setup(world: &mut World, renderer: &mut gizmo::renderer::Renderer) -> CruiseS
     if std::env::var("NFS_LAMPS").as_deref() != Ok("off") {
         println!("lamps: {}", city::lights::spawn(world, &lights));
     }
+    // The cars' headlights (`scene::enable_headlights`), on every car spawned from here on.
+    // `NFS_HEADLIGHTS=off` leaves them dark; a number scales them.
+    match std::env::var("NFS_HEADLIGHTS").as_deref() {
+        Ok("off") => {}
+        Ok(v) => {
+            let scale = v.trim().parse::<f32>().unwrap_or(1.0).max(0.0);
+            scene::enable_headlights(world, renderer, scene::HEADLIGHT_INTENSITY * scale);
+        }
+        Err(_) => {
+            scene::enable_headlights(world, renderer, scene::HEADLIGHT_INTENSITY);
+        }
+    }
 
     let rig = spawn_car(
         world,
@@ -1311,6 +1323,8 @@ fn setup(world: &mut World, renderer: &mut gizmo::renderer::Renderer) -> CruiseS
     let mut camera =
         ChaseCamera::spawn(world, rig.start.position + Vec3::new(0.0, 4.0, 10.0), std::env::var("NFS_NEAR").ok().and_then(|v| v.parse().ok()).unwrap_or(0.5), 20_000.0);
     camera.set_views(&rig.cameras);
+    // The night's exposure (`scene::city_exposure`): the engine reads it from the camera.
+    scene::set_exposure(world, camera.id, scene::city_exposure());
 
     let debug = std::env::var("NFS_DEBUG").is_ok_and(|v| v != "0");
     if let Some(id) = race_line {
