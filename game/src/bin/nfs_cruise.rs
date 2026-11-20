@@ -568,11 +568,10 @@ fn main() {
         .set_setup(setup)
         .set_update(update)
         .set_ui(ui)
-        .set_render(|world, _s, encoder, view, renderer, _t| {
+        .set_render(|world, s, encoder, view, renderer, _t| {
             // The city is baked-lit and opaque; the screen-space passes cost frame time and have
             // nothing to work with here.
             renderer.gpu_fluid = None;
-            renderer.gpu_particles = None;
             // The glare threshold the renderer ships with extracts nothing from a baked-lit
             // night map — see `scene::city_glare` for the measurement.
             let (bt, bi) = scene::city_glare();
@@ -595,6 +594,18 @@ fn main() {
             let wet = renderer.wetness.is_some();
             scene::set_haze(renderer, wet);
             scene::set_rain(renderer, wet);
+            // The spray every car's tyres throw off the wet road (`spray`), the particles' only use: dry,
+            // there are none.
+            if wet {
+                let wheels: Vec<(u32, f32)> = std::iter::once(&s.rig)
+                    .chain(s.field.iter().map(|(rig, _)| rig))
+                    .chain(s.rails.iter().flat_map(|r| r.rigs.iter()))
+                    .flat_map(|rig| rig.wheels.iter().map(move |w| (w.id, rig.radius)))
+                    .collect();
+                nfsu2::spray::throw(world, renderer, &wheels);
+            } else {
+                renderer.gpu_particles = None;
+            }
             // TAA on; `NFS_TAA=off` takes it out. It was off until pin `37625d72`: it made the
             // city's lights blink as the car drove, fixed in the engine (MOTOR-NOTLARI #27).
             // `NFS_SSAO=off` takes the ambient occlusion out.

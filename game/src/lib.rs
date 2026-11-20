@@ -29,6 +29,7 @@ pub mod race;
 pub mod rig;
 pub mod scene;
 pub mod sound;
+pub mod spray;
 pub mod world;
 
 /// Part classification and configuration — pure policy that lives in the parser crate (so the

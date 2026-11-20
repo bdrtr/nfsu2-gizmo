@@ -26,6 +26,9 @@
 //! - `NFS_WET=<0..1>`, `NFS_PUDDLES=<0..1>` — the city in the rain (`scene::wet_streets`).
 //! - `NFS_TIME=<n>` — draw the view `n` times first and print each part's GPU time, median over all but
 //!   the first ten: a repeatable, windowless measure of what a change costs (`time_frames`).
+//! - `NFS_SPRAY=<km/h>` with `NFS_CAR` and `NFS_WET` — the car drives up to where it stands at that speed
+//!   over those frames (90 without `NFS_TIME`), throwing spray (`nfsu2::spray`), so the still shows its
+//!   trail; with `NFS_TIME`, what the spray costs.
 //! - `NFS_EVENT=<n>` — raise race n's barrier groups without drawing its line.
 //! - `NFS_TIERS=all|coarse` — put the coarse detail tiers back, or draw *only* them. Only the
 //!   richest member of each family is drawn by default; see [`nfsu2::world::lod`].
@@ -1452,6 +1455,7 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
     // player's view of the city with the player's car in it, lit the way `nfs_cruise` lights it
     // (its sun is 2.2 against this binary's 2.4; `NFS_SUN` sets both). The only way to look at the
     // car under the city's glare without a window.
+    let mut car_rig = None;
     if let Ok(car) = std::env::var("NFS_CAR") {
         let yaw = std::env::var("NFS_CAR_YAW").ok().and_then(|v| v.parse::<f32>().ok()).unwrap_or(0.0);
         let mut phys = gizmo::physics::world::PhysicsWorld::new();
@@ -1467,6 +1471,7 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
         if let Some(pose) = rig.pose(&world) {
             rig.sync_visuals(&mut world, pose, 0.0);
         }
+        car_rig = Some(rig);
     }
 
     let dir = (mid - eye).normalize();
@@ -1522,8 +1527,35 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
         return;
     }
 
-    if let Some(frames) = std::env::var("NFS_TIME").ok().and_then(|v| v.parse::<usize>().ok()) {
-        time_frames(&mut world, &mut renderer, frames, w, h);
+    let timing = std::env::var("NFS_TIME").ok().and_then(|v| v.parse::<usize>().ok());
+    let spray = std::env::var("NFS_SPRAY").ok().and_then(|v| v.parse::<f32>().ok());
+    if timing.is_some() || spray.is_some() {
+        let frames = timing.unwrap_or(90);
+        // `NFS_SPRAY=<km/h>`: the car drives up to where it stands at that speed over the frames, its
+        // tyres throwing spray (`nfsu2::spray`) on the wet road, so the still shows the trail it leaves.
+        world.insert_resource(gizmo::core::time::Time::new());
+        let rest = car_rig.as_ref().and_then(|r| r.pose(&world));
+        time_frames(&mut world, &mut renderer, frames, w, h, timing.is_some(), |world, renderer, k| {
+            let (Some(kmh), Some(rig), Some(rest)) = (spray, car_rig.as_mut(), rest) else { return };
+            let dt = 1.0 / 60.0;
+            if let Some(mut time) = world.get_resource_mut::<gizmo::core::time::Time>() {
+                time.update(dt);
+            }
+            let v = kmh / 3.6;
+            let ahead = rest.rotation * Vec3::NEG_Z;
+            let still_to_go = (frames - 1 - k) as f32 * v * dt;
+            let pose = nfsu2::rig::Pose { position: rest.position - ahead * still_to_go, rotation: rest.rotation, speed: v };
+            rig.sync_visuals(world, pose, dt);
+            // `NFS_SPRAY_DRAW=off`: the same drive with no spray thrown, what its cost is measured against.
+            if std::env::var("NFS_SPRAY_DRAW").as_deref() != Ok("off") {
+                let wheels: Vec<(u32, f32)> = rig.wheels.iter().map(|w| (w.id, rig.radius)).collect();
+                nfsu2::spray::throw(world, renderer, &wheels);
+            }
+        });
+        if spray.is_some() {
+            let ring = renderer.gpu_particles.as_ref().map(|p| (p.active_particles, p.ring_head.load(std::sync::atomic::Ordering::Relaxed)));
+            println!("spray: particles (drawn, thrown) {ring:?}");
+        }
     }
     let pixels = shoot(&mut world, &mut renderer, out, w, h);
 
@@ -1613,7 +1645,15 @@ fn bounds(city: &CityVisuals) -> (Vec3, Vec3) {
 /// median over the rest, and their sum. The same view every frame, so two builds or two settings are
 /// compared on exactly the same work: what `nfs_cruise`'s laps cannot do, its drive never repeating, and
 /// what needs no window.
-fn time_frames(world: &mut World, renderer: &mut Renderer, frames: usize, w: u32, h: u32) {
+fn time_frames(
+    world: &mut World,
+    renderer: &mut Renderer,
+    frames: usize,
+    w: u32,
+    h: u32,
+    report: bool,
+    mut each: impl FnMut(&mut World, &mut Renderer, usize),
+) {
     let target = renderer.device.create_texture(&wgpu::TextureDescriptor {
         label: Some("nfs-city-timing"),
         size: wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
@@ -1627,6 +1667,7 @@ fn time_frames(world: &mut World, renderer: &mut Renderer, frames: usize, w: u32
     let view = target.create_view(&wgpu::TextureViewDescriptor::default());
     let mut parts: Vec<(&'static str, Vec<f64>)> = Vec::new();
     for frame in 0..frames {
+        each(world, renderer, frame);
         let mut encoder = renderer.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
         gizmo::systems::default_render_pass(world, &mut encoder, &view, renderer);
         renderer.queue.submit(Some(encoder.finish()));
@@ -1642,6 +1683,9 @@ fn time_frames(world: &mut World, renderer: &mut Renderer, frames: usize, w: u32
                 None => parts.push((label, vec![ms])),
             }
         }
+    }
+    if !report {
+        return;
     }
     if parts.is_empty() {
         println!("time: no GPU timer on this device");
