@@ -229,6 +229,29 @@ pub fn set_haze(renderer: &mut gizmo::renderer::Renderer, wet: bool) {
     }
 }
 
+/// Rain falling in the wet city (`Renderer::rainfall`): streaks round the camera, lit by the lamps and the
+/// headlights it falls through, and splashes on the road and the cars where it lands. The engine's own
+/// rain, slanted a little by a breeze; `NFS_RAIN=off` stops it, `NFS_RAIN=<drops>` sets how many fall
+/// round the camera at once.
+pub fn set_rain(renderer: &mut gizmo::renderer::Renderer, wet: bool) {
+    let drops = match std::env::var("NFS_RAIN").as_deref() {
+        Ok("off") => None,
+        Ok(v) => v.trim().parse::<u32>().ok(),
+        Err(_) => wet.then_some(CITY_RAIN_DROPS),
+    };
+    renderer.rainfall = drops.map(|drops| {
+        let mut rain = gizmo::renderer::rain::Rainfall::default();
+        rain.drops = drops;
+        rain.wind = CITY_RAIN_WIND;
+        rain
+    });
+}
+
+/// How many drops fall round the camera at once in the wet city ([`set_rain`]).
+pub const CITY_RAIN_DROPS: u32 = 20_000;
+/// The breeze that slants the rain, m/s ([`set_rain`]).
+pub const CITY_RAIN_WIND: [f32; 3] = [1.2, 0.0, 0.6];
+
 /// The haze's march: steps a ray, and how far it goes ([`set_haze`]). Five: the engine integrates each
 /// step's stretch of a light's air by quadrature, so a long stretch is as smooth as a short one; at 8
 /// the wet haze cost 2.8 ms of GPU, at 5 1.9 (AMD 780M, 2026-11-20).
