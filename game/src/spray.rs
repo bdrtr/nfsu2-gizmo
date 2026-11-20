@@ -19,9 +19,10 @@ use std::collections::HashMap;
 /// Below this a tyre throws up nothing worth seeing, m/s: 30 km/h.
 pub const SPRAY_FROM: f32 = 30.0 / 3.6;
 /// Puffs a wheel throws a second for every m/s past [`SPRAY_FROM`], on a soaked road: at 100 km/h,
-/// fifty — small and faint, so that they run together into a mist rather than stand apart as balls of
-/// smoke, which fewer, bigger ones did. A hundred and twenty was too thick (the user, 2026-11-20).
-pub const SPRAY_RATE: f32 = 2.5;
+/// eighty. Small, faint and spread wide, so that they run together into a mist: fewer, bigger, brighter
+/// ones stood apart in a car's headlights as round discs (2026-11-21), and a hundred and twenty of the
+/// first kind were too thick (the user, 2026-11-20).
+pub const SPRAY_RATE: f32 = 4.0;
 /// The spray's own particle ring. At most some 32 wheels × 120 puffs a second (at 200 km/h) × 1.1 s are
 /// alive, about 4,200. The renderer's default ring is 100,000, and the whole of a ring is simulated and drawn —
 /// twice, with the volumetric light's veil — while anything in it lives: 0.85 ms of GPU for a few hundred
@@ -76,18 +77,18 @@ pub fn puff(contact: Vec3, velocity: Vec3, wet: f32, r: [f32; 4]) -> GpuParticle
     let ahead = Vec3::new(velocity.x, 0.0, velocity.z).normalize_or_zero();
     let side = Vec3::new(-ahead.z, 0.0, ahead.x);
     // Off the back of the contact patch, a hand either side of its middle.
-    let at = contact - ahead * 0.15 + side * (r[0] - 0.5) * 0.3 + Vec3::Y * 0.05;
+    let at = contact - ahead * 0.15 + side * (r[0] - 0.5) * 0.5 + Vec3::Y * 0.05;
     // Part of the car's speed — the tread throws the water forward as much as the car runs from it —
     // lifted, and spread sideways.
-    let thrown = velocity * (0.3 + 0.25 * r[1]) + Vec3::Y * (1.0 + 2.0 * r[2]) + side * (r[3] - 0.5) * 2.0;
+    let thrown = velocity * (0.3 + 0.25 * r[1]) + Vec3::Y * (0.6 + 1.6 * r[2]) + side * (r[3] - 0.5) * 3.0;
     GpuParticle {
         position: at.to_array(),
         life: 0.0,
         velocity: thrown.to_array(),
         max_life: 0.5 + 0.6 * r[2],
-        color: [0.82, 0.85, 0.9, 0.05 * wet.clamp(0.0, 1.0)],
+        color: [0.82, 0.85, 0.9, 0.03 * wet.clamp(0.0, 1.0)],
         size_start: 0.12,
-        size_end: 0.5 + 0.4 * r[1],
+        size_end: 0.35 + 0.3 * r[1],
         _padding: [0.0; 2],
     }
 }
@@ -162,7 +163,7 @@ mod tests {
         let frame = 1.0 / 60.0;
         assert_eq!(puffs(SPRAY_FROM, 1.0, frame, 0.0), (0, 0.0), "at 30 km/h, none");
         assert_eq!(puffs(30.0, 0.0, frame, 0.5), (0, 0.0), "on a dry road, none, and nothing owed");
-        // A second at 100 km/h: fifty puffs, a frame at a time.
+        // A second at 100 km/h: eighty puffs, a frame at a time.
         let speed = 100.0 / 3.6;
         let (mut thrown, mut owed) = (0, 0.0);
         for _ in 0..60 {

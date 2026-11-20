@@ -216,16 +216,18 @@ pub fn set_haze(renderer: &mut gizmo::renderer::Renderer, wet: bool) {
         Ok(v) => v.trim().parse::<f32>().ok(),
         Err(_) => Some(if wet { CITY_HAZE_WET } else { CITY_HAZE }),
     };
-    match (scatter, renderer.volumetric.as_mut()) {
-        (Some(scatter), Some(air)) if scatter > 0.0 => {
+    let gizmo::renderer::Renderer { volumetric, device, deferred, .. } = renderer;
+    match (scatter, volumetric.as_mut(), deferred.as_ref()) {
+        (Some(scatter), Some(air), Some(deferred)) if scatter > 0.0 => {
             air.params.bulb_scatter = scatter;
             air.params.sun_scatter = 0.0;
-            // The engine integrates a light's inverse square over each step, so the lamps' halos do not
+            // The engine integrates each lamp's air once a ray, over its whole chord, so the halos do not
             // need the 16 steps a sun's shafts do; and past 70 m the city's fog has the air.
             air.params.steps = HAZE_STEPS;
             air.params.max_distance = HAZE_REACH;
+            air.set_march_divisor(device, deferred, haze_march_divisor());
         }
-        _ => renderer.volumetric = None,
+        _ => *volumetric = None,
     }
 }
 
@@ -316,6 +318,17 @@ pub fn set_rain(renderer: &mut gizmo::renderer::Renderer, wet: bool) {
 pub const CITY_RAIN_DROPS: u32 = 20_000;
 /// The breeze that slants the rain, m/s ([`set_rain`]).
 pub const CITY_RAIN_WIND: [f32; 3] = [1.2, 0.0, 0.6];
+
+/// The frame's size over the haze's march, each way ([`set_haze`]): 4, a sixteenth of the frame's pixels.
+/// The haze is soft and the engine upsamples it by depth, so a lamp's halo keeps off the post in front of
+/// it; at the engine's 2 a drive down a lamp-lit street spent 4.3 ms of GPU on it (1080p, AMD 780M,
+/// 2026-11-21). `NFS_HAZE_RES=<n>` sets it.
+pub const HAZE_MARCH_DIVISOR: u32 = 4;
+
+/// [`HAZE_MARCH_DIVISOR`], or `NFS_HAZE_RES`.
+fn haze_march_divisor() -> u32 {
+    std::env::var("NFS_HAZE_RES").ok().and_then(|v| v.parse().ok()).unwrap_or(HAZE_MARCH_DIVISOR)
+}
 
 /// The haze's march: steps a ray, and how far it goes ([`set_haze`]). Five: the engine integrates each
 /// step's stretch of a light's air by quadrature, so a long stretch is as smooth as a short one; at 8

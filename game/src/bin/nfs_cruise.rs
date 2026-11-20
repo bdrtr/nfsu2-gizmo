@@ -1707,6 +1707,41 @@ fn update(world: &mut World, state: &mut CruiseState, dt: f32, input: &Input) {
     state.camera.update(world, input, watched.unwrap_or(pose), dt);
 }
 
+/// Where the frame goes, over the last 60: the app loop's scopes and our command recording.
+/// `render` minus `encode` is the acquire, the submit and the present — waiting on the GPU.
+/// Printed once a second under `NFS_DIAG`, with the car on a rail as with one driven.
+fn print_profile(world: &World) {
+    if let Some(p) = world.get_resource::<gizmo::core::profiler::FrameProfiler>() {
+        let ms = |n: &str| p.avg_scope_ms(n, 60);
+        println!(
+            "prof  frame {:.1} ms · physics {:.1} · update {:.1} · render {:.1} (encode {:.1}, rest {:.1})",
+            p.avg_frame_ms(60),
+            ms("physics"),
+            ms("update"),
+            ms("render"),
+            ms("encode"),
+            ms("render") - ms("encode"),
+        );
+        // The draw's own parts, CPU (`view.*`, `render.*`) and GPU (`gpu.*`, a few frames late),
+        // as the engine lays them into the profiler — what "encode" and "rest" above are made of.
+        let mut names: Vec<&'static str> = Vec::new();
+        for frame in p.history() {
+            for s in &frame.scopes {
+                if (s.name.starts_with("view.") || s.name.starts_with("gpu.")) && !names.contains(&s.name) {
+                    names.push(s.name);
+                }
+            }
+        }
+        names.sort_unstable();
+        let parts: Vec<String> = names.iter().map(|n| format!("{} {:.1}", n, ms(n))).collect();
+        let stats = world
+            .get_resource::<gizmo::renderer::components::RenderStats>()
+            .map(|r| format!("  draws {} · tris {}k · instances {} · shadow inst {}", r.draw_calls, r.triangles / 1000, r.instances, r.shadow_instances))
+            .unwrap_or_default();
+        println!("laps  {}{stats}", parts.join(" · "));
+    }
+}
+
 /// `NFS_DIAG=1`: once a second, whether the car is standing on the city or falling through it.
 ///
 /// The one question this binary exists to answer. A car that never grounds is a collider that was
@@ -1725,6 +1760,8 @@ fn diagnose(world: &World, state: &mut CruiseState, pose: nfsu2::rig::Pose) {
     let Some(v) = vehicles.by_id(state.rig.chassis) else {
         // On a rail (`NFS_DEMO=1`) there is no vehicle to report: the frame times still are.
         let (med, p95) = frame_ms(&state.frames).unwrap_or((f32::NAN, f32::NAN));
+        // The frame's parts too: a drive is what a frame is timed in, and a rail is what drives it.
+        print_profile(world);
         println!("diag  rail  t {:.0} s  frame {med:.1}/{p95:.1} ms ({:.0} fps)", state.t, 1000.0 / med);
         return;
     };
@@ -1814,37 +1851,7 @@ fn diagnose(world: &World, state: &mut CruiseState, pose: nfsu2::rig::Pose) {
         }
     }
     let (med, p95) = frame_ms(&state.frames).unwrap_or((f32::NAN, f32::NAN));
-    // Where the frame goes, over the last 60: the app loop's scopes and our command recording.
-    // `render` minus `encode` is the acquire, the submit and the present — waiting on the GPU.
-    if let Some(p) = world.get_resource::<gizmo::core::profiler::FrameProfiler>() {
-        let ms = |n: &str| p.avg_scope_ms(n, 60);
-        println!(
-            "prof  frame {:.1} ms · physics {:.1} · update {:.1} · render {:.1} (encode {:.1}, rest {:.1})",
-            p.avg_frame_ms(60),
-            ms("physics"),
-            ms("update"),
-            ms("render"),
-            ms("encode"),
-            ms("render") - ms("encode"),
-        );
-        // The draw's own parts, CPU (`view.*`, `render.*`) and GPU (`gpu.*`, a few frames late),
-        // as the engine lays them into the profiler — what "encode" and "rest" above are made of.
-        let mut names: Vec<&'static str> = Vec::new();
-        for frame in p.history() {
-            for s in &frame.scopes {
-                if (s.name.starts_with("view.") || s.name.starts_with("gpu.")) && !names.contains(&s.name) {
-                    names.push(s.name);
-                }
-            }
-        }
-        names.sort_unstable();
-        let parts: Vec<String> = names.iter().map(|n| format!("{} {:.1}", n, ms(n))).collect();
-        let stats = world
-            .get_resource::<gizmo::renderer::components::RenderStats>()
-            .map(|r| format!("  draws {} · tris {}k · instances {} · shadow inst {}", r.draw_calls, r.triangles / 1000, r.instances, r.shadow_instances))
-            .unwrap_or_default();
-        println!("laps  {}{stats}", parts.join(" · "));
-    }
+    print_profile(world);
     println!(
         "diag  pos ({:+.1},{:+.2},{:+.1})  vel ({:+.2},{:+.2},{:+.2})  speed {:+.1} km/h  cell {:?}           grounded {grounded:?}  frame {med:.1}/{p95:.1} ms ({:.0} fps)",
         pose.position.x, pose.position.y, pose.position.z,
