@@ -229,8 +229,10 @@ pub fn set_haze(renderer: &mut gizmo::renderer::Renderer, wet: bool) {
     }
 }
 
-/// The haze's march: steps a ray, and how far it goes ([`set_haze`]).
-pub const HAZE_STEPS: f32 = 8.0;
+/// The haze's march: steps a ray, and how far it goes ([`set_haze`]). Five: the engine integrates each
+/// step's stretch of a light's air by quadrature, so a long stretch is as smooth as a short one; at 8
+/// the wet haze cost 2.8 ms of GPU, at 5 1.9 (AMD 780M, 2026-11-20).
+pub const HAZE_STEPS: f32 = 5.0;
 /// See [`HAZE_STEPS`].
 pub const HAZE_REACH: f32 = 70.0;
 
