@@ -229,6 +229,51 @@ pub fn set_haze(renderer: &mut gizmo::renderer::Renderer, wet: bool) {
     }
 }
 
+/// How much faster than the clock the game runs ([`game_speed`]): 1.25. The city is at its true scale —
+/// a lane 3.78 m, the 240SX 4.39 m — and the speedometer is the car's own m/s ×3.6, so at "100 km/h" the
+/// road went by at a real 100 km/h, 28 m a second, which from 6 m behind looked too slow ("100 km/h'de
+/// daha fazla yol almalıyız gibi", the user, 2026-11-20). Running the whole game a quarter faster than
+/// the clock keeps every number honest in the game's own time — the speedometer, the physics, the laps —
+/// and puts 35 m of road a second under the car at "100". The user's choice over reading the speedometer
+/// low or giving the car more power, which would not have changed the road per "km/h".
+pub const GAME_SPEED: f32 = 1.25;
+
+/// The game's speed against the clock: [`GAME_SPEED`], or `NFS_GAME_SPEED=<k>` (`1` is real time),
+/// kept within 0.25–4. Read once.
+#[must_use]
+pub fn game_speed() -> f32 {
+    static SPEED: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
+    *SPEED.get_or_init(|| game_speed_from(std::env::var("NFS_GAME_SPEED").ok().as_deref()))
+}
+
+/// [`game_speed`] from what `NFS_GAME_SPEED` says, if anything.
+fn game_speed_from(setting: Option<&str>) -> f32 {
+    setting
+        .and_then(|v| v.trim().parse::<f32>().ok())
+        .filter(|k| k.is_finite() && *k > 0.0)
+        .map_or(GAME_SPEED, |k| k.clamp(0.25, 4.0))
+}
+
+#[cfg(test)]
+mod game_speed_tests {
+    use super::*;
+
+    #[test]
+    fn the_game_runs_a_quarter_faster_unless_told_otherwise() {
+        assert_eq!(game_speed_from(None), GAME_SPEED);
+        assert_eq!(GAME_SPEED, 1.25);
+        assert_eq!(game_speed_from(Some("1")), 1.0, "real time");
+        assert_eq!(game_speed_from(Some(" 1.5 ")), 1.5);
+        assert_eq!(game_speed_from(Some("10")), 4.0, "kept within reason");
+        assert_eq!(game_speed_from(Some("0.1")), 0.25);
+        for nonsense in ["0", "-1", "fast", "", "NaN", "inf"] {
+            assert_eq!(game_speed_from(Some(nonsense)), GAME_SPEED, "{nonsense:?}");
+        }
+        // At "100 km/h" the road under the car, metres a second of the clock.
+        assert!((100.0 / 3.6 * GAME_SPEED - 34.7).abs() < 0.1);
+    }
+}
+
 /// How much of the rain a car soaks up (`Material::porosity`): none. Paint, glass, chrome, rubber and the
 /// lights are sealed — the rain lies on them as a film, smooth and rippling, and neither darkens them like
 /// the road nor stands a puddle on a roof. Porous, as the engine's default is, the 240SX's paint went as

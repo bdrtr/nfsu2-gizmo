@@ -623,6 +623,14 @@ fn setup(world: &mut World, renderer: &mut gizmo::renderer::Renderer) -> CruiseS
     if std::env::var("NFS_DIAG").is_ok() {
         world.insert_resource(gizmo::core::profiler::FrameProfiler::new());
     }
+    // The engine's clock at the game's speed (`scene::game_speed`), as `update` scales its own: the rain,
+    // its rings and the particles fall in the same time the cars drive in.
+    if world.get_resource::<gizmo::core::time::Time>().is_none() {
+        world.insert_resource(gizmo::core::time::Time::new());
+    }
+    if let Some(mut time) = world.get_resource_mut::<gizmo::core::time::Time>() {
+        time.set_time_scale(scene::game_speed());
+    }
     let tracks = city::tracks_path(std::env::args().nth(1));
     let car_path = std::env::args()
         .nth(2)
@@ -1420,6 +1428,10 @@ fn update(world: &mut World, state: &mut CruiseState, dt: f32, input: &Input) {
         state.frames.remove(0);
     }
     state.frames.push(dt * 1000.0);
+    // From here on, game time: the game runs `scene::game_speed()` times the clock (1.25 by default,
+    // `NFS_GAME_SPEED`) — the car, the traffic, the rivals, the camera and the race's clock alike, so
+    // the picture is the same drive, faster. The frame times above, and `t`, stay the clock's.
+    let dt = dt * scene::game_speed();
 
     let mut controls = state.driver.read(input, dt);
     // `NFS_HOLD=1`: the keys ignored and the brakes on — for timing frames at one spot, where a
