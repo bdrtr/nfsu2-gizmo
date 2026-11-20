@@ -24,6 +24,8 @@
 //! - `NFS_LOD_BANDS="near,mid"` with `NFS_AT` and `NFS_EYE` — draw each instanced copy at the
 //!   detail level `nfs_cruise` would from that eye, instead of the finest everywhere.
 //! - `NFS_WET=<0..1>`, `NFS_PUDDLES=<0..1>` — the city in the rain (`scene::wet_streets`).
+//! - `NFS_TIME=<n>` — draw the view `n` times first and print each part's GPU time, median over all but
+//!   the first ten: a repeatable, windowless measure of what a change costs (`time_frames`).
 //! - `NFS_EVENT=<n>` — raise race n's barrier groups without drawing its line.
 //! - `NFS_TIERS=all|coarse` — put the coarse detail tiers back, or draw *only* them. Only the
 //!   richest member of each family is drawn by default; see [`nfsu2::world::lod`].
@@ -1520,6 +1522,9 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
         return;
     }
 
+    if let Some(frames) = std::env::var("NFS_TIME").ok().and_then(|v| v.parse::<usize>().ok()) {
+        time_frames(&mut world, &mut renderer, frames, w, h);
+    }
     let pixels = shoot(&mut world, &mut renderer, out, w, h);
 
     if let Some((px, py)) = id_probe {
@@ -1601,6 +1606,58 @@ fn bounds(city: &CityVisuals) -> (Vec3, Vec3) {
     } else {
         (Vec3::ZERO, Vec3::ONE)
     }
+}
+
+/// `NFS_TIME=<n>`: draw the view `n` times before the still and print how long each part of a frame took
+/// on the GPU — the engine's timer (`Renderer::gpu_timer`), the ten first frames left out, each part's
+/// median over the rest, and their sum. The same view every frame, so two builds or two settings are
+/// compared on exactly the same work: what `nfs_cruise`'s laps cannot do, its drive never repeating, and
+/// what needs no window.
+fn time_frames(world: &mut World, renderer: &mut Renderer, frames: usize, w: u32, h: u32) {
+    let target = renderer.device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("nfs-city-timing"),
+        size: wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: renderer.config.format,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+        view_formats: &[],
+    });
+    let view = target.create_view(&wgpu::TextureViewDescriptor::default());
+    let mut parts: Vec<(&'static str, Vec<f64>)> = Vec::new();
+    for frame in 0..frames {
+        let mut encoder = renderer.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        gizmo::systems::default_render_pass(world, &mut encoder, &view, renderer);
+        renderer.queue.submit(Some(encoder.finish()));
+        let _ = renderer.device.poll(wgpu::PollType::Wait { submission_index: None, timeout: None });
+        // What the draw collected this frame: the GPU's times of frames it finished, and the CPU's laps.
+        for (label, time) in std::mem::take(&mut renderer.draw_laps) {
+            if frame < 10 || !label.starts_with("gpu.") {
+                continue;
+            }
+            let ms = time.as_secs_f64() * 1000.0;
+            match parts.iter_mut().find(|(l, _)| *l == label) {
+                Some((_, v)) => v.push(ms),
+                None => parts.push((label, vec![ms])),
+            }
+        }
+    }
+    if parts.is_empty() {
+        println!("time: no GPU timer on this device");
+        return;
+    }
+    let median = |v: &mut Vec<f64>| {
+        v.sort_by(f64::total_cmp);
+        v[v.len() / 2]
+    };
+    let mut total = 0.0;
+    for (label, v) in &mut parts {
+        let m = median(v);
+        total += m;
+        println!("time  {label:<22} {m:7.3} ms  ({} frames)", v.len());
+    }
+    println!("time  {:<22} {total:7.3} ms", "gpu.total");
 }
 
 /// Render one frame into an offscreen target and write it out, tightly packed.
