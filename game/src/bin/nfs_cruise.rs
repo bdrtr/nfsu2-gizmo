@@ -591,7 +591,9 @@ fn main() {
                 renderer.ssr = None;
             }
             renderer.ssgi = None;
-            renderer.volumetric = None;
+            // The lamps' and the headlights' light in the air (`scene::set_haze`).
+            let wet = renderer.wetness.is_some();
+            scene::set_haze(renderer, wet);
             // TAA on; `NFS_TAA=off` takes it out. It was off until pin `37625d72`: it made the
             // city's lights blink as the car drove, fixed in the engine (MOTOR-NOTLARI #27).
             // `NFS_SSAO=off` takes the ambient occlusion out.

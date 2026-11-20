@@ -205,6 +205,42 @@ pub const CITY_LOCAL_CONTRAST: f32 = 0.2;
 /// The exposed luminance above which local exposure compresses: see [`CITY_LOCAL_CONTRAST`].
 pub const CITY_LOCAL_PIVOT: f32 = 0.15;
 
+/// The night's haze: the engine's volumetric light (`Renderer::volumetric`) scattering the street lamps'
+/// and the headlights' light in the air — a halo round every lamp, a beam ahead of every car — thicker in
+/// the rain. Only the local lights: the scene's sun is the car's moon, and it would fog the whole frame.
+/// [`CITY_HAZE`] dry and [`CITY_HAZE_WET`] wet, unless `NFS_HAZE=<scatter>` says otherwise (`off` leaves
+/// the air clear and the pass out).
+pub fn set_haze(renderer: &mut gizmo::renderer::Renderer, wet: bool) {
+    let scatter = match std::env::var("NFS_HAZE").as_deref() {
+        Ok("off") => None,
+        Ok(v) => v.trim().parse::<f32>().ok(),
+        Err(_) => Some(if wet { CITY_HAZE_WET } else { CITY_HAZE }),
+    };
+    match (scatter, renderer.volumetric.as_mut()) {
+        (Some(scatter), Some(air)) if scatter > 0.0 => {
+            air.params.bulb_scatter = scatter;
+            air.params.sun_scatter = 0.0;
+            // The engine integrates a light's inverse square over each step, so the lamps' halos do not
+            // need the 16 steps a sun's shafts do; and past 70 m the city's fog has the air.
+            air.params.steps = HAZE_STEPS;
+            air.params.max_distance = HAZE_REACH;
+        }
+        _ => renderer.volumetric = None,
+    }
+}
+
+/// The haze's march: steps a ray, and how far it goes ([`set_haze`]).
+pub const HAZE_STEPS: f32 = 8.0;
+/// See [`HAZE_STEPS`].
+pub const HAZE_REACH: f32 = 70.0;
+
+/// How much of the lamps' light the night air scatters, per metre, dry ([`set_haze`]): a faint halo round
+/// each lamp head. Chosen on 2026-11-20 from the race start in the rain at 0.0005, 0.0008, 0.0015 and
+/// 0.004 — at 0.0008 a soft glow a couple of metres round the bulb, at 0.004 the lamps balls of fog.
+pub const CITY_HAZE: f32 = 0.0003;
+/// And in the rain: see [`CITY_HAZE`].
+pub const CITY_HAZE_WET: f32 = 0.0008;
+
 /// Give the camera `camera` an exposure: the engine's one exposure knob is the camera's
 /// (`Camera::exposure`), applied to the whole frame before the tone curve.
 pub fn set_exposure(world: &mut World, camera: u32, exposure: f32) {
