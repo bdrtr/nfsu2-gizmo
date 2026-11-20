@@ -23,6 +23,7 @@
 //! - `NFS_ONLY=<substr>` — draw only the objects whose name contains it.
 //! - `NFS_LOD_BANDS="near,mid"` with `NFS_AT` and `NFS_EYE` — draw each instanced copy at the
 //!   detail level `nfs_cruise` would from that eye, instead of the finest everywhere.
+//! - `NFS_WET=<0..1>`, `NFS_PUDDLES=<0..1>` — the city in the rain (`scene::wet_streets`).
 //! - `NFS_EVENT=<n>` — raise race n's barrier groups without drawing its line.
 //! - `NFS_TIERS=all|coarse` — put the coarse detail tiers back, or draw *only* them. Only the
 //!   richest member of each family is drawn by default; see [`nfsu2::world::lod`].
@@ -1166,6 +1167,11 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
     // Neutral, with the decoded vertex colours `world::build` makes — see `scene::city_tonemap`.
     renderer.tonemap_curve = scene::city_tonemap();
     println!("bloom: threshold {bloom_t:.2}, intensity {bloom_i:.2}");
+    // `NFS_WET` / `NFS_PUDDLES`: the city in the rain, as `nfs_cruise` draws it — and its rain's rings on
+    // the water (`scene::set_rain`), still. A still has no time for the streaks to fall in.
+    renderer.wetness = scene::wet_streets();
+    let wet = renderer.wetness.is_some();
+    scene::set_rain(&mut renderer, wet);
 
     // The two arms the engine gained and nothing was pulling — see `scene::city_lift`.
     let lift = scene::city_lift();

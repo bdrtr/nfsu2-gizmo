@@ -582,7 +582,7 @@ fn main() {
             // `NFS_WET`: the city in the rain (`Renderer::wetness`) and the screen-space reflections that
             // its smooth roads and puddles show. The engine then draws the baked city through its
             // G-buffer, where the reflections read it.
-            renderer.wetness = wet_streets();
+            renderer.wetness = scene::wet_streets();
             if renderer.wetness.is_some() {
                 if let Some(ssr) = renderer.ssr.as_mut() {
                     ssr.enabled = true;
@@ -616,16 +616,6 @@ fn main() {
         .expect("failed to run app");
 }
 
-/// `NFS_WET=<0..1>` (`1` = soaked): the city in the rain, `NFS_PUDDLES=<0..1>` of the flat ground
-/// under water (0.3 by default). `None` is dry.
-fn wet_streets() -> Option<gizmo::renderer::Wetness> {
-    let level: f32 = std::env::var("NFS_WET").ok()?.parse().ok()?;
-    if level <= 0.0 {
-        return None;
-    }
-    let puddles = std::env::var("NFS_PUDDLES").ok().and_then(|v| v.parse().ok()).unwrap_or(0.3);
-    Some(gizmo::renderer::Wetness::new(level).with_puddles(puddles))
-}
 
 fn setup(world: &mut World, renderer: &mut gizmo::renderer::Renderer) -> CruiseState {
     // `NFS_DIAG`: the engine's own frame profiler, which the app loop fills with `physics`,

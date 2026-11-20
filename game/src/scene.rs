@@ -229,6 +229,26 @@ pub fn set_haze(renderer: &mut gizmo::renderer::Renderer, wet: bool) {
     }
 }
 
+/// How much of the rain a car soaks up (`Material::porosity`): none. Paint, glass, chrome, rubber and the
+/// lights are sealed — the rain lies on them as a film, smooth and rippling, and neither darkens them like
+/// the road nor stands a puddle on a roof. Porous, as the engine's default is, the 240SX's paint went as
+/// dark as the asphalt in the rain, and a puddle of the world's noise slid over its boot as it drove
+/// (`nfs_city` from above the start, `NFS_WET=1 NFS_PUDDLES=1`, 2026-11-20).
+pub const CAR_POROSITY: f32 = 0.0;
+
+/// `NFS_WET=<0..1>` (`1` = soaked): the city in the rain, `NFS_PUDDLES=<0..1>` of the flat ground
+/// under water (0.3 by default). `None` is dry. Every binary that draws the city reads it here, so that
+/// the headless stills (`nfs_city`) show what `nfs_cruise` drives through.
+#[must_use]
+pub fn wet_streets() -> Option<gizmo::renderer::Wetness> {
+    let level: f32 = std::env::var("NFS_WET").ok()?.parse().ok()?;
+    if level <= 0.0 {
+        return None;
+    }
+    let puddles = std::env::var("NFS_PUDDLES").ok().and_then(|v| v.parse().ok()).unwrap_or(0.3);
+    Some(gizmo::renderer::Wetness::new(level).with_puddles(puddles))
+}
+
 /// Rain falling in the wet city (`Renderer::rainfall`): streaks round the camera, lit by the lamps and the
 /// headlights it falls through, and splashes on the road and the cars where it lands. The engine's own
 /// rain, slanted a little by a breeze; `NFS_RAIN=off` stops it, `NFS_RAIN=<drops>` sets how many fall

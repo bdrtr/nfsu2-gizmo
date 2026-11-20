@@ -454,6 +454,7 @@ fn build_car(
         Material::new(white.clone())
             .with_pbr(Vec4::new(look.rgb[0], look.rgb[1], look.rgb[2], look.alpha), look.roughness, look.metallic)
             .with_double_sided(true)
+            .with_porosity(scene::CAR_POROSITY)
     };
     let mut car = build_car_visuals(&renderer.device, &all, tpk.as_ref(), paint, &cfg, flat);
 
@@ -475,7 +476,12 @@ fn build_car(
         let m = scene::wheel_material(
             surface,
             &mut tex,
-            |bg| Material::new(bg).with_pbr(Vec4::new(1.0, 1.0, 1.0, 1.0), 0.7, 0.2).with_double_sided(true),
+            |bg| {
+                Material::new(bg)
+                    .with_pbr(Vec4::new(1.0, 1.0, 1.0, 1.0), 0.7, 0.2)
+                    .with_double_sided(true)
+                    .with_porosity(scene::CAR_POROSITY)
+            },
             flat,
         );
         (mesh, m)
@@ -486,7 +492,12 @@ fn build_car(
             let m = scene::wheel_material(
                 surface,
                 &mut tex,
-                |bg| Material::new(bg).with_pbr(Vec4::new(1.0, 1.0, 1.0, 1.0), 0.45, 0.85).with_double_sided(true),
+                |bg| {
+                    Material::new(bg)
+                        .with_pbr(Vec4::new(1.0, 1.0, 1.0, 1.0), 0.45, 0.85)
+                        .with_double_sided(true)
+                        .with_porosity(scene::CAR_POROSITY)
+                },
                 flat,
             );
             (mesh, m)
@@ -496,6 +507,7 @@ fn build_car(
         Material::new(bg)
             .with_pbr(Vec4::new(tint[0], tint[1], tint[2], 1.0), rough, metal)
             .with_double_sided(true)
+            .with_porosity(scene::CAR_POROSITY)
     });
 
     // ── Wheels: the single wheel mesh instanced at the four corners **the record names** ──
