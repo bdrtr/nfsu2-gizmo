@@ -52,6 +52,16 @@
 //!   (`0x5C7EC0`) scales the half-angle by height/width, so 4:3 gives 53.64° vertically, which is
 //!   what is kept here at any window shape.
 //!
+//! **Beyond the game: the view opens with speed and kicks open with nitro** (2026-11-20, the user's
+//! call: the game's camera, with what the UE5 remake adds to it). [`game_speed_fov`] widens the game's
+//! 53.64° by up to [`GAME_FOV_WIDEN`] between [`GAME_FOV_FROM`] and [`GAME_FOV_FULL`], most of it early:
+//! the city is at its true scale — a lane 3.78 m, the 240SX 4.39 m, the speedometer the car's own
+//! m/s ×3.6 — and true 100 km/h seen from 6 m behind looked too slow ("100 km/h'de daha fazla yol
+//! almalıyız gibi", the user), so by 100 km/h the view is 8° wider and the road beside the car runs
+//! past the edges of the screen. Nitro adds [`NITRO_FOV`] on top, opened at [`FOV_OPEN_RATE`] and let
+//! close at [`FOV_RATE`], so its shove is felt as the view lunging forward. `NFS_FOV=game` keeps the
+//! game's fixed view.
+//!
 //! Not carried over: the horizon's lean into acceleration, since the engine's camera has no roll;
 //! the heading's level-out in the air, because [`super::Pose`] does not say whether the car is
 //! flying; and `0x44DE90`'s ×1.3 seat in a state not identified yet.
@@ -69,6 +79,26 @@ use crate::ecs::{ByIdMut};
 pub const GAME_FOV: f32 = GAME_HFOV * 0.75;
 /// The same before the 4:3: what `0x7EB5B4` holds, horizontal.
 const GAME_HFOV: f32 = 71.52 * std::f32::consts::PI / 180.0;
+/// How much wider the game chase sees at [`GAME_FOV_FULL`] and above, vertical radians: 12°, so 65.6°.
+pub const GAME_FOV_WIDEN: f32 = 12.0 * std::f32::consts::PI / 180.0;
+/// Below this the game chase keeps the game's view (m/s, 30 km/h)…
+pub const GAME_FOV_FROM: f32 = 30.0 / 3.6;
+/// …and here it is [`GAME_FOV_WIDEN`] wider (m/s, 200 km/h).
+pub const GAME_FOV_FULL: f32 = 200.0 / 3.6;
+/// What nitro adds while it burns, vertical radians: 6°.
+pub const NITRO_FOV: f32 = 6.0 * std::f32::consts::PI / 180.0;
+/// How fast the view opens towards a wider target, per second: a nitro press is felt in a fifth of a
+/// second, where [`FOV_RATE`] would take most of one.
+const FOV_OPEN_RATE: f32 = 6.0;
+
+/// The field of view the game chase is heading for at `speed` (m/s, either sign), with nitro burning
+/// or not: the game's, widened with speed — easing out, `1 − (1 − f)²`, so that most of it is there by
+/// the speeds a city is driven at and none of it kinks at the top — and by [`NITRO_FOV`] under nitro.
+#[must_use]
+pub fn game_speed_fov(speed: f32, nitro: bool) -> f32 {
+    let f = ((speed.abs() - GAME_FOV_FROM) / (GAME_FOV_FULL - GAME_FOV_FROM)).clamp(0.0, 1.0);
+    GAME_FOV + GAME_FOV_WIDEN * (1.0 - (1.0 - f) * (1.0 - f)) + if nitro { NITRO_FOV } else { 0.0 }
+}
 
 /// One seat from a car's record, in the car's frame.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -427,6 +457,9 @@ pub struct ChaseCamera {
     seat_y: f32,
     /// `NFS_CHASE=old`: the chase this file had before the game's was read.
     old_chase: bool,
+    /// Whether the game chase widens its view with speed and nitro ([`game_speed_fov`]); `NFS_FOV=game`
+    /// keeps the game's fixed view.
+    widen: bool,
     /// Whether nitro is burning this frame ([`game_shake`]); the caller's to set.
     pub nitro: bool,
     /// The seats on offer, and which one is in use. C goes to the next.
@@ -479,6 +512,7 @@ impl ChaseCamera {
             last: None,
             seat_y: at.y,
             old_chase,
+            widen: std::env::var("NFS_FOV").map_or(true, |v| v != "game"),
             nitro: false,
             views: DEFAULT_VIEWS.to_vec(),
             view: 0,
@@ -514,6 +548,28 @@ impl ChaseCamera {
         self
     }
 
+    /// This frame's field of view and shake, for a car at `speed` m/s, chasing it or not; the clock
+    /// already moved on by `dt`.
+    fn advance_view(&mut self, chasing: bool, speed: f32, dt: f32) {
+        let (want, amp) = match (chasing, self.old_chase) {
+            (true, true) => (speed_fov(speed), shake_amplitude(speed)),
+            (true, false) if self.widen => (game_speed_fov(speed, self.nitro), 0.0),
+            (true, false) => (GAME_FOV, 0.0),
+            (false, _) => (FOV_REST, 0.0),
+        };
+        // Opening faster than closing: nitro's kick lands at once, and the view eases back after it.
+        let rate = if want > self.fov && !self.old_chase { FOV_OPEN_RATE } else { FOV_RATE };
+        self.fov += (want - self.fov) * (1.0 - (-rate * dt).exp());
+        let (ty, tp) = tremble(self.clock);
+        self.shake = if chasing && !self.old_chase {
+            // Through the view as it is now: the game widens the shake's angles with the view
+            // (`0x4412E0`), and a fixed 71.52° here shrank the shake on screen as the view opened.
+            game_shake(speed, self.nitro, self.clock, self.fov / 0.75)
+        } else {
+            (ty * amp, tp * amp)
+        };
+    }
+
     /// Move the camera for this frame and write it to its entity.
     pub fn update(&mut self, world: &mut World, input: &Input, pose: super::Pose, dt: f32) {
         let orbiting = input.is_mouse_button_pressed(gizmo::core::input::mouse::RIGHT);
@@ -523,18 +579,7 @@ impl ChaseCamera {
             self.view = (self.view + 1) % self.views.len();
             self.follow = GameFollow::new();
         }
-        let (want, amp) = match (chasing, self.old_chase) {
-            (true, true) => (speed_fov(pose.speed), shake_amplitude(pose.speed)),
-            (true, false) => (GAME_FOV, 0.0),
-            (false, _) => (FOV_REST, 0.0),
-        };
-        self.fov += (want - self.fov) * (1.0 - (-FOV_RATE * dt).exp());
-        let (ty, tp) = tremble(self.clock);
-        self.shake = if chasing && !self.old_chase {
-            game_shake(pose.speed, self.nitro, self.clock, GAME_HFOV)
-        } else {
-            (ty * amp, tp * amp)
-        };
+        self.advance_view(chasing, pose.speed, dt);
         match self.shot {
             // A fixed seat in the car's frame; the aim follows from where that lands.
             Some(offset) => {
@@ -736,6 +781,78 @@ mod tests {
         let n = (n << 13) ^ n;
         let h = n.wrapping_mul(n).wrapping_mul(0x3D73).wrapping_add(0xC_0AE5).wrapping_mul(n).wrapping_add(0xD208_DD0D) & 0x7FFF_FFFF;
         assert_eq!(noise(1.0), 1.0 - h as f32 / 1_073_741_824.0);
+    }
+
+    #[test]
+    fn the_game_chase_opens_with_speed_and_nitro_kicks_it_wider() {
+        let deg = |r: f32| r.to_degrees();
+        assert_eq!(game_speed_fov(0.0, false), GAME_FOV, "standing: the game's view");
+        assert_eq!(game_speed_fov(GAME_FOV_FROM, false), GAME_FOV, "town speed: the game's view");
+        let full = game_speed_fov(GAME_FOV_FULL, false);
+        assert!((deg(full) - 65.64).abs() < 0.01, "200 km/h: {:.2}°", deg(full));
+        let at_100 = deg(game_speed_fov(100.0 / 3.6, false));
+        assert!((at_100 - 61.5).abs() < 0.1, "100 km/h: most of it already, {at_100:.2}°");
+        assert_eq!(game_speed_fov(100.0, false), full, "no wider past it");
+        assert_eq!(game_speed_fov(-30.0, false), game_speed_fov(30.0, false), "reversing is the same speed");
+        let mut last = GAME_FOV;
+        for kmh in (0..=300).step_by(10) {
+            let f = game_speed_fov(kmh as f32 / 3.6, false);
+            assert!(f >= last, "never narrower as it gets faster: {kmh} km/h");
+            last = f;
+        }
+        let at_150 = game_speed_fov(150.0 / 3.6, false);
+        assert!((deg(game_speed_fov(150.0 / 3.6, true) - at_150) - 6.0).abs() < 1e-3, "nitro: 6° more");
+    }
+
+    #[test]
+    fn nitro_opens_the_view_in_a_fifth_of_a_second_and_it_eases_back_slower() {
+        // The two rates the update closes on its target with, per second, over 60 frames a second.
+        let close = |rate: f32, from: f32, to: f32, frames: u32| {
+            (0..frames).fold(from, |f, _| f + (to - f) * (1.0 - (-rate * STEP).exp()))
+        };
+        let (low, high) = (game_speed_fov(150.0 / 3.6, false), game_speed_fov(150.0 / 3.6, true));
+        let opened = close(FOV_OPEN_RATE, low, high, 12);
+        assert!((high - opened) / (high - low) < 0.31, "0.2 s after the press: {:.2}", (opened - low) / (high - low));
+        let eased = close(FOV_RATE, high, low, 12);
+        assert!((eased - low) / (high - low) > 0.6, "0.2 s after letting go, most of it is still there");
+    }
+
+    #[test]
+    fn at_speed_under_nitro_the_chase_sees_wider_and_shakes_through_that_view() {
+        let mut world = World::new();
+        let mut camera = ChaseCamera::spawn(&mut world, Vec3::ZERO, 0.1, 100.0);
+        camera.widen = true;
+        camera.old_chase = false;
+        camera.nitro = true;
+        let speed = 200.0 / 3.6;
+        for _ in 0..120 {
+            camera.clock += STEP;
+            camera.advance_view(true, speed, STEP);
+        }
+        let want = game_speed_fov(speed, true);
+        assert!((camera.fov - want).abs() < 1e-3, "two seconds in: {:.2}° of {:.2}°", camera.fov.to_degrees(), want.to_degrees());
+        assert_eq!(camera.shake, game_shake(speed, true, camera.clock, camera.fov / 0.75), "the shake is the view's own");
+        // And with the game's view kept, the game's.
+        camera.widen = false;
+        for _ in 0..600 {
+            camera.clock += STEP;
+            camera.advance_view(true, speed, STEP);
+        }
+        assert!((camera.fov - GAME_FOV).abs() < 1e-4, "`NFS_FOV=game`: {:.2}°", camera.fov.to_degrees());
+    }
+
+    #[test]
+    fn the_shake_widens_with_the_view_as_the_game_widens_it() {
+        // `0x4412E0`: an angle's sine scales with the half-view's sine. Through the widest view the
+        // update hands it (200 km/h and nitro: 95.5° across) the shake's angle grows by that ratio —
+        // its share of the screen falls to 0.83 of the game's view's, where an angle held at 71.52°
+        // fell to 0.65.
+        let wide = game_speed_fov(GAME_FOV_FULL, true) / 0.75;
+        let (_, narrow_pitch) = game_shake(60.0, true, 1.3, GAME_HFOV);
+        let (_, wide_pitch) = game_shake(60.0, true, 1.3, wide);
+        let ratio = wide_pitch.sin() / narrow_pitch.sin();
+        let want = (wide * 0.5).sin() / (GAME_HFOV * 0.5).sin();
+        assert!(narrow_pitch != 0.0 && (ratio / want - 1.0).abs() < 1e-3, "{ratio} against {want}");
     }
 
     fn largest_shake(speed: f32, nitro: bool) -> f32 {
