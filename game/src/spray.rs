@@ -18,12 +18,12 @@ use std::collections::HashMap;
 
 /// Below this a tyre throws up nothing worth seeing, m/s: 30 km/h.
 pub const SPRAY_FROM: f32 = 30.0 / 3.6;
-/// Puffs a wheel throws a second for every m/s past [`SPRAY_FROM`], on a soaked road: at 100 km/h, a
-/// hundred and twenty — small and faint, so that they run together into a mist rather than stand apart
-/// as balls of smoke, which half as many twice the size did.
-pub const SPRAY_RATE: f32 = 6.0;
-/// The spray's own particle ring. At most some 32 wheels × 120 puffs a second × 1.1 s are alive, about
-/// 4,200. The renderer's default ring is 100,000, and the whole of a ring is simulated and drawn —
+/// Puffs a wheel throws a second for every m/s past [`SPRAY_FROM`], on a soaked road: at 100 km/h,
+/// fifty — small and faint, so that they run together into a mist rather than stand apart as balls of
+/// smoke, which fewer, bigger ones did. A hundred and twenty was too thick (the user, 2026-11-20).
+pub const SPRAY_RATE: f32 = 2.5;
+/// The spray's own particle ring. At most some 32 wheels × 120 puffs a second (at 200 km/h) × 1.1 s are
+/// alive, about 4,200. The renderer's default ring is 100,000, and the whole of a ring is simulated and drawn —
 /// twice, with the volumetric light's veil — while anything in it lives: 0.85 ms of GPU for a few hundred
 /// puffs (1080p, AMD 780M, 2026-11-20).
 pub const SPRAY_RING: u32 = 8192;
@@ -85,9 +85,9 @@ pub fn puff(contact: Vec3, velocity: Vec3, wet: f32, r: [f32; 4]) -> GpuParticle
         life: 0.0,
         velocity: thrown.to_array(),
         max_life: 0.5 + 0.6 * r[2],
-        color: [0.82, 0.85, 0.9, 0.07 * wet.clamp(0.0, 1.0)],
-        size_start: 0.15,
-        size_end: 0.7 + 0.5 * r[1],
+        color: [0.82, 0.85, 0.9, 0.05 * wet.clamp(0.0, 1.0)],
+        size_start: 0.12,
+        size_end: 0.5 + 0.4 * r[1],
         _padding: [0.0; 2],
     }
 }
@@ -96,6 +96,11 @@ pub fn puff(contact: Vec3, velocity: Vec3, wet: f32, r: [f32; 4]) -> GpuParticle
 /// as the renderer's rain says, for a frame as long as the world's clock says. Nothing while it is dry or
 /// there is no particle system.
 pub fn throw(world: &mut World, renderer: &mut gizmo::renderer::Renderer, wheels: &[(u32, f32)]) {
+    // `NFS_SPRAY=off`: none, and no particle system.
+    if std::env::var("NFS_SPRAY").as_deref() == Ok("off") {
+        renderer.gpu_particles = None;
+        return;
+    }
     let wet = renderer.wetness.map_or(0.0, |w| w.level);
     let dt = world.get_resource::<gizmo::core::time::Time>().map_or(0.0, |t| t.dt());
     if world.get_resource::<Spray>().is_none() {
@@ -157,7 +162,7 @@ mod tests {
         let frame = 1.0 / 60.0;
         assert_eq!(puffs(SPRAY_FROM, 1.0, frame, 0.0), (0, 0.0), "at 30 km/h, none");
         assert_eq!(puffs(30.0, 0.0, frame, 0.5), (0, 0.0), "on a dry road, none, and nothing owed");
-        // A second at 100 km/h: sixty puffs, a frame at a time.
+        // A second at 100 km/h: fifty puffs, a frame at a time.
         let speed = 100.0 / 3.6;
         let (mut thrown, mut owed) = (0, 0.0);
         for _ in 0..60 {

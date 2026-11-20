@@ -28,7 +28,8 @@
 //!   the first ten: a repeatable, windowless measure of what a change costs (`time_frames`).
 //! - `NFS_SPRAY=<km/h>` with `NFS_CAR` and `NFS_WET` — the car drives up to where it stands at that speed
 //!   over those frames (90 without `NFS_TIME`), throwing spray (`nfsu2::spray`), so the still shows its
-//!   trail; with `NFS_TIME`, what the spray costs.
+//!   trail; with `NFS_TIME`, what the spray costs. `NFS_SPRAY_FOLLOW=1` carries the camera with the car,
+//!   as a chase camera rides, and `NFS_SPRAY_DRAW=off` makes the same drive with no spray.
 //! - `NFS_EVENT=<n>` — raise race n's barrier groups without drawing its line.
 //! - `NFS_TIERS=all|coarse` — put the coarse detail tiers back, or draw *only* them. Only the
 //!   richest member of each family is drawn by default; see [`nfsu2::world::lod`].
@@ -1535,6 +1536,7 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
         // tyres throwing spray (`nfsu2::spray`) on the wet road, so the still shows the trail it leaves.
         world.insert_resource(gizmo::core::time::Time::new());
         let rest = car_rig.as_ref().and_then(|r| r.pose(&world));
+        let follow = std::env::var("NFS_SPRAY_FOLLOW").is_ok_and(|v| v != "0");
         time_frames(&mut world, &mut renderer, frames, w, h, timing.is_some(), |world, renderer, k| {
             let (Some(kmh), Some(rig), Some(rest)) = (spray, car_rig.as_mut(), rest) else { return };
             let dt = 1.0 / 60.0;
@@ -1546,6 +1548,13 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
             let still_to_go = (frames - 1 - k) as f32 * v * dt;
             let pose = nfsu2::rig::Pose { position: rest.position - ahead * still_to_go, rotation: rest.rotation, speed: v };
             rig.sync_visuals(world, pose, dt);
+            // `NFS_SPRAY_FOLLOW=1`: the camera rides with the car, as a chase camera does, so the car's own
+            // spray streams past it — the dearest view of it.
+            if follow {
+                let at = eye - ahead * still_to_go;
+                let d = (mid - ahead * still_to_go - at).normalize_or(Vec3::Z);
+                world.add_component(cam, Transform::new(at).with_rotation(Camera::rotation_from(d.z.atan2(d.x), d.y.asin())));
+            }
             // `NFS_SPRAY_DRAW=off`: the same drive with no spray thrown, what its cost is measured against.
             if std::env::var("NFS_SPRAY_DRAW").as_deref() != Ok("off") {
                 let wheels: Vec<(u32, f32)> = rig.wheels.iter().map(|w| (w.id, rig.radius)).collect();
