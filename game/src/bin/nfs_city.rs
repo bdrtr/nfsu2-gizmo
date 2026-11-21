@@ -1170,6 +1170,8 @@ async fn run(path: &str, out: &str, w: u32, h: u32) {
     let (bloom_t, bloom_i) = scene::city_glare();
     renderer.bloom_threshold = bloom_t;
     renderer.bloom_intensity = bloom_i;
+    // The lamps' and the car lights' lens flare (`scene::city_flare`, `NFS_FLARE`).
+    renderer.lens_flare = scene::city_flare();
     // Neutral, with the decoded vertex colours `world::build` makes — see `scene::city_tonemap`.
     renderer.tonemap_curve = scene::city_tonemap();
     println!("bloom: threshold {bloom_t:.2}, intensity {bloom_i:.2}");

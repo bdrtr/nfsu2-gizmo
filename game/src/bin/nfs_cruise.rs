@@ -577,6 +577,8 @@ fn main() {
             let (bt, bi) = scene::city_glare();
             renderer.bloom_threshold = bt;
             renderer.bloom_intensity = bi;
+            // The lamps' and the car lights' lens flare (`scene::city_flare`, `NFS_FLARE`).
+            renderer.lens_flare = scene::city_flare();
             renderer.tonemap_curve = scene::city_tonemap();
             // `NFS_WET`: the city in the rain (`Renderer::wetness`) and the screen-space reflections that
             // its smooth roads and puddles show. The engine then draws the baked city through its
