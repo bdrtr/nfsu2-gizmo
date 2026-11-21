@@ -355,14 +355,15 @@ pub fn set_exposure(world: &mut World, camera: u32, exposure: f32) {
 
 /// The lens flare the city is drawn with (`Renderer::lens_flare`, the engine's image-based one): the
 /// ghosts and the halo a camera's lens makes of the lamps, the headlights and the brake lights at night.
-/// Its threshold is on the bloom's quarter-size level, where a lamp a few pixels across reads a fraction
-/// of its brightness, and stands well above [`CITY_BLOOM_THRESHOLD`]: the lit windows bloom, the lights
-/// flare. `NFS_FLARE="intensity[,threshold]"` overrides both.
+/// Its threshold is on the bloom's half-size level, texel by texel, and stands well above
+/// [`CITY_BLOOM_THRESHOLD`]: the lit windows bloom, the lights flare. With it the lights' anamorphic streaks, drawn out sideways across the frame
+/// ([`CITY_FLARE_STREAK`]). `NFS_FLARE="intensity[,threshold[,streak]]"` overrides them.
 #[must_use]
 pub fn city_flare() -> gizmo::renderer::post_process::LensFlare {
     let mut flare = gizmo::renderer::post_process::LensFlare::default()
         .with_intensity(CITY_FLARE_INTENSITY)
-        .with_threshold(CITY_FLARE_THRESHOLD);
+        .with_threshold(CITY_FLARE_THRESHOLD)
+        .with_streaks(CITY_FLARE_STREAK);
     if let Ok(v) = std::env::var("NFS_FLARE") {
         let n: Vec<f32> = v.split(',').filter_map(|p| p.trim().parse().ok()).collect();
         if let Some(i) = n.first() {
@@ -371,14 +372,23 @@ pub fn city_flare() -> gizmo::renderer::post_process::LensFlare {
         if let Some(t) = n.get(1) {
             flare = flare.with_threshold(*t);
         }
+        if let Some(streak) = n.get(2) {
+            flare = flare.with_streaks(*streak);
+        }
     }
     flare
 }
 
 /// How strong the city's lens flare is ([`city_flare`]).
 pub const CITY_FLARE_INTENSITY: f32 = 0.5;
-/// The luminance the city's lens flare starts at, on the bloom's quarter-size level ([`city_flare`]).
+/// The luminance the city's lens flare starts at, on the bloom's half-size level ([`city_flare`]).
 pub const CITY_FLARE_THRESHOLD: f32 = 1.0;
+/// How strong the lights' anamorphic streaks are ([`city_flare`]). A streak spreads a light along an
+/// eighth of the frame's width each way, so its strength is many times the ghosts'. They start at the
+/// engine's streak threshold (3), where the brightest glints streak — a car's lit roof, the lights of the
+/// car ahead — and the lamps, which this city does not make as bright, do not. At 20 the line through the
+/// player's roof read as a mark on the frame; at 10 it reads as the lens.
+pub const CITY_FLARE_STREAK: f32 = 10.0;
 
 /// The glare threshold the city is drawn with. See [`city_glare`] for where it comes from.
 pub const CITY_BLOOM_THRESHOLD: f32 = 0.18;
